@@ -1,0 +1,91 @@
+---
+name: code-review
+description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/PRD asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to "review since X".
+---
+
+# Code Review（代码审查）
+
+对 `HEAD` 与用户提供的固定点之间的 diff 进行双轴审查：
+
+- **Standards（规范）**—— 代码是否符合本仓库文档化的编码规范？
+- **Spec（规格）**—— 代码是否忠实实现了原始 issue / PRD / spec？
+
+两个轴作为**并行的 sub-agent** 运行，以免污染彼此的上下文，然后本 skill 汇总它们的发现。
+
+issue tracker 应该已经提供给你——如果 `docs/agents/issue-tracker.md` 缺失，运行 `/setup-rolex-skills`。
+
+## 流程
+
+### 1. 确定固定点
+
+用户说的任何固定点——commit SHA、分支名、tag、`main`、`HEAD~5` 等。如果他们没有指定，问一个。
+
+捕获 diff 命令：`git diff <fixed-point>...HEAD`（三个点，这样比较的是 merge-base）。同时通过 `git log <fixed-point>..HEAD --oneline` 记录 commit 列表。
+
+在进一步操作之前，确认固定点能解析（`git rev-parse <fixed-point>`）且 diff 非空。错误 ref 或空 diff 应该在这里就失败——而不是在两个并行 sub-agent 内部。
+
+### 2. 定位 spec 来源
+
+按顺序寻找原始的 spec：
+
+1. commit 消息中的 issue 引用（`#123`、`Closes #45`、GitLab `!67` 等）——通过 `docs/agents/issue-tracker.md` 中的工作流获取。
+2. 用户作为参数传入的路径。
+3. `docs/`、`specs/` 或 `.scratch/` 下匹配分支名或功能名的 PRD/spec 文件。
+4. 如果找不到，询问用户 spec 在哪里。如果他们说没有，**Spec** sub-agent 将跳过并报告"无可用 spec"。
+
+### 3. 定位规范来源
+
+仓库中任何文档化了代码应该如何编写的文件，例如 `CODING_STANDARDS.md` 或 `CONTRIBUTING.md`。
+
+在仓库文档化内容之上，Standards 轴始终携带下面的**代码坏味基线**——一组固定的 Fowler 代码坏味（《重构》第 3 章），即使在仓库没有文档化任何内容时也适用。两条规则约束它：
+
+- **仓库优先。** 文档化的仓库规范始终优先；当它认可基线会标记的内容时，压制该坏味。
+- **总是判断。** 每个坏味是一个带标签的启发式规则（"可能的依恋情结"），永远不是硬性违规——而且，像这里的任何规范一样，跳过工具已经强制执行的内容。
+
+每个坏味包含*它是什么* → *如何修复*；将其与 diff 匹配：
+
+- **神秘的命名** —— 函数、变量或类型的名称没有揭示它做什么或包含什么。→ 重命名；如果找不到诚实的名称，说明设计不清晰。
+- **重复代码** —— 相同逻辑形状出现在更改中的多个 hunk 或文件中。→ 提取共享形状，从两处调用它。
+- **依恋情结** —— 一个方法触碰另一个对象的数据比触碰自己的更多。→ 将该方法移到它依恋的数据上。
+- **数据泥团** —— 相同的几个字段或参数总是一起出现（一个等待诞生的类型）。→ 将它们打包成一个类型，传递那个类型。
+- **基本类型偏执** —— 基本类型或字符串代替了值得拥有自己类型的领域概念。→ 给该概念赋予自己的小类型。
+- **重复的 switch** —— 相同类型上的相同 `switch`/`if` 级联在更改中重复出现。→ 用多态替换，或使用两者共享的一个映射。
+- **霰弹式修改** —— 一个逻辑变更迫使 diff 中许多文件发生分散的编辑。→ 将一起变更的内容聚合到一个模块中。
+- **发散式变化** —— 一个文件或模块因几个不相关的原因被编辑。→ 拆分，使每个模块因为一个原因而变化。
+- **投机性泛化** —— 为 spec 没有的需求添加的抽象、参数或钩子。→ 删除它；内联回来直到真正的需求出现。
+- **消息链** —— 调用者不应依赖的长 `a.b().c().d()` 导航。→ 将遍历隐藏在一个单一方法中，放在第一个对象上。
+- **中间人** —— 主要只是委托给下游的类或函数。→ 砍掉它，直接调用真正的目标。
+- **拒绝遗赠** —— 子类或实现者忽略或覆盖了大部分继承来的东西。→ 放弃继承，使用组合。
+
+### 4. 并行启动两个 sub-agent
+
+在一条消息中发送两个 `Agent` 工具调用。两者都使用 `general-purpose` subagent。
+
+**Standards sub-agent 提示**—— 包含：
+
+- 完整的 diff 命令和 commit 列表。
+- 步骤 3 中找到的规范来源文件列表，**加上步骤 3 的坏味基线全文**——sub-agent 没有其他途径访问它。
+- 任务："报告——按相关文件/hunk——（a）diff 中每一处违反文档化规范的地方：引用规范（文件 + 规则）；以及（b）你发现的任何基线坏味：命名并引用 hunk。区分硬性违规和判断——文档化规范的违规可以是硬性的，但基线坏味始终是判断，且文档化的仓库规范覆盖基线。跳过工具强制执行的内容。400 字以内。"
+
+**Spec sub-agent 提示**—— 包含：
+
+- diff 命令和 commit 列表。
+- spec 的路径或获取到的内容。
+- 任务："报告：（a）spec 要求但缺失或不完整的需求；（b）diff 中未被要求的行为（范围蔓延）；（c）看起来已实现但实现方式错误的需求。每项发现引用 spec 中的对应行。400 字以内。"
+
+如果 spec 缺失，跳过 Spec sub-agent 并在最终报告中注明。
+
+### 5. 汇总
+
+在两个 `## Standards` 和 `## Spec` 标题下分别呈现两份报告，逐字或轻微清理。**不要**合并或重新排序发现——两个轴是刻意分开的（见《为什么两个轴》）。
+
+以一行摘要结尾：每个轴的发现总数，以及每个轴内最严重的问题（如果有）。不要跨轴选一个胜者——这正是分开审查要防止的重新排序。
+
+## 为什么两个轴
+
+一个更改可能通过一个轴而失败在另一个轴上：
+
+- 遵守了每条规范但实现了错误的功能 → **Standards 通过，Spec 未通过。**
+- 完全按 issue 要求做了但破坏了项目约定 → **Spec 通过，Standards 未通过。**
+
+分开报告可以防止一个轴掩盖另一个轴。
