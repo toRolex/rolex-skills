@@ -24,4 +24,3 @@ Daily code work skills.
 - **[codebase-design](./codebase-design/SKILL.md)** — 深度模块设计的共享词汇和原则。
 - **[code-review](./code-review/SKILL.md)** — 双轴 review：Standards（代码规范）+ Spec（需求匹配）。
 - **[resolving-merge-conflicts](./resolving-merge-conflicts/SKILL.md)** — 解决进行中的 git merge/rebase 冲突。
-- **[uv-python](./uv-python/SKILL.md)** — 使用 UV 管理 Python 项目和操作。
