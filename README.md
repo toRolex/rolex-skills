@@ -1,92 +1,35 @@
-# Rolex Skills · AI 编程技能 · 中文增强版
+# Rolex Skills
 
-[英文上游](https://github.com/mattpocock/skills) (mattpocock/skills) 的中文改编版——不 fork，独立建仓。
+开箱即用的 AI 编程技能——让 Claude Code 听懂中文、帮你干活。
 
-就像 [superpowers-zh](https://github.com/jnMetaCode/superpowers-zh) 之于 [superpowers](https://github.com/obra/superpowers)：在同等工作流方法的基础上，补充了中文开发者的实际需求。
+基于 [mattpocock/skills](https://github.com/mattpocock/skills) 改编，加了 6 个原创实用技能。
 
-## 🆚 与英文上游（mattpocock/skills）的区别
-
-| 维度 | 英文上游 | 中文增强版 |
-|---|---|---|
-| 总技能数 | 23（已删掉 personal/deprecated） | 23（上游翻译 + 6 个原创技能） |
-| 语言 | 英文 | 所有 SKILL.md 正文翻译为中文 |
-| 交互语言 | 英文 | 全部中文提示 |
-| 命名 | `ask-matt`、`setup-matt-pocock-skills` | `ask-rolex`、`setup-rolex-skills` |
-| 原创技能 | 无 | `afk-issue-loop`、`clean-branches`、`git-flow-conventions`、`publish-release`、`qa-plan`、`safe-pull` |
-| 浏览器工具 | 无约束 | 每次会话首次使用前必须 `Skill("browser-tools")` |
-| 强模型模式 | 无 | `strong-model-consultant` 分层协作模式 |
-| 分发 | npm + Claude Code 插件 + git clone | git clone + `link-skills.sh` |
-| 文档 | docs/ × 22 页 + CHANGELOG | 同上，全部翻译 |
-
-**一句话：** 英文上游 = 方法论内核；中文增强版 = 方法论内核 + 6 个原创实用技能 + 全中文适配。
-
-## 快速开始
+## 装
 
 ```bash
-git clone https://github.com/toRolex/rolex-skills
-cd rolex-skills
-bash scripts/link-skills.sh
+npx skills@latest add toRolex/rolex-skills
+# 或者
+git clone https://github.com/toRolex/rolex-skills && cd rolex-skills && bash scripts/link-skills.sh
 ```
 
-然后在 agent 中运行 `/setup-rolex-skills`，它会：
-- 询问你使用的 issue tracker（GitHub、GitLab 或本地文件）
-- 询问 triage 时使用的标签
-- 询问文档保存位置
+装完在仓库里跑一次 `/setup-rolex-skills`，回答三个问题（issue tracker、标签、文档位置），搞定。
 
-## Skill 一览
+## 有哪些技能
 
-### Engineering（工程技能）
+**访谈与设计：** `/grill-with-docs` 打磨需求 → `/domain-modeling` 统一语言 → `/codebase-design` 设计模块 → `/to-spec` 写 spec → `/to-tickets` 拆 tickets
 
-**用户手动调用：**
+**开发：** `/implement` 按 tickets 构建 → `/tdd` 红绿循环 → `/code-review` 双轴审查
 
-- **`/ask-rolex`** — 路由器，问它就知道该用哪个 skill
-- **`/grill-with-docs`** — 深入访谈 + 构建领域模型
-- **`/setup-rolex-skills`** — 每个仓库首次使用前运行
-- **`/to-spec`** — 对话转 spec
-- **`/to-tickets`** — spec 拆 tickets
-- **`/implement`** — 按 spec/tickets 构建
-- **`/triage`** — issue 分类处理
-- **`/wayfinder`** — 超大工作量探路
-- **`/improve-codebase-architecture`** — 架构优化扫描
-- **`/afk-issue-loop`** — 批量 AFK 处理 GitHub issues
-- **`/qa-plan`** — 从 commit 生成 QA 测试计划
+**Git 实用工具：** `/safe-pull` 安全同步 → `/clean-branches` 删已合并分支 → `/git-flow-conventions` 分支规范 → `/publish-release` 一键发版
 
-**模型自动调用：**
+**排查与维护：** `/diagnosing-bugs` 困难 bug → `/triage` issue 分类 → `/improve-codebase-architecture` 架构扫描 → `/resolving-merge-conflicts` 解冲突
 
-- **`/prototype`** — 一次性原型
-- **`/diagnosing-bugs`** — 困难 bug 诊断
-- **`/research`** — 一手资料调研
-- **`/tdd`** — 测试驱动开发
-- **`/domain-modeling`** — 领域模型打磨
-- **`/codebase-design`** — 深度模块设计
-- **`/code-review`** — 双轴代码审查
-- **`/resolving-merge-conflicts`** — 解决合并冲突
-- **`/clean-branches`** — 清理已合并 Git 分支
-- **`/git-flow-conventions`** — Git Flow 分支管理规范
-- **`/publish-release`** — 从 develop 发版
-- **`/safe-pull`** — 安全 git pull + rebase
+**其他：** `/prototype` 一次性质疑 → `/research` 后台调研 → `/wayfinder` 超大工作量探路 → `/qa-plan` 从 commit 生成 QA 计划 → `/afk-issue-loop` 批量处理 issues
 
-### Productivity（生产力工具）
+## 跟原版有什么不同
 
-**用户手动调用：**
-
-- **`/grill-me`** — 无代码库的深度访谈
-- **`/handoff`** — 会话压缩交接
-- **`/teach`** — 多会话教学
-- **`/writing-great-skills`** — 编写 skill 的参考
-
-**模型自动调用：**
-
-- **`/grilling`** — 深度访谈引擎
-
-## 与上游的关系
-
-本项目保持独立版本和独立发布节奏。上游有有价值的更新时，手动 cherry-pick 过来。
-
-## 致谢
-
-- [mattpocock/skills](https://github.com/mattpocock/skills) — 上游方法论内核，MIT 协议
+上游全英文，技能正文和提示词都翻了中文，加了 Git 工作流相关的实用技能（`/safe-pull`、`/clean-branches`、`/git-flow-conventions`、`/publish-release`）。自己用的习惯的副本，不是竞争关系。
 
 ## 协议
 
-MIT License — 自由使用，商业或个人均可。
+MIT
