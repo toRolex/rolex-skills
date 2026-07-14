@@ -1,0 +1,41 @@
+{
+  "skill_name": "git-flow-conventions",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我要开始一个新功能开发——给网站加用户登录系统，帮我创建正确的分支并告诉我开发完成后该怎么做",
+      "expected_output": "应指导创建 feature/login-system 分支，基于 develop 创建，开发完成后合并回 develop 使用 --no-ff，并清理本地和远程分支",
+      "assertions": [
+        {"id": "feature-naming", "description": "建议使用 feature/ 前缀命名分支"},
+        {"id": "based-on-develop", "description": "明确说明从 develop 分支创建"},
+        {"id": "no-ff-merge", "description": "推荐使用 --no-ff 合并方式"},
+        {"id": "branch-cleanup", "description": "说明合并后删除本地和远程分支"},
+        {"id": "specific-commands", "description": "提供可执行的 git 命令"}
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "线上出了个紧急bug，用户注册收不到短信验证码，需要马上修。帮我列一下从建分支到发布完的完整步骤",
+      "expected_output": "应指导创建 hotfix 分支基于 master，修复后同时合并到 master 和 develop，打 tag，清理分支",
+      "assertions": [
+        {"id": "hotfix-naming", "description": "建议使用 hotfix- 前缀命名分支"},
+        {"id": "based-on-master", "description": "明确说明从 master 分支创建"},
+        {"id": "merge-to-both", "description": "说明需要合并到 master 和 develop 两个分支"},
+        {"id": "tagging", "description": "说明需要在 master 上打 tag"},
+        {"id": "specific-commands", "description": "提供完整的可执行 git 命令序列"}
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "我们团队现在每个人提交的 commit message 格式乱七八糟，帮我制定一套规范，包括格式模板和 type 类型说明",
+      "expected_output": "应提供 Conventional Commits 格式规范，包含 type 表格、scope 说明、示例",
+      "assertions": [
+        {"id": "conventional-format", "description": "推荐 Conventional Commits 格式"},
+        {"id": "type-list", "description": "提供完整的 commit type 列表（含 feat/fix/docs 等）"},
+        {"id": "format-template", "description": "提供 type(scope): subject 格式模板"},
+        {"id": "examples", "description": "提供具体的 commit message 示例"},
+        {"id": "enforcement", "description": "建议使用 commitlint 或类似工具强制执行规范"}
+      ]
+    }
+  ]
+}

@@ -69,9 +69,14 @@ disable-model-invocation: true
 - **`/prototype`** — 一个小型一次性程序，回答一个设计问题：这个状态模型对吗，或者这个 UI 应该长什么样。从第一天就是一次性的——保留答案，删除代码。它是主流程第 2 步的绕行，但任何时候设计问题难以在纸面上解决时都可以用它。
 - **`/research`** — 将阅读工作委托给 **后台 agent**：针对 **一手资料** 调查问题，然后在仓库中留下带引用的 Markdown 文件。它阅读时你继续工作。产出的文件是带入主流程 `/grill-with-docs` 的东西——研究喂养思考，不替代思考。
 - **`/teach`** — 多会话学习一个概念，用当前目录作为有状态的教学工作区。
-- **`/uv-python`** — 所有 Python 项目和操作使用 UV 管理。新建项目、添加依赖、运行脚本、管理虚拟环境时 model 会自动调用。
 - **`/resolving-merge-conflicts`** — 解决进行中的 git merge/rebase 冲突。冲突时 model 会自动调用。
 - **`/writing-great-skills`** — 编写和编辑 skill 的参考指南。
+- **`/afk-issue-loop`** — 批量 AFK 处理 GitHub issues。遍历 `ready-for-agent` 标签的 issue，逐个分发给独立 agent。
+- **`/qa-plan`** — 从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue。
+- **`/clean-branches`** — 清理本地和远程已合并的 Git 分支。
+- **`/git-flow-conventions`** — Git Flow 分支管理与提交规范指南。
+- **`/publish-release`** — 从 develop 分支发版。
+- **`/safe-pull`** — 安全 git pull + rebase 工作流。
 
 ## 前置条件
 
@@ -81,6 +86,6 @@ disable-model-invocation: true
 
 这些是本仓库相比 matt pocock skills 的差异化内容：
 
-- **Python/UV**：所有 Python 操作走 `/uv-python`，基于 `astral-sh/uv` skill。
+- **6 个原创技能** — 覆盖 Git 工作流（`/safe-pull`、`/clean-branches`、`/git-flow-conventions`、`/publish-release`）、AFK 批量处理（`/afk-issue-loop`）、QA 计划（`/qa-plan`）。
 - **浏览器工具**：每次会话首次使用浏览器/搜索工具前必须先 `Skill("browser-tools")`。`WebSearch` 有 bug，走其他搜索途径。Playwright 默认 `--headed --persistent`。
 - **强模型顾问**：目标不清、高影响多方案、关键权衡不明时，调用 `Agent(subagent_type="strong-model-consultant")`，顾问返回决策后再继续执行。

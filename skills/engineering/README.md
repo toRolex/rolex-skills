@@ -13,6 +13,8 @@ Daily code work skills.
 - **[triage](./triage/SKILL.md)** — 将 issue 按 triage 角色状态机处理。
 - **[wayfinder](./wayfinder/SKILL.md)** — 为超大工作量绘制共享的调研 ticket 地图。
 - **[improve-codebase-architecture](./improve-codebase-architecture/SKILL.md)** — 扫描代码库寻找 deepening 机会，生成 HTML 报告。
+- **[afk-issue-loop](./afk-issue-loop/SKILL.md)** — 批量 AFK 处理 GitHub issues。
+- **[qa-plan](./qa-plan/SKILL.md)** — 从 commit 生成 QA 测试计划。
 
 ## Model-invoked
 
@@ -24,3 +26,7 @@ Daily code work skills.
 - **[codebase-design](./codebase-design/SKILL.md)** — 深度模块设计的共享词汇和原则。
 - **[code-review](./code-review/SKILL.md)** — 双轴 review：Standards（代码规范）+ Spec（需求匹配）。
 - **[resolving-merge-conflicts](./resolving-merge-conflicts/SKILL.md)** — 解决进行中的 git merge/rebase 冲突。
+- **[clean-branches](./clean-branches/SKILL.md)** — 清理已合并 Git 分支。
+- **[git-flow-conventions](./git-flow-conventions/SKILL.md)** — Git Flow 分支管理与提交规范。
+- **[publish-release](./publish-release/SKILL.md)** — 从 develop 发版。
+- **[safe-pull](./safe-pull/SKILL.md)** — 安全 git pull + rebase 工作流。

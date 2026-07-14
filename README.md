@@ -8,17 +8,17 @@
 
 | 维度 | 英文上游 | 中文增强版 |
 |---|---|---|
-| 总技能数 | 23（已删掉 personal/deprecated） | 23 — 全部翻译 + 新增 uv-python |
+| 总技能数 | 23（已删掉 personal/deprecated） | 23（上游翻译 + 6 个原创技能） |
 | 语言 | 英文 | 所有 SKILL.md 正文翻译为中文 |
 | 交互语言 | 英文 | 全部中文提示 |
 | 命名 | `ask-matt`、`setup-matt-pocock-skills` | `ask-rolex`、`setup-rolex-skills` |
-| Python | 无特殊处理 | 强制 UV（`uv-python` 技能） |
+| 原创技能 | 无 | `afk-issue-loop`、`clean-branches`、`git-flow-conventions`、`publish-release`、`qa-plan`、`safe-pull` |
 | 浏览器工具 | 无约束 | 每次会话首次使用前必须 `Skill("browser-tools")` |
 | 强模型模式 | 无 | `strong-model-consultant` 分层协作模式 |
 | 分发 | npm + Claude Code 插件 + git clone | git clone + `link-skills.sh` |
 | 文档 | docs/ × 22 页 + CHANGELOG | 同上，全部翻译 |
 
-**一句话：** 英文上游 = 方法论内核；中文增强版 = 方法论内核 + 全中文适配 + MacOS 中文开发环境 + UV Python 生态。
+**一句话：** 英文上游 = 方法论内核；中文增强版 = 方法论内核 + 6 个原创实用技能 + 全中文适配。
 
 ## 快速开始
 
@@ -48,6 +48,8 @@ bash scripts/link-skills.sh
 - **`/triage`** — issue 分类处理
 - **`/wayfinder`** — 超大工作量探路
 - **`/improve-codebase-architecture`** — 架构优化扫描
+- **`/afk-issue-loop`** — 批量 AFK 处理 GitHub issues
+- **`/qa-plan`** — 从 commit 生成 QA 测试计划
 
 **模型自动调用：**
 
@@ -59,7 +61,10 @@ bash scripts/link-skills.sh
 - **`/codebase-design`** — 深度模块设计
 - **`/code-review`** — 双轴代码审查
 - **`/resolving-merge-conflicts`** — 解决合并冲突
-- **`/uv-python`** — UV Python 管理
+- **`/clean-branches`** — 清理已合并 Git 分支
+- **`/git-flow-conventions`** — Git Flow 分支管理规范
+- **`/publish-release`** — 从 develop 发版
+- **`/safe-pull`** — 安全 git pull + rebase
 
 ### Productivity（生产力工具）
 
