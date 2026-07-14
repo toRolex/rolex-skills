@@ -1,3 +1,18 @@
+# 这个仓库是什么
+
+本项目是 [mattpocock/skills](https://github.com/mattpocock/skills) 的中文改编版。
+
+关系就像 [obra/superpowers](https://github.com/obra/superpowers) 和 [jnMetaCode/superpowers-zh](https://github.com/jnMetaCode/superpowers-zh)：上游英文 → 下游中文增强版。
+
+具体来说：
+
+1. **先翻译**——所有 SKILL.md 正文翻译成中文，保留英文技术术语
+2. **再适配**——`ask-matt` → `ask-rolex`，删掉个人化/过时的技能，改了 README 和 CLAUDE.md
+3. **再补充**——加了上游没有的东西，比如 `uv-python`（Python 强制 UV），中文开发环境相关
+4. **能跟上**——上游更新了可以 cherry-pick 过来，不依赖上游的分支
+
+# 仓库规则
+
 Skills 按 bucket 文件夹组织在 `skills/` 下：
 
 - `engineering/` — 日常编码工作
