@@ -14,4 +14,10 @@ bash scripts/link-skills.sh
 
 ## 何时使用
 
-适合批量处理积压的 issue——开启后不用管，agent 逐个解决。调用方式：**手动调用**。
+手动敲 `/afk-issue-loop` 调用。
+
+适合批量处理积压的 issue——开启后不用管，agent 逐个解决。
+
+## 在流程中的位置
+
+独立工具。处理 triage 后积压的 ready-for-agent issue。不确定时问 `/ask-rolex`。

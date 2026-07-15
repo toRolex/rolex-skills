@@ -14,4 +14,10 @@ bash scripts/link-skills.sh
 
 ## 何时使用
 
-说"发版"、"发布"、"release"、"bump version"、"打 tag"时。调用方式：**模型自动调用**。
+敲 `/publish-release` 或 agent 自动调用。
+
+说"发版"、"发布"、"release"、"bump version"、"打 tag"时。
+
+## 在流程中的位置
+
+独立工具。主开发流完成后使用。不确定时问 `/ask-rolex`。

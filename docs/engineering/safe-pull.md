@@ -14,4 +14,10 @@ bash scripts/link-skills.sh
 
 ## 何时使用
 
-说"同步代码"、"拉取最新"、"rebase main"、"sync"、"pull latest"、"update branch"时。调用方式：**模型自动调用**。
+敲 `/safe-pull` 或 agent 自动调用。
+
+说"同步代码"、"拉取最新"、"rebase main"、"sync"、"pull latest"、"update branch"时。
+
+## 在流程中的位置
+
+独立工具。日常开发中频繁使用。不确定时问 `/ask-rolex`。

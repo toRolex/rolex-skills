@@ -14,4 +14,10 @@ bash scripts/link-skills.sh
 
 ## 何时使用
 
-分支太多、合并后残留、worktree 未清理、远程有 stale 分支时。调用方式：**模型自动调用**。
+敲 `/clean-branches` 或 agent 自动调用。
+
+分支太多、合并后残留、worktree 未清理、远程有 stale 分支时。
+
+## 在流程中的位置
+
+独立工具。通常在合并或发版后使用。不确定时问 `/ask-rolex`。
