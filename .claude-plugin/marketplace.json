@@ -40,7 +40,7 @@
       ]
     },
     {
-      "name": "原创 Git 工具",
+      "name": "原创工具",
       "source": "./",
       "category": "engineering",
       "description": "原创技能。安全 pull、清理分支、Git Flow 规范、一键发版、生成测试计划、批量处理 issue",
