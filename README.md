@@ -1,20 +1,76 @@
 # Rolex Skills
 
-开箱即用的 AI 编程技能——让 Claude Code 听懂中文、帮你干活。
+AI 编程技能合集——让 Claude Code 听懂中文、帮你干活。
 
-基于 [mattpocock/skills](https://github.com/mattpocock/skills) 改编，加了 6 个原创实用工具。
+基于 [mattpocock/skills](https://github.com/mattpocock/skills) 改编并补充了原创工具。这些技能是真实工程师日常使用的，不是"氛围编程"——它们处理真实项目的复杂性和约束。
 
-## 安装
+## 快速开始（30 秒）
+
+两种安装方式，任选其一：
+
+### 方式 A：npx skills（推荐）
+
+可在本地编辑修改：
 
 ```bash
 npx skills@latest add toRolex/rolex-skills
-# 或者
+```
+
+选择你要安装的技能，记得勾选 `/setup-rolex-skills`。然后在项目里运行：
+
+```
+/setup-rolex-skills
+```
+
+回答三个问题（issue 跟踪器、标签、文档存放位置），即可开始使用。
+
+### 方式 B：Plugin（只读，自动更新）
+
+```bash
+# Claude Code 内执行：
+/plugin marketplace add toRolex/rolex-skills
+/plugin install rolex-skills@toRolex
+```
+
+然后同样运行：
+
+```
+/setup-rolex-skills
+```
+
+**两种方式的区别**：方式 A 的文件可编辑，你可以随意修改；方式 B 是只读包，有更新时会自动同步，适合想保持最新又不想操心的用户。
+
+### 方式 C：Git 克隆（开发者）
+
+如果你在给本仓库贡献或自定义安装：
+
+```bash
 git clone https://github.com/toRolex/rolex-skills
 cd rolex-skills
 bash scripts/link-skills.sh
 ```
 
-装完在项目里跑一次 `/setup-rolex-skills`，回答三个问题即可使用。
+然后运行 `/setup-rolex-skills`。
+
+## 为什么要有这些技能
+
+### 痛点 1：「AI 没按我想的做」
+
+Agent 和开发者之间存在沟通鸿沟。**拷问 session** 是解决之道——让 Agent 在动手前先问透你的需求。`/grill-with-docs` 和 `/grill-me` 就是干这个的。前者还会产出共享词汇表（`CONTEXT.md`），让后续每次对话都更精准。
+
+### 痛点 2：「Agent 太啰嗦」
+
+没有共享词汇，Agent 每次都要长篇描述同样的概念。一个共享语言文档（领域模型）能让它直击要害——把"课程章节中某个 lesson 变为 real 时的问题"压缩成"物化级联问题"，省 token 又精准。
+
+### 痛点 3：「代码跑不通」
+
+对齐了需求，但代码质量跟不上。需要：静态类型、浏览器访问、自动化测试、**红-绿-重构**循环。`/tdd` 技能就是这个循环，`/diagnosing-bugs` 则是把调试最佳实践封装成结构化流程。
+
+### 痛点 4：「又建成屎山了」
+
+AI 加速了编码速度，也加速了软件熵增。`/improve-codebase-architecture` 能帮你挽救混乱的代码库，`/codebase-design` 提供深度模块设计的纪律。建议每几天跑一次。
+
+> 软件工程基本功比以往任何时候都重要。这些技能不是让你不用思考——是让你把思考花在刀刃上。
 
 ## 技能一览
 
