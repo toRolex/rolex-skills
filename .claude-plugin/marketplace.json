@@ -7,10 +7,10 @@
   "description": "AI 编程技能合集——让 Claude Code 听懂中文、帮你干活。",
   "plugins": [
     {
-      "name": "主流程-想法到交付",
+      "name": "主流程：想法到交付",
       "source": "./",
       "category": "engineering",
-      "description": "从想法到交付的完整工作流：访谈、写 spec、拆 ticket、TDD 实现、代码审查",
+      "description": "改编自上峰。从想法到交付的完整工作流：访谈、写 spec、拆 ticket、TDD 实现、代码审查",
       "skills": [
         "./skills/engineering/ask-rolex",
         "./skills/engineering/grill-with-docs",
@@ -28,7 +28,7 @@
       "name": "开发工具",
       "source": "./",
       "category": "engineering",
-      "description": "工程师日常：调试、原型、研究、TDD、领域建模、代码设计、冲突解决",
+      "description": "改编自上峰。调试、原型、研究、TDD、领域建模、代码设计、冲突解决",
       "skills": [
         "./skills/engineering/diagnosing-bugs",
         "./skills/engineering/prototype",
@@ -36,28 +36,28 @@
         "./skills/engineering/tdd",
         "./skills/engineering/domain-modeling",
         "./skills/engineering/codebase-design",
-        "./skills/engineering/resolving-merge-conflicts",
-        "./skills/engineering/afk-issue-loop"
+        "./skills/engineering/resolving-merge-conflicts"
       ]
     },
     {
-      "name": "Git 工具",
+      "name": "原创 Git 工具",
       "source": "./",
       "category": "engineering",
-      "description": "安全 pull、清理分支、Git Flow 规范、一键发版、生成测试计划",
+      "description": "原创技能。安全 pull、清理分支、Git Flow 规范、一键发版、生成测试计划、批量处理 issue",
       "skills": [
         "./skills/engineering/safe-pull",
         "./skills/engineering/clean-branches",
         "./skills/engineering/git-flow-conventions",
         "./skills/engineering/publish-release",
-        "./skills/engineering/qa-plan"
+        "./skills/engineering/qa-plan",
+        "./skills/engineering/afk-issue-loop"
       ]
     },
     {
       "name": "通用技能",
       "source": "./",
       "category": "productivity",
-      "description": "跨会话教学、访谈、交接文档、Skill 编写参考",
+      "description": "改编自上峰。教学、访谈、交接文档、Skill 编写参考",
       "skills": [
         "./skills/productivity/grill-me",
         "./skills/productivity/grilling",
