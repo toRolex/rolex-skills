@@ -1,14 +1,26 @@
 ---
 name: afk-issue-loop
-description: Loop through GitHub issues labeled ready-for-agent, dispatching each to a fresh-context subagent in an isolated git worktree. After all issues complete, remind the user to run code review or QA manually. Use when the user wants to run AFK agents against issues, mentions "Ralph loop", "夜班", "AFK 实现", "让 agent 自己跑 issue", "帮我逐个处理 issue", "批量实现 issue", or wants to loop through ready-for-agent issues.
+description: 遍历标记为 ready-for-agent 的 GitHub issue，将每个 issue 分派到隔离 git worktree 中的全新上下文的子 agent。所有 issue 完成后，提醒用户手动运行 code review 或 QA。当用户希望将 AFK agent 用于 issue、提到 "Ralph loop"、"夜班"、"AFK 实现"、"让 agent 自己跑 issue"、"帮我逐个处理 issue"、"批量实现 issue"、或希望遍历 ready-for-agent 的 issue 时使用。
 disable-model-invocation: true
+argument-hint: "[auto-approve] [auto-merge] [mode=subagent|herdr] [model=haiku|sonnet|opus]"
 ---
 
 # AFK Issue Loop
 
 Matt Pocock 的 Ralph loop 的轻量替代——不需要 Docker/Sandcastle，用 `wt` worktree + `Agent` 工具实现相同效果。
 
-**前置条件**：项目已跑过 `/setup-matt-pocock-skills`，仓库有 `CONTEXT.md`。
+**前置条件**：项目已跑过 `/setup-matt-pocock-skills`，仓库有 `CONTEXT.md`。herdr 模式额外需要 herdr CLI 已安装。
+
+## 模式选择
+
+通过 `[mode=subagent|herdr]` 参数选择。无参数时默认 `subagent`。
+
+| 模式 | 原理 | 适用场景 |
+|------|------|----------|
+| `subagent` | 当前会话中用 `Agent` 工具分派子 agent | 少量 issue（≤5）、需要实时看子 agent 进度 |
+| `herdr` | 调用 `/herdr-instances` 开新 pane 启动独立 claude 实例 | 大量 issue、想并行跑满、不占当前会话上下文 |
+
+herdr 模式下控制者只做扫描和验证，实现 agent 在独立 claude 窗口中运行。具体的 pane 创建、指令下发、等待、结果收集等操作，直接遵循 `/herdr-instances` skill 的核心工作流和布局规则（主编排 pane 不可上下分割，左右/上下分割各自不超过 3）。
 
 ## Quick start
 
@@ -38,11 +50,11 @@ gh issue list --label ready-for-agent --state open --limit 20 --json number,titl
 
 ### 阶段 2：分派实现
 
-对每个可立即开始的 issue（互不依赖的 issue 可并行分派）：
+对每个可立即开始的 issue（互不依赖的 issue 可并行分派）。根据 `mode` 参数选择分派方式。
 
 **选择模型**：按任务复杂度选择，详见 [REFERENCE.md](REFERENCE.md#模型选择)。简要规则：纯机械操作用 Haiku，常规实现用 Sonnet，架构决策或跨模块集成用 Opus。
 
-**创建 worktree**（默认从 `develop` 分支，如项目用 `main` 则替换）。根据 issue label 选择分支前缀：
+**分支前缀**（两种模式共用），根据 issue label 选择：
 
 | Label | 前缀 | 用途 |
 |---|---|---|
@@ -51,29 +63,48 @@ gh issue list --label ready-for-agent --state open --limit 20 --json number,titl
 | `hotfix` | `hotfix/` | 紧急修复 |
 | 其他（chore、refactor 等）或无 label | `chore/` | 日常维护 |
 
+---
+
+#### subagent 模式（默认）
+
+创建 worktree（从 `develop` 分支，如项目用 `main` 则替换）：
+
 ```bash
 wt switch -c <prefix>/<issue-id>-<short-name> -b develop
 ```
 
-**分派 agent**：用 `Agent` 工具（**不带 `isolation` 参数**——worktree 已由 `wt switch -c` 创建），按 `reference/implementer-prompt.md` 模板构造 prompt，必须注入：
+用 `Agent` 工具（**不带 `isolation` 参数**——worktree 已由 `wt switch -c` 创建），按 `reference/implementer-prompt.md` 模板构造 prompt，必须注入：
 - issue 完整文本（`gh issue view <id> --json title,body`）
 - `CONTEXT.md` 内容（如存在）
 - 相关 ADR（如存在）
-- worktree 的绝对路径（`wt` 创建的 `<project>.feature-<id>-<name>` 目录）
+- worktree 的绝对路径（`wt` 创建的 `<project>.<prefix>-<id>-<name>` 目录）
 
-agent 在该 worktree 中按 `/implement` 标准流程工作：TDD → typecheck → code-review → commit → `wt merge develop --no-ff --no-squash` → 关闭 issue。
+agent 在该 worktree 中按 implementer-prompt 流程工作：seam 确认 → TDD → 全量测试 → commit → 本地 merge develop（不推送）→ 清理 worktree → 关闭 issue。
 
-**控制者只做编排**：扫描、分派、验证 commit。**绝不手动写任何实现代码，无论 issue 看起来多简单。** 子 agent 产出有问题时，分派修复 agent（可换更强模型），不在主会话里直接改代码。
+#### herdr 模式
 
-子 agent 可能在开始实现前询问 seam 确认——直接回答，给出你的判断。这不算手动实现，这是编排的一部分。
+流程与 subagent 模式完全一致（seam 确认 → TDD → 全量测试 → commit → 本地 merge → 清理 worktree → 关 issue），区别只在于交付方式：
+
+1. 按 `/herdr-instances` 布局规则在**当前 tab** 创建 pane
+2. 启动 agent，按 implementer-prompt 模板构造 prompt（工作目录段替换为自行 `wt switch -c <前缀>/<id>-<名称> -b develop` 的版本），通过 `herdr pane run` 下发
+
+**踩过的坑**（详见 REFERENCE.md）：
+- agent start 必须指定 `--cwd "$(pwd)"`，否则 agent 工作目录为根目录
+- agent start 必须指定 `--env "PATH=$PATH"`，否则 nvm 管理的 node 等工具找不到
+- 新启动的 agent 需先 `sleep 15` 等待 claude 初始化，再 `wait --status idle`
+
+---
+
+#### 两种模式后续共用
+
+**控制者只做编排**：扫描、分派、验证。**绝不手动写任何实现代码。**
 
 **处理 agent 状态**：详见 [REFERENCE.md](REFERENCE.md#状态处理)。
 
-**BLOCKED 或 NEEDS_CONTEXT 时**：保留 worktree，补信息后同一 worktree 重新分派。
-
-**DONE 后**：子 agent 已自行 `wt merge develop --no-ff --no-squash` 到 develop 并清理 worktree。控制者验证两件事后检查依赖图：
+**DONE 后**：验证三件事后检查依赖图：
 - `gh issue view <id> --json state` 返回 CLOSED
 - `wt list` 中不再出现该 worktree
+- herdr 模式额外关闭 agent pane：`herdr pane close $WS:pX`
 - 验证通过后检查依赖图：是否有被此 issue 阻塞的 issue 现在可以开始。有则立即分派。
 
 ## Reference

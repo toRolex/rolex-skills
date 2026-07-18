@@ -28,7 +28,7 @@ issue 的 body 中使用 `Blocked by` 字段声明依赖（格式：`- #<id> —
 
 | 状态 | 动作 |
 |---|---|
-| `DONE` | 子 agent 已自行 `wt merge develop --no-ff --no-squash` 到 develop 并清理 worktree，控制者检查依赖图解锁被阻塞的 issue |
+| `DONE` | 子 agent 已在 worktree 内用 `git merge --no-ff --no-squash` 本地合入 develop，清理 worktree 并删分支。控制者检查依赖图解锁被阻塞的 issue |
 | `DONE_WITH_CONCERNS` | 阅读疑虑；正确性相关的分派修复 agent（不手动修）；观察性疑虑记录后 merge，检查依赖图 |
 | `NEEDS_CONTEXT` | 保留 worktree，提供缺失信息后重新分派 |
 | `BLOCKED` | 保留 worktree，评估原因后：补上下文 / 换强模型 / 拆分 issue / 上报。**绝不忽视** |
@@ -64,8 +64,8 @@ issue 的 body 中使用 `Blocked by` 字段声明依赖（格式：`- #<id> —
 - **控制者手动修复子 agent 的产出**——发现 bug 后分派修复 agent（可换更强模型），不在主会话里直接改代码
 - **使用 Agent 的 `isolation: "worktree"` 参数**——worktree 已由 `wt switch -c` 创建，agent 直接在工作目录中运行，不需要再创建隔离环境
 - **使用 `git worktree add` 代替 `wt switch -c`**——必须用 `wt` 命令创建 worktree，保证分支管理和清理的一致性
-- **使用 `git -C` 跨 worktree 执行 merge**——必须用 `wt merge develop --no-ff --no-squash` 在 worktree 内完成合并。`git -C` 跨 worktree merge 会丢失分支关系，生成直 commit
-- **控制者在不重建 worktree 的情况下手动 re-merge**——revert 后通过 `wt switch -c` 重建 worktree 再分派 agent，或用 `wt merge develop --no-ff --no-squash` 直接重做
+- **使用 `git -C` 跨 worktree 执行 merge**——应在 worktree 内用 `git checkout develop && git merge --no-ff --no-squash <分支>` 完成。`git -C` 跨 worktree merge 会丢失分支关系，生成直 commit
+- **控制者在不重建 worktree 的情况下手动 re-merge**——revert 后通过 `wt switch -c` 重建 worktree 再分派 agent，或手动用 `git merge --no-ff --no-squash` 重做
 
 **agent 行为红线（写在 implementer-prompt 中，控制者不越俎代庖）：**
 - Agent **只能在 worktree 目录内工作**，禁止 `cd` 回主仓库或从主仓库执行 git 命令
@@ -86,6 +86,33 @@ issue 的 body 中使用 `Blocked by` 字段声明依赖（格式：`- #<id> —
 | `pnpm ralph` | 用户调用 `/afk-issue-loop` |
 | Docker 沙箱 | `wt switch -c` worktree |
 | 依赖驱动的并行分派 | 控制者解析 `Blocked by`，无依赖 issue 并行分派 |
-| patch 回宿主 | `wt merge develop --no-ff --no-squash` |
+| 本地 merge develop（不推送） | `git merge --no-ff --no-squash` 在 worktree 内本地合入 develop |
 | Ralph 信号完成 | agent 报告 `DONE` |
 | Code review / QA | 提示用户手动执行 |
+
+## herdr 模式注意事项
+
+### herdr agent start 三要素
+
+```bash
+herdr agent start <名称> \
+  --cwd "$(pwd)" \                # 必需：否则 agent 在 / 根目录启动
+  --env "PATH=$PATH" \            # 必需：否则 nvm node、uv 等工具找不到
+  --workspace "$WS" --tab "$TAB"  # 必需：缺省会新建 tab 而非分割本 tab
+  --split right                   # 先 right 开列，列满 3 改 down 堆叠
+  -- claude
+```
+
+### 新启动 agent 的等待顺序
+
+claude 初始化需要时间，不能立即 wait：
+
+```bash
+sleep 15                         # 等 claude 加载插件和 skill
+herdr wait agent-status $WS:pX --status idle --timeout 300000
+herdr pane run $WS:pX "prompt"   # 确认 idle 后再发指令
+herdr wait agent-status $WS:pX --status idle --timeout 300000
+result=$(herdr pane read $WS:pX --source recent-unwrapped)
+```
+
+发指令用 `pane run`，不是 `agent send`（`send` 只粘贴不回车）。Wait 用 pane ID（`$WS:pX`），不用命名 target。已完成 agent 用 `herdr pane close $WS:pX` 关闭腾位置。

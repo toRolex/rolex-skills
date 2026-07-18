@@ -1,6 +1,34 @@
 # 实现 agent 分派模板
 
-分派时用此模板构造 `Agent` 的 prompt。方括号内容替换为实际值。
+两种模式使用同一模板，仅工作目录段不同。其余步骤（seam 确认 → TDD → 全量测试 → commit → 本地 merge → 清理 worktree → 关 issue）完全一致。
+
+---
+
+**subagent 模式** — 工作目录段用此版本：
+
+```
+## 工作目录
+
+[worktree 的绝对路径，已由 `wt switch -c <prefix>/<issue-id>-<name> -b develop` 预创建]
+
+你在这个 worktree 中直接工作，不需要自己创建分支或隔离环境。
+```
+
+**herdr 模式** — 工作目录段替换为：
+
+```
+## 工作目录
+
+你没有预置 worktree。请先自行创建并切换：
+
+  wt switch -c <prefix>/<issue-id>-<short-name> -b develop
+
+确认已在 worktree 目录内后，再进行后续步骤。
+```
+
+---
+
+完整模板（合并工作目录段后）：
 
 ```
 你正在实现 GitHub issue #[number]：[title]
@@ -17,9 +45,7 @@
 
 ## 工作目录
 
-[worktree 的绝对路径，已由 `wt switch -c` 预创建]
-
-你在这个 worktree 中直接工作，不需要自己创建分支或隔离环境。
+[按模式选择上面的对应版本，替换此行]
 
 ## 你的工作
 
@@ -33,8 +59,18 @@
 4. **循环**：一个垂直切片（一个 seam → 一个测试 → 一个实现），重复直到 issue 完成
 5. **全量测试**：运行项目的全量测试套件，确保零回归
 6. **提交**：通过后 commit
-7. **合并**：在 worktree 内执行 `wt merge develop --no-ff --no-squash`，将当前分支合入 develop（`wt` 自动处理：commit → --no-ff merge → worktree 清理 → 分支删除）
-8. **验证 merge**：确认 merge commit 有 2 个 parent：`git cat-file -p HEAD | grep "^parent"`。如果只有 1 个 parent，说明 `wt merge --no-ff` 未生效，**不得关闭 issue**，先排查原因。
+7. **合并**：在 worktree 内执行本地 merge，不推送远程：
+   ```bash
+   git checkout develop
+   git merge --no-ff --no-squash <当前分支名>
+   ```
+   然后手动清理 worktree 和分支：
+   ```bash
+   cd /path/to/main/repo  # 退出 worktree
+   wt remove <worktree路径>
+   git branch -D <当前分支名>
+   ```
+8. **验证 merge**：确认 merge commit 有 2 个 parent：`git cat-file -p HEAD | grep "^parent"`。如果只有 1 个 parent，说明 merge 未生效，**不得关闭 issue**，先排查原因。
 9. **关闭 issue**：`gh issue close [number]` — **硬性要求，汇报 DONE 前必须执行**
 
 **全量测试是硬性要求**。在你汇报 DONE 之前，项目的全量测试套件必须全部通过。

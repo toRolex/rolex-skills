@@ -23,27 +23,71 @@ wt list 2>/dev/null || git worktree list
 # 所有远程分支
 git branch -r
 
-# 已合并入当前分支的本地分支（排除当前分支和 main）
-git branch --merged | grep -v '^*' | grep -v 'main$' | grep -v 'master$' | grep -v "$(git rev-parse --abbrev-ref HEAD)"
+# 已合并入当前分支的本地分支（排除当前分支和 main/master）
+git branch --merged | sed 's/^\* //' | grep -vE '^(main|master|develop|HEAD)$' | grep -v "^$(git rev-parse --abbrev-ref HEAD)$"
+
+# 检测 squash merge（GitHub squash merge 无 merge commit，--merged 不识别）
+# 两类检测方法：
+#   a) release/* 分支：匹配对应 tag 是否存在（release 分支的 version bump 使 three-dot diff 永远非空）
+#      如 release/<version> -> 查 v<version> tag
+#   b) 其他分支：three-dot diff 为空 -> 分支内容已合入
+git branch | sed 's/^\* //' | grep -vE '^(main|master|develop|HEAD)$' | grep -v "^$(git rev-parse --abbrev-ref HEAD)$" | while read -r b; do
+  b="${b# }"  # 去掉可能的前导空格
+  git merge-base --is-ancestor "$b" HEAD 2>/dev/null && continue
+
+  # release/* 分支用 tag 检测
+  if echo "$b" | grep -qE '^release/'; then
+    ver=$(echo "$b" | sed 's/^release\///')
+    if git tag -l "v$ver" | grep -q .; then
+      echo "$b  [squash-merged] (tag v$ver exists)"
+      continue
+    fi
+  fi
+
+  # 非 release 分支用 three-dot diff
+  git diff --quiet HEAD..."$b" 2>/dev/null && echo "$b  [squash-merged]"
+done
 
 # 已合并入当前分支的远程 tracking branches（如有 origin）
-git branch -r --merged origin/HEAD 2>/dev/null | grep -v 'origin/HEAD' | grep -v 'origin/main' | grep -v 'origin/master'
+git branch -r --merged origin/HEAD 2>/dev/null | sed 's/^\* //' | grep -vE '^(origin/HEAD|origin/main|origin/master)$'
+
+# 检测远程 squash merge 的分支
+git branch -r | sed 's/^\* //' | grep -vE '^(origin/HEAD|origin/main|origin/master)$' | while read -r r; do
+  r="${r# }"
+  git merge-base --is-ancestor "$r" HEAD 2>/dev/null && continue
+
+  # release/* 分支用 tag 检测
+  local_name="${r#origin/}"
+  if echo "$local_name" | grep -qE '^release/'; then
+    ver=$(echo "$local_name" | sed 's/^release\///')
+    if git tag -l "v$ver" | grep -q .; then
+      echo "$r  [squash-merged] (tag v$ver exists)"
+      continue
+    fi
+  fi
+
+  # 非 release 分支用 three-dot diff
+  git diff --quiet HEAD..."$r" 2>/dev/null && echo "$r  [squash-merged]"
+done
 ```
 
 ### 2. 分析并呈现
 
 组装一张完整表格，包含：
 
-| 类型 | 分支名 | 最新提交 | 已合并 | 关联 worktree | 建议 |
+| 类型 | 分支名 | 最新提交 | 状态 | 关联 worktree | 建议 |
 |---|---|---|---|---|---|
-| local | feature/xxx | abc123 | 是 | 否 | 可删 |
-| remote | origin/xxx | def456 | 是 | - | 可删 |
+| local | feature/xxx | abc123 | 已合并 | 否 | 可删 |
+| local | release/x.y.z | def456 | [squash-merged] (tag vx.y.z exists) | 否 | 可删 |
+| remote | origin/xxx | ghi789 | 已合并 | - | 可删 |
 
 关键规则：
 - **保护当前分支**和 `main`/`master`，绝不建议删除
+- **保护 `develop` 分支**（如果当前不在 develop 上，develop 作为长期分支也应保护）
 - **有活跃 worktree 的分支**标记为"使用中"，需要用户明确确认才删
 - **未合并的分支**标记为"未合并"，说明风险
 - **远程有而本地无的分支**如果已合并，标记可删
+- **squash-merged 的分支**（含 `[squash-merged]` 标记）视为已合并，标记可删。检测方式：`release/*` 分支检查对应 tag 是否存在（如 `release/0.7.6` -> 查 `v0.7.6` tag）；非 release 分支用 three-dot diff 为空判断内容已合入
 
 ### 3. 一次性确认
 
@@ -53,14 +97,14 @@ git branch -r --merged origin/HEAD 2>/dev/null | grep -v 'origin/HEAD' | grep -v
 以下分支已合并入当前分支 (develop)，建议删除：
 
 本地 (6):
-  1. release/v0.2.0        [4963987] 可删
-  2. feature/payment       [548ad1f] 可删
-  3. feature/ui-taste      [4dfcf23] 可删
+  1. release/v0.2.0        [4963987] [squash-merged] 可删
+  2. feature/payment       [548ad1f] 已合并 可删
+  3. feature/ui-taste      [4dfcf23] 已合并 可删
   ...
 
 远程 (3):
-  a. origin/feature/payment  可删
-  b. origin/bugfix/login     可删
+  a. origin/feature/payment  已合并 可删
+  b. origin/bugfix/login     [squash-merged] 可删
   ...
 
 请选择要删除的分支（如 1,2,3,a,b 或 all）：
