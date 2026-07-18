@@ -2,7 +2,7 @@
 
 AI 编程技能合集——把软件工程工作流打包好，让 Claude Code 按规范干活。
 
-基于 [mattpocock/skills](https://github.com/mattpocock/skills) 中文化并补充了 6 个原创 skill。这些技能不是"氛围编程"——它们处理真实项目的复杂性和约束。
+基础 [mattpocock/skills](https://github.com/mattpocock/skills) 中文化并补充了原创 skill 和技能守卫。这些技能不是"氛围编程"——它们处理真实项目的复杂性和约束。
 
 ## 痛点
 
@@ -140,9 +140,9 @@ flowchart LR
 |------|------|------|
 | `/ask-rolex` | 手动 | 告诉你当前场景该用哪个 skill、什么顺序 |
 
-## 🆕 原创技能
+## 🆕 原创技能 + 工具
 
-6 个原创 skill，覆盖 Git 操作到发版的完整运维链：
+**6 个原创 skill**，覆盖 Git 操作到发版的完整运维链：
 
 | 命令 | 职责 |
 |------|------|
@@ -152,6 +152,8 @@ flowchart LR
 | `/publish-release` ★ | 从 develop 一键发版 |
 | `/qa-plan` ★ | 从 commit 生成 Step-by-Step 测试计划 |
 | `/afk-issue-loop` ★ | 批量处理 ready-for-agent 的 Issue |
+| **技能守卫** |  |  |
+| `hooks/` | grilling/wayfinder 阶段自动阻止写代码的 Claude hooks |
 
 ## 场景速查
 
@@ -203,6 +205,16 @@ bash scripts/link-skills.sh
 ```
 
 然后运行 `/setup-rolex-skills`。
+
+### 可选：安装技能守卫
+
+技能守卫是 3 个 Claude Code hooks，在 grilling/wayfinder 等规划阶段自动**阻止写入代码文件**，防止你在该想清楚的时候提前动手：
+
+```bash
+bash scripts/link-hooks.sh
+```
+
+安装后，当你运行 `/wayfinder`、`/grilling`、`/grill-with-docs` 或 `/grill-me` 时，agent 无法修改 `.ts`、`.py`、`.go` 等代码文件，直到退出该 session。对应的 hook 脚本在 `hooks/` 目录。
 
 ## 协议
 
