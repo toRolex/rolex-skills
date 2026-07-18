@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "name": "主流程：想法到交付",
+      "name": "1. 主流程：想法到交付",
       "source": "./",
       "description": "改编自上峰。从想法到交付的完整工作流：访谈、写 spec、拆 ticket、TDD 实现、代码审查",
       "skills": [
