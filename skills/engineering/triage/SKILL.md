@@ -1,10 +1,24 @@
 ---
 name: triage
-description: Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.
+description: 将 issue 和外部 PR 通过一个分类角色状态机进行 triage 流转——分类、验证、必要时打磨，并编写 agent-ready brief。
 disable-model-invocation: true
 ---
 
 # Triage（分类）
+
+> **术语约定：** 以下关键术语保持固定译法，含英文源词以便对照：
+>
+> | English | 中文 |
+> |---------|------|
+> | `triage` | triage |
+> | `role` | 角色 |
+> | `state machine` | 状态机 |
+> | `agent brief` | agent brief |
+> | `grilling` | grilling |
+> | `maintainer` | 维护者 |
+> | `reporter` | 报告人 |
+> | `AFK agent` | AFK agent |
+> | `out of scope` | 超出范围 |
 
 将项目 issue tracker 上的 issue 通过一个小型状态机进行 triage 流转。
 

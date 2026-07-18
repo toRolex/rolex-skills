@@ -1,11 +1,19 @@
 ---
 name: resolving-merge-conflicts
-description: "Use when you need to resolve an in-progress git merge/rebase conflict."
+description: 当你需要解决进行中的 git merge/rebase 冲突时使用。
 ---
 
 # Resolving Merge Conflicts（解决合并冲突）
 
-1. **查看当前状态**——合并或 rebase 的状态。检查 git 历史和冲突文件。
+> **术语约定：** 以下关键术语保持固定译法，含英文源词以便对照：
+>
+> | English | 中文 |
+> |---------|------|
+> | `merge/rebase` | 合并/rebase |
+> | `primary sources` | 一手资料 |
+> | `hunk` | hunk |
+
+1. **查看当前状态**——合并/rebase 的状态。检查 git 历史和冲突文件。
 
 2. **找到每个冲突的一手来源**。深入理解每个变更为什么被做出，以及原始意图是什么。阅读 commit 消息，检查 PR，检查原始 issue/tickets。
 

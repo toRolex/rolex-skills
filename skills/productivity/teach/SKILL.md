@@ -1,27 +1,52 @@
 ---
 name: teach
-description: Teach the user a new skill or concept, within this workspace.
+description: 在教学工作区内教授用户一项新技能或概念。
 disable-model-invocation: true
-argument-hint: "What would you like to learn about?"
+argument-hint: "你想学什么？"
 ---
 
 # Teach（教学）
 
+> **术语约定：**
+> | English | 中文 |
+> |---|---|
+> | workspace | 工作区 |
+> | lesson | 课程 |
+> | mission | 任务 |
+> | knowledge | 知识 |
+> | skill（learned ability） | 技能 |
+> | wisdom | 智慧 |
+> | learning record | 学习记录 |
+> | reference | 参考 |
+> | asset / component | 组件 |
+> | feedback loop | 反馈循环 |
+> | zone of proximal development | 最近发展区 |
+> | fluency strength | 流利度 |
+> | storage strength | 存储强度 |
+> | retrieval practice | 检索练习 |
+> | spacing | 间隔 |
+> | interleaving | 交错 |
+> | desirable difficulty | 理想难度 |
+> | community | 社区 |
+> | glossary | 词汇表 |
+> | agent | agent（不翻译） |
+
 用户要求你教他们一些东西。这是一个有状态的请求——他们打算在多个会话中学习这个主题。
 
-## 教学工作区
+## Teaching Workspace（教学工作区）
 
-将当前目录视为教学工作区。他们的学习状态通过以下文件捕获在此目录中：
+将当前目录视为教学工作区。学习状态通过以下文件捕获在此目录中：
 
 - `MISSION.md`：捕获用户对该主题感兴趣*原因*的文档。应用来支撑所有教学。使用 [MISSION-FORMAT.md](./MISSION-FORMAT.md) 中的格式。
-- `./reference/*.html`：参考材料目录。这些是来自课程的精简知识——速查表、参考算法、语法、瑜伽姿势、词汇表。它们是学习的原始单元。它们应该是打印效果良好的精美文档，设计用于快速参考。
+- `./reference/*.html`：参考材料目录。这些是来自课程的精简知识——速查表、参考算法、语法、瑜伽姿势、词汇表。它们是学习的原始单元。应该是打印效果良好的精美文档，设计用于快速参考。
 - `RESOURCES.md`：可探索的资源列表，用于将教学扎根于上下文知识，或获取知识和智慧。使用 [RESOURCES-FORMAT.md](./RESOURCES-FORMAT.md) 中的格式。
-- `./learning-records/*.md`：学习记录目录，捕获用户所学的内容。它们大致相当于软件开发的架构决策记录——捕获非显而易见的课程和可能需要后续修订或驱动未来会话的关键洞见。应使用它们来计算最近发展区。标题为 `0001-<dash-case-name>.md`，编号每次递增。使用 [LEARNING-RECORD-FORMAT.md](./LEARNING-RECORD-FORMAT.md) 中的格式。
-- `./lessons/*.html`：课程目录。一个**lesson（课程）**是单个自包含的 HTML 输出，教授一个紧密范围且与 mission 相关的内容。这是此教学工作区的主要教学单元。
+- `./learning-records/*.md`：学习记录目录，捕获用户所学的内容。它们大致相当于软件开发的架构决策记录——捕获非显而易见的课程和可能需要后续修订或驱动未来会话的关键洞见。应使用它们来计算最近发展区。标题为 `0001-<短横线隔开的名字>.md`，编号每次递增。使用 [LEARNING-RECORD-FORMAT.md](./LEARNING-RECORD-FORMAT.md) 中的格式。
+- `./lessons/*.html`：课程目录。一个**课程**是单个自包含的 HTML 输出，教授一个紧密范围且与任务相关的内容。这是此教学工作区的主要教学单元。
 - `./assets/*`：课程间共享的可复用**组件**。见 [Assets（组件）](#assets组件)。
 - `NOTES.md`：用于记录用户偏好或工作笔记的草稿本。
+- `GLOSSARY.md`：此教学工作区的规范语言。使用 [GLOSSARY-FORMAT.md](./GLOSSARY-FORMAT.md) 中的格式。
 
-## 理念
+## Philosophy（理念）
 
 为了深度学习，用户需要三样东西：
 
@@ -33,7 +58,7 @@ argument-hint: "What would you like to learn about?"
 
 有些主题可能需要更多的技能而非知识。学习更多理论物理可能更偏重知识。对于瑜伽，更偏重技能。
 
-### 流利度 vs 存储强度
+### Fluency vs Storage Strength（流利度 vs 存储强度）
 
 你应当小心区分两种学习类型：
 
@@ -46,13 +71,13 @@ argument-hint: "What would you like to learn about?"
 - 间隔（随时间分布练习）
 - 交错（在练习中混合相关但不同的主题——仅用于技能练习）
 
-## 课程
+## Lessons（课程）
 
-课程是你产出的主要内容——知识和技能到达用户的单元。每个课程是一个自包含的 HTML 文件，保存到 `./lessons/`，标题为 `0001-<dash-case-name>.html`，编号每次递增。
+课程是你产出的主要内容——知识和技能到达用户的单元。每个课程是一个自包含的 HTML 文件，保存到 `./lessons/`，标题为 `0001-<短横线隔开的名字>.html`，编号每次递增。
 
 课程应该**精美**——清晰、可读的排版和布局——因为用户以后会回来复习。像 Tufte 那样思考。
 
-课程应该简短，且能非常快速地完成。学习者的工作记忆非常小，我们需要保持在其中。但每个课程应给用户一个可继续构建的切实胜利。它应直接与 mission 相关，并在用户的最近发展区内。
+课程应该简短，且能非常快速地完成。学习者的工作记忆非常小，我们需要保持在其中。但每个课程应给用户一个可继续构建的切实胜利。它应直接与任务相关，并在用户的最近发展区内。
 
 如果可能，通过运行 CLI 命令为用户打开课程文件。
 
@@ -62,7 +87,7 @@ argument-hint: "What would you like to learn about?"
 
 每个课程应包含一个提醒，让用户向 agent 提出后续问题。Agent 是他们的老师，可以帮助解决任何不清楚的地方。
 
-## 组件
+## Assets（组件）
 
 课程由可复用的**组件**构建，存储在 `./assets/` 中：样式表、测验小部件、模拟器、图表助手——任何第二个课程可能复用的东西。
 
@@ -70,7 +95,7 @@ argument-hint: "What would you like to learn about?"
 
 共享样式表是每个工作区获得的第一个组件：每个课程链接它，这样课程看起来像一个一致的系列，而不是一堆一次性作品。随着工作区的增长，组件库也应增长。
 
-## 任务
+## The Mission（任务）
 
 每个课程应与任务联系起来——用户对学习这个主题感兴趣的原因。
 
@@ -80,9 +105,9 @@ argument-hint: "What would you like to learn about?"
 
 任务可能随着用户技能和知识的发展而改变。这是正常的——确保更新 `MISSION.md` 并添加学习记录来捕获变更。在改变任务前与用户确认。
 
-## 最近发展区
+## Zone Of Proximal Development（最近发展区）
 
-每个课程中，用户应始终感觉他们正在被'刚刚好'地挑战。
+每个课程中，用户应始终感觉他们正在被"刚刚好"地挑战。
 
 用户可能指定他们想学的一个确切东西。如果没有，通过以下方式确定他们的最近发展区：
 
@@ -90,7 +115,7 @@ argument-hint: "What would you like to learn about?"
 - 根据他们的任务确定要教的正确内容
 - 教在最近发展区内最相关的内容
 
-## 知识
+## Knowledge（知识）
 
 课程应围绕用户将要学习的技能来设计。课程中的知识应只限于获取该技能所需的内容。你先教授知识，然后通过互动反馈循环让用户练习技能。
 
@@ -98,7 +123,7 @@ argument-hint: "What would you like to learn about?"
 
 对于知识获取，难度是敌人。它消耗你理解所需的工作记忆。
 
-## 技能
+## Skills（技能）
 
 如果知识是关于获取，技能是关于持久性和灵活性。让知识巩固下来。
 
@@ -107,11 +132,11 @@ argument-hint: "What would you like to learn about?"
 - 互动课程，使用测验和轻量的浏览器内任务
 - 引导用户完成真实世界步骤清单的课程（例如瑜伽姿势）
 
-每种都应基于**反馈循环**，用户接收关于他们表现反馈。这个反馈循环应尽可能紧，理想情况下立即且自动提供反馈。
+每种都应基于**反馈循环**，用户接收关于他们表现的反馈。这个反馈循环应尽可能紧，理想情况下立即且自动提供反馈。
 
 对于测验，每个答案应有完全相同的字数（以及如果可能，字符数）。不要通过格式给用户任何回答的线索。
 
-## 获取智慧
+## Acquiring Wisdom（获取智慧）
 
 智慧来自真实的现实世界互动——在学习环境外测试你的技能。
 
@@ -121,7 +146,7 @@ argument-hint: "What would you like to learn about?"
 
 你应尝试寻找用户可以加入的高信誉社区。如果用户表示不希望加入社区，尊重它。
 
-## 参考文档
+## Reference Documents（参考文档）
 
 在创建课程的同时，你也应创建参考文档。课程可以引用这些文档——它们对于跟踪跨课程有用的知识原始单元很有用。
 

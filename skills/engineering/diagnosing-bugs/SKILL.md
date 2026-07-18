@@ -1,7 +1,25 @@
 ---
 name: diagnosing-bugs
-description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
+description: 硬 Bug 和性能回归的诊断循环。当用户说"诊断"/"排查这个"，或报告有东西坏了/抛异常/失败/慢时使用。
 ---
+
+> **术语约定：** 以下关键术语保持固定译法：
+>
+> | English | 中文 |
+> |---------|------|
+> | feedback loop | 反馈循环 |
+> | bisection / bisect | 二分查找 |
+> | harness | harness（不翻译） |
+> | regression test | 回归测试 |
+> | hypothesis | 假设 |
+> | seam | seam（不翻译） |
+> | repro | 复现 |
+> | flaky | flaky（不翻译） |
+> | deterministic | 确定的 |
+> | non-deterministic | 非确定的 |
+> | instrumentation | 仪表化 |
+> | HITL | HITL（不翻译） |
+> | plausible | 看似合理的 |
 
 # Diagnosing Bugs（Bug 诊断）
 
@@ -24,7 +42,7 @@ description: Diagnosis loop for hard bugs and performance regressions. Use when 
 5. **重放捕获的 trace。** 将真实的网络请求/载荷/事件日志保存到磁盘；在隔离环境中通过代码路径重放。
 6. **一次性 harness。** 启动系统的最小子集（一个服务，mocked 依赖），用单个函数调用执行 bug 代码路径。
 7. **Property / fuzz 循环。** 如果 bug 是"有时输出错误"，运行 1000 个随机输入并查找失败模式。
-8. **二分搜索 harness。** 如果 bug 出现在两个已知状态之间（commit、数据集、版本），自动化"在状态 X 启动、检查、重复"，这样你就能 `git bisect run` 它。
+8. **二分查找 harness。** 如果 bug 出现在两个已知状态之间（commit、数据集、版本），自动化"在状态 X 启动、检查、重复"，这样你就能 `git bisect run` 它。
 9. **差分循环。** 旧版本 vs 新版本（或两种配置）跑相同输入并 diff 输出。
 10. **HITL bash 脚本。** 最后手段。如果人类必须点击，用 `scripts/hitl-loop.template.sh` 驱动他们，让循环仍然有结构。捕获的输出反馈给你。
 
@@ -81,7 +99,7 @@ description: Diagnosis loop for hard bugs and performance regressions. Use when 
 
 ## 阶段 3 — 假设
 
-在测试任何一个之前生成 **3–5 个排序的假设**。单一假设生成会锚定在第一个 plausible 的想法上。
+在测试任何一个之前生成 **3–5 个排序的假设**。单一假设生成会锚定在第一个看似合理的想法上。
 
 每个假设必须是**可证伪的**：陈述它所做的预测。
 

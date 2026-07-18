@@ -1,8 +1,20 @@
 ---
 name: implement
-description: "Implement a piece of work based on a spec or set of tickets."
+description: "根据 spec 或一组 tickets 实现一项工作。"
 disable-model-invocation: true
 ---
+
+> **术语约定：** 以下关键术语保持固定译法，含英文源词以便对照：
+>
+> | English | 中文 |
+> |---------|------|
+> | spec | spec（保留英文） |
+> | ticket(s) | ticket（保留英文） |
+> | seam | seam（保留英文） |
+> | tdd | tdd（保留英文） |
+> | typechecking | 类型检查 |
+> | test suite | 测试套件 |
+> | code-review | code-review（保留英文） |
 
 # Implement（实现）
 

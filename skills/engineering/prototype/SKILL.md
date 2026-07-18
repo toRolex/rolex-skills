@@ -1,13 +1,26 @@
 ---
 name: prototype
-description: Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.
+description: 构建一次性原型来回答设计问题。当用户想验证状态模型或逻辑是否合理，或探索 UI 应该长什么样时使用。
 ---
+> **术语约定：** 以下关键术语保持固定译法，含英文源词以便对照：
+>
+> | English | 中文 |
+> |---------|------|
+> | prototype | 原型 |
+> | throwaway | 一次性（adj.） |
+> | branch | 分支 |
+> | state / state model | 状态 / 状态模型 |
+> | variant | 变体 |
+> | persistence | 持久化 |
+> | logic | logic（保留英文，branch 名称） |
+> | UI | UI（保留英文） |
+> | primary source | 一手来源 |
 
 # Prototype（原型）
 
 原型是**回答一个问题的一次性代码**。问题决定了它的形状。
 
-## 选择分支
+## Pick a branch（选择分支）
 
 确定正在回答的是哪个问题——从用户提示、周围代码，或如果用户在的话直接问：
 
@@ -16,7 +29,7 @@ description: Build a throwaway prototype to answer a design question. Use when t
 
 两个分支产生非常不同的产物——选错了会浪费整个原型。如果问题确实模糊且用户不在，默认选择更适合周围代码的分支（后端模块 → logic；页面或组件 → UI），并在原型顶部陈述你的假设。
 
-## 两者都适用的规则
+## Rules that apply to both（两者都适用的规则）
 
 1. **从第一天就是一次性的，并明确标记。** 将原型代码放在它实际使用位置的附近（正在为其做原型的模块或页面旁边），这样上下文很明显——但命名让它能看出是原型，而不是生产代码。对于一次性 UI 路由，遵循项目已经使用的任何路由约定；不要发明新的顶层结构。
 

@@ -1,14 +1,21 @@
 ---
 name: research
-description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
+description: 针对高信任度一手资料调研问题，并将发现作为 Markdown 文件保存在仓库中。当用户希望调研某个主题、查阅文档或 API 事实、或将阅读工作委托给后台 agent 时使用。
 ---
 
 # Research（调研）
+
+> **术语约定：** 以下关键术语保持固定译法，含英文源词以便对照：
+>
+> | English | 中文 |
+> |---------|------|
+> | `background agent` | 后台 agent |
+> | `primary sources` | 一手资料 |
 
 启动一个**后台 agent** 来做调研，这样你在它阅读时继续工作。
 
 它的工作：
 
-1. 针对**一手资料**调查问题——官方文档、源代码、规范、第一方 API——而不是它们的二次解读。将每个声明追溯到拥有它的源头。
+1. 针对**一手资料**调查问题——官方文档、源代码、规范、第一方 API——而不是它们的二次解读。将每个声明追溯到它的来源。
 2. 将发现写入单个 Markdown 文件，引用每个声明的来源。
 3. 保存在仓库已有的此类笔记的位置；匹配现有约定，如果没有，放在合理的位置并说明。

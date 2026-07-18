@@ -6,11 +6,46 @@ disable-model-invocation: true
 
 # Writing Great Skills（编写优秀的 Skill）
 
+> **术语约定：**
+> | English | 中文 |
+> |---|---|
+> | agent | agent（不翻译） |
+> | skill | skill（不翻译） |
+> | predictability | 可预测性 |
+> | description | description（不翻译） |
+> | context load | 上下文负载 |
+> | cognitive load | 认知负载 |
+> | model-invoked / user-invoked | 不翻译 |
+> | leading word | 引领词 |
+> | branch | 分支 |
+> | trigger | 触发（动词）/ 触发条件（名词） |
+> | invocation | 调用 |
+> | information hierarchy | 信息层次 |
+> | step | 步骤 |
+> | reference | 参考 |
+> | in-skill step / in-skill reference | skill 内步骤 / skill 内参考 |
+> | external reference | 外部参考 |
+> | completion criterion | 完成标准 |
+> | premature completion | 提前完成 |
+> | legwork | legwork（不翻译） |
+> | progressive disclosure | 渐进式披露 |
+> | context pointer | 上下文指针 |
+> | co-location | 共位 |
+> | granularity | 粒度 |
+> | duplication | 重复 |
+> | no-op | no-op（不翻译） |
+> | sediment | 沉积 |
+> | sprawl | 蔓延 |
+> | negation | 否定 |
+> | single source of truth | 单一真相来源 |
+> | relevance | 相关性 |
+> | router skill | 路由器 skill |
+>
 一个 skill 的存在意义是从随机系统中规整出确定性。**可预测性**——agent 每次运行采用相同的_过程_，而不是产生相同的输出——是根本美德；下面的每个杠杆都服务于它。
 
 **加粗术语**在 [`GLOSSARY.md`](GLOSSARY.md) 中有定义；在那里查找完整含义。
 
-## 调用方式
+## Invocation（调用方式）
 
 两个选择，权衡不同的成本：
 
@@ -21,7 +56,7 @@ disable-model-invocation: true
 
 当 user-invoked skills 多到你记不住时，积累的认知负载由**路由器 skill** 治愈：一个 user-invoked skill，列出其他 skill 以及何时使用每个。
 
-## 编写 description
+## Writing the description（编写 description）
 
 model-invoked 的 **description** 做两件事——说明 skill 是什么，列出应该触发它的**分支**。每个词增加**上下文负载**，所以 description 的修剪比正文更需要严格：
 
@@ -29,7 +64,7 @@ model-invoked 的 **description** 做两件事——说明 skill 是什么，列
 - **每个分支一个触发条件。** 将单个分支重命名的同义词是**重复**——"使用 TDD 构建功能……要求测试优先开发"是一个分支写了两遍。合并它们；只保留真正不同的分支。
 - **剪掉正文已包含的身份。** 保持 description 只包含触发条件，加上任何"当其他 skill 需要……"的可达子句。
 
-## 信息层次
+## Information hierarchy（信息层次）
 
 一个 skill 由两种内容类型构建——**步骤**和**参考**——它们自由混合：一个 skill 可以全部是步骤、全部是参考、或两者都有。核心决策是使用哪一种，以及每种在**信息层次**中的位置，这是一个按 agent 需要材料的紧急性排序的阶梯：
 
@@ -45,14 +80,14 @@ model-invoked 的 **description** 做两件事——说明 skill 是什么，列
 
 阶梯决定了一个片段在层级中_多深_的位置，而**共位**则决定了一旦到达那里，_什么与它相邻_：将一个概念的定义、规则和注意事项放在一个标题下，而不是分散的，这样阅读一部分就会带来相邻部分。
 
-## 何时拆分
+## When to split（何时拆分）
 
 **粒度**是你将 skill 划分的精细程度，每次切割消耗两种负载之一，所以只有切割能带来回报时才拆分。两种拆分：
 
 - **按调用方式拆分** —— 当你有一个应该独立触发的**引领词**，或其他 skill 必须调用它时，拆出一个 **model-invoked** skill。你为新的始终加载的 **description** 支付**上下文负载**，所以这种独立可达必须值得。
 - **按顺序拆分** —— 当剩余的步骤（步骤的**后续步骤**）诱使 agent 急于完成当前步骤（**提前完成**）时，拆分一系列**步骤**。将它们保持不可见，鼓励 agent 在当前任务上做更多**legwork**。
 
-## 修剪
+## Pruning（修剪）
 
 将每个含义保持在**单一真相来源**：一个权威位置，这样改变行为是一次编辑。
 
@@ -60,7 +95,7 @@ model-invoked 的 **description** 做两件事——说明 skill 是什么，列
 
 然后逐句（不只是逐行）追捕**no-ops**：对每个句子单独运行 no-op 测试，当它失败时，删除整个句子而不是从中修剪单词。要激进——大多数测试失败的散文应被删除，而不是重写。
 
-## 引领词
+## Leading words（引领词）
 
 **引领词**是一个已经存在于模型预训练中的紧凑概念，agent 在执行 skill 时用它来思考（例如_lesson_、_fog of war_、_tracer bullets_）。在文本中反复使用（尽管不一定——一个强的引领词可能只需要出现一次），它积累了一个分布式定义，并用最少的 token 锚定整个行为区域，通过利用模型已经持有的先验知识。
 
@@ -73,7 +108,7 @@ model-invoked 的 **description** 做两件事——说明 skill 是什么，列
 
 你赢两次：更少的 tokens，_和_一个更锐利的钩子让 agent 挂载其思考。假设每个 skill 都携带了引领词可以退休的重复表述——去找它们。
 
-## 失败模式
+## Failure modes（失败模式）
 
 用这些来诊断用户可能遇到的 skill 问题。
 

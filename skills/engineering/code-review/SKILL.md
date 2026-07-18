@@ -1,7 +1,30 @@
 ---
 name: code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/PRD asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to "review since X".
+description: 审查自某个固定点（commit、branch、tag 或 merge-base）以来的变更，沿两个轴进行——Standards（代码是否遵循本仓库文档化的编码规范？）和 Spec（代码是否匹配原始 issue/PRD 的要求？）。两个并行 sub-agent 分别运行审查并并排报告结果。当用户想要 review branch、PR、进行中的变更，或要求"review since X"时使用。
 ---
+
+> **术语约定：** 以下关键术语保持固定译法：
+>
+> | English | 中文 |
+> |---------|------|
+> | review | 审查 |
+> | Standards | Standards（不翻译） |
+> | Spec | spec（不翻译） |
+> | issue | issue（不翻译） |
+> | PRD | PRD（不翻译） |
+> | diff | diff（不翻译） |
+> | commit | commit（不翻译） |
+> | branch | 分支 |
+> | tag | tag（不翻译） |
+> | merge-base | merge-base（不翻译） |
+> | sub-agent | sub-agent（不翻译） |
+> | fixed point | 固定点 |
+> | code smell / smell | 代码坏味 / 坏味 |
+> | baseline | 基线 |
+> | violation | 违规 |
+> | judgement call | 判断 |
+> | hunk | hunk（不翻译） |
+> | scope creep | 范围蔓延 |
 
 # Code Review（代码审查）
 

@@ -1,7 +1,25 @@
 ---
 name: codebase-design
-description: Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.
+description: 设计深度模块的共享词汇表。当用户想要设计或改进模块的 interface、寻找深化机会、决定 seam 放在哪里、让代码更可测试或更易 AI 导航，或其他 skill 需要深度模块词汇表时使用。
 ---
+
+> **术语约定：** 以下关键术语保持固定译法：
+>
+> | English | 中文 |
+> |---------|------|
+> | Module | Module（不翻译） |
+> | Interface | Interface（不翻译） |
+> | Implementation | Implementation（不翻译） |
+> | Depth | Depth（不翻译） |
+> | Seam | Seam（不翻译） |
+> | Adapter | Adapter（不翻译） |
+> | Leverage | Leverage（不翻译） |
+> | Locality | Locality（不翻译） |
+> | deep module | 深度模块 |
+> | shallow module | 浅模块 |
+> | interface（类型层面） | 接口 |
+> | seam（作为概念） | seam（不翻译） |
+> | boundary | boundary（不翻译） |
 
 # Codebase Design（代码库设计）
 

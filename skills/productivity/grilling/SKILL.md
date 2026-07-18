@@ -5,6 +5,15 @@ description: Grill the user relentlessly about a plan or design. Use when the us
 
 # Grilling（深度访谈）
 
+> **术语约定：**
+> | English | 中文 |
+> |---|---|
+> | plan | 计划 |
+> | shared understanding | 共同理解 |
+> | design tree | 设计树 |
+> | codebase | 代码库 |
+> | agent | agent（不翻译） |
+
 对这个计划的每个方面进行无休止的追问，直到我们达成共同理解。沿着设计树的每个分支走下去，逐个解决决策之间的依赖关系。对每个问题，提供你的推荐答案。
 
 一次问一个问题，在对每个问题给出反馈后再继续。同时问多个问题是令人困惑的。
