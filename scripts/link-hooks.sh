@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Links skill-guard hook scripts from this repo into ~/.claude/hooks/.
-# Each entry is a symlink into this repo, so a `git pull` keeps hooks up to date.
+# Uses per-file symlinks so other hooks from other sources can coexist.
+# A `git pull` keeps installed hooks up to date.
 #
 # For plugin install (via `/plugin marketplace add`), this step is optional —
 # the hooks load automatically from the plugin's `hooks/hooks.json`.
@@ -10,26 +11,24 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$REPO/bin"
 DEST="$HOME/.claude/hooks"
+SCRIPTS=(set-skill-mode.sh detect-skill-mode.sh block-code-files.sh)
 
-# Remove existing destination if it's a symlink into this repo
-if [ -L "$DEST" ]; then
-  resolved="$(readlink "$DEST")"
-  case "$resolved" in
-    "$REPO"|"$REPO"/*)
-      echo "error: $DEST is already a symlink into this repo ($resolved)." >&2
-      echo "Remove it (rm \"$DEST\") and re-run if you need to recreate it." >&2
-      exit 1
-      ;;
-  esac
-fi
+mkdir -p "$DEST"
 
-# Remove real files (leftover from direct install)
-if [ -d "$DEST" ] && [ ! -L "$DEST" ]; then
-  echo "removing real directory $DEST (will replace with symlink)" >&2
-  rm -rf "$DEST"
-elif [ -f "$DEST" ]; then
-  rm "$DEST"
-fi
+for script in "${SCRIPTS[@]}"; do
+  target="$DEST/$script"
+  source="$SRC/$script"
 
-ln -sfn "$SRC" "$DEST"
-echo "linked hooks -> $SRC"
+  # Remove existing entry if it's a symlink into this repo
+  if [ -L "$target" ]; then
+    resolved="$(readlink "$target")"
+    case "$resolved" in
+      "$SRC"|"$SRC"/*)
+        rm "$target"
+        ;;
+    esac
+  fi
+
+  ln -sfn "$source" "$target"
+  echo "linked $target -> $source"
+done
