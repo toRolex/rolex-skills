@@ -7,7 +7,8 @@
 INPUT=$(cat)
 CMD=$(echo "$INPUT" | jq -r '.command_name // empty')
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MODE_FILE="$SCRIPT_DIR/current-mode"
+TTY_ID=$(tty 2>/dev/null | tr -c 'a-zA-Z0-9' '_' || echo "unknown")
+MODE_FILE="$SCRIPT_DIR/current-mode-$TTY_ID"
 
 [ -z "$CMD" ] && exit 0
 

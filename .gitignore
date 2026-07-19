@@ -18,6 +18,7 @@ package/
 
 # runtime state (hook scripts)
 current-mode
+current-mode-*
 dist/
 .cache/
 
