@@ -6,7 +6,8 @@
 
 INPUT=$(cat)
 CMD=$(echo "$INPUT" | jq -r '.command_name // empty')
-MODE_FILE="$HOME/.claude/hooks/current-mode"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODE_FILE="$SCRIPT_DIR/current-mode"
 
 [ -z "$CMD" ] && exit 0
 

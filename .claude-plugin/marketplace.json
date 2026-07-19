@@ -8,9 +8,9 @@
   },
   "plugins": [
     {
-      "name": "1. 主流程：想法到交付",
+      "name": "rolex-skills",
       "source": "./",
-      "description": "改编自上峰。从想法到交付的完整工作流：访谈、写 spec、拆 ticket、TDD 实现、代码审查",
+      "description": "从想法到交付的完整工作流：访谈、写 spec、拆 ticket、TDD 实现、代码审查。附带 skill guard hooks 防止受限 skill 误写入代码文件。",
       "skills": [
         "./skills/engineering/ask-rolex",
         "./skills/engineering/grill-with-docs",
@@ -21,41 +21,20 @@
         "./skills/engineering/wayfinder",
         "./skills/engineering/triage",
         "./skills/engineering/improve-codebase-architecture",
-        "./skills/engineering/setup-rolex-skills"
-      ]
-    },
-    {
-      "name": "开发工具",
-      "source": "./",
-      "description": "改编自上峰。调试、原型、研究、TDD、领域建模、代码设计、冲突解决",
-      "skills": [
+        "./skills/engineering/setup-rolex-skills",
         "./skills/engineering/diagnosing-bugs",
         "./skills/engineering/prototype",
         "./skills/engineering/research",
         "./skills/engineering/tdd",
         "./skills/engineering/domain-modeling",
         "./skills/engineering/codebase-design",
-        "./skills/engineering/resolving-merge-conflicts"
-      ]
-    },
-    {
-      "name": "原创工具",
-      "source": "./",
-      "description": "原创技能。安全 pull、清理分支、Git Flow 规范、一键发版、生成测试计划、批量处理 issue",
-      "skills": [
+        "./skills/engineering/resolving-merge-conflicts",
         "./skills/engineering/safe-pull",
         "./skills/engineering/clean-branches",
         "./skills/engineering/git-flow-conventions",
         "./skills/engineering/publish-release",
         "./skills/engineering/qa-plan",
-        "./skills/engineering/afk-issue-loop"
-      ]
-    },
-    {
-      "name": "通用技能",
-      "source": "./",
-      "description": "改编自上峰。教学、访谈、交接文档、Skill 编写参考",
-      "skills": [
+        "./skills/engineering/afk-issue-loop",
         "./skills/productivity/grill-me",
         "./skills/productivity/grilling",
         "./skills/productivity/handoff",

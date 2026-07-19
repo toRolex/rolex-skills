@@ -15,6 +15,9 @@ package/
 *.log
 .env
 .env.*
+
+# runtime state (hook scripts)
+current-mode
 dist/
 .cache/
 

@@ -3,7 +3,8 @@
 # restricted 模式下阻止代码文件写入
 
 INPUT=$(cat)
-MODE_FILE="$HOME/.claude/hooks/current-mode"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODE_FILE="$SCRIPT_DIR/current-mode"
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 [ -z "$FILE_PATH" ] && exit 0

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Links skill-guard hooks from this repo into ~/.claude/hooks/.
+# Links skill-guard hook scripts from this repo into ~/.claude/hooks/.
 # Each entry is a symlink into this repo, so a `git pull` keeps hooks up to date.
+#
+# For plugin install (via `/plugin marketplace add`), this step is optional —
+# the hooks load automatically from the plugin's `hooks/hooks.json`.
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$REPO/hooks"
+SRC="$REPO/bin"
 DEST="$HOME/.claude/hooks"
 
 # Remove existing destination if it's a symlink into this repo

@@ -1,0 +1,9 @@
+{
+  "name": "rolex-skills",
+  "description": "AI 编程技能合集——让 Claude Code 听懂中文、帮你干活。内置 skill guard hooks 防止 wayfinder/grilling 等 skill 误写入代码文件。",
+  "version": "1.1.0",
+  "author": {
+    "name": "Rolex"
+  },
+  "homepage": "https://github.com/toRolex/rolex-skills"
+}

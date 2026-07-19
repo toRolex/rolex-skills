@@ -1,0 +1,38 @@
+# Hook 事件配置
+# 安装为 Claude Code 插件时自动加载
+# 独立安装时需复制到项目 settings.json
+{
+  "hooks": {
+    "UserPromptExpansion": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "set-skill-mode.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "detect-skill-mode.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "block-code-files.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
