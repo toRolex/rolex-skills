@@ -7,8 +7,14 @@
 INPUT=$(cat)
 CMD=$(echo "$INPUT" | jq -r '.command_name // empty')
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODES_DIR="$SCRIPT_DIR/modes"
 TTY_ID=$(tty 2>/dev/null | tr -c 'a-zA-Z0-9' '_' || echo "unknown")
-MODE_FILE="$SCRIPT_DIR/current-mode-$TTY_ID"
+MODE_FILE="$MODES_DIR/current-mode-$TTY_ID"
+
+mkdir -p "$MODES_DIR"
+
+# 清理上次残留状态，再重新写入
+rm -f "$MODE_FILE"
 
 [ -z "$CMD" ] && exit 0
 

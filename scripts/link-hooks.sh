@@ -11,7 +11,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$REPO/bin"
 DEST="$HOME/.claude/hooks"
-SCRIPTS=(set-skill-mode.sh detect-skill-mode.sh block-code-files.sh)
+SCRIPTS=(set-skill-mode.sh block-code-files.sh)
 
 mkdir -p "$DEST"
 

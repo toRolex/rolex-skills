@@ -79,7 +79,7 @@ wt switch -c <prefix>/<issue-id>-<short-name> -b develop
 - 相关 ADR（如存在）
 - worktree 的绝对路径（`wt` 创建的 `<project>.<prefix>-<id>-<name>` 目录）
 
-agent 在该 worktree 中按 implementer-prompt 流程工作：seam 确认 → TDD → 全量测试 → commit → 本地 merge develop（不推送）→ 清理 worktree → 关闭 issue。
+agent 在该 worktree 中按 implementer-prompt 流程工作：seam 确认 → TDD → 全量测试 → commit → 本地 merge develop（**绝不创建 PR，绝不推送远程**）→ 清理 worktree → 关闭 issue。
 
 #### herdr 模式
 
@@ -97,13 +97,18 @@ agent 在该 worktree 中按 implementer-prompt 流程工作：seam 确认 → T
 
 #### 两种模式后续共用
 
-**控制者只做编排**：扫描、分派、验证。**绝不手动写任何实现代码。**
+**红线（控制者遵守）：**
+- 控制者只做编排：扫描、分派、验证。**绝不手动写任何实现代码。**
+- **绝不推送到远程**。所有 merge 只发生在本地 develop。如果本地 develop 与 origin/develop 因外部事件（如 PR）分歧，**不推送、不 merge origin/develop、不解决冲突**。分歧不影响后续 issue 的本地 worktree 创建（`wt switch -c` 从本地 develop 创建）。
+- **绝不 git push origin develop**。在任何情况下都不执行此命令。
+- agent 创建了 GitHub PR 是严重的流程错误——**该 issue 标记为失败**，回滚 merge，通过本地 `git merge --no-ff --no-squash` 重做，绝不用 `git push` 去"追平"远程。
 
 **处理 agent 状态**：详见 [REFERENCE.md](REFERENCE.md#状态处理)。
 
 **DONE 后**：验证三件事后检查依赖图：
 - `gh issue view <id> --json state` 返回 CLOSED
 - `wt list` 中不再出现该 worktree
+- **确认 merge 是本地完成的**：`git log --oneline develop -5` 应包含对应的 merge commit 或 squash commit（非 `origin/develop` 上的 commit）。如果 commit 来自 GitHub PR（含 `(#N)` 标记），该 issue 标记为流程错误，按"红线"规则回滚重做
 - herdr 模式额外关闭 agent pane：`herdr pane close $WS:pX`
 - 验证通过后检查依赖图：是否有被此 issue 阻塞的 issue 现在可以开始。有则立即分派。
 

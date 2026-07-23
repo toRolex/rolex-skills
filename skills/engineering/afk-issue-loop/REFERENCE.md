@@ -62,6 +62,8 @@ issue 的 body 中使用 `Blocked by` 字段声明依赖（格式：`- #<id> —
 - 忽略 agent 的疑问（先回答再继续）
 - **控制者手动实现 issue**——每个 issue 必须通过 Agent 分派，无论看起来多简单
 - **控制者手动修复子 agent 的产出**——发现 bug 后分派修复 agent（可换更强模型），不在主会话里直接改代码
+- **控制者推送到远程 develop**——`git push origin develop` 在任何情况下都不执行。本地 develop 与 origin/develop 分歧时，保留分歧，不影响后续 worktree 创建
+- **控制者手动解决 develop 与 origin/develop 的冲突**——不 push、不 merge origin/develop、不解决冲突。分歧是预期状态，由项目维护者决定何时同步
 - **使用 Agent 的 `isolation: "worktree"` 参数**——worktree 已由 `wt switch -c` 创建，agent 直接在工作目录中运行，不需要再创建隔离环境
 - **使用 `git worktree add` 代替 `wt switch -c`**——必须用 `wt` 命令创建 worktree，保证分支管理和清理的一致性
 - **使用 `git -C` 跨 worktree 执行 merge**——应在 worktree 内用 `git checkout develop && git merge --no-ff --no-squash <分支>` 完成。`git -C` 跨 worktree merge 会丢失分支关系，生成直 commit
@@ -70,6 +72,8 @@ issue 的 body 中使用 `Blocked by` 字段声明依赖（格式：`- #<id> —
 **agent 行为红线（写在 implementer-prompt 中，控制者不越俎代庖）：**
 - Agent **只能在 worktree 目录内工作**，禁止 `cd` 回主仓库或从主仓库执行 git 命令
 - **Seam 确认**是硬性检查点：列出 seam → 等待控制者确认 → 控制者确认后才允许开始写测试或实现代码
+- **严格执行完整步骤链：测试 → commit → merge → 清理 → 关 issue**。任何步骤未完成即汇报 DONE 视为流程违规，控制者检查后要求补做
+- **禁止创建 GitHub PR**：`gh pr create`、通过 GitHub Web UI 合并、或任何形式的远程 merge 都是违规。merge 唯一允许的方式是 worktree 内 `git checkout develop && git merge --no-ff --no-squash <分支名>`
 - **Merge 后必须验证**：`git cat-file -p HEAD | grep "^parent" | wc -l` 应为 2。只有 1 个 parent 说明 merge 没成功，不得关闭 issue
 - **全量测试结果必须贴实际命令输出**（含通过/失败数量），禁止只说"测试通过"而无证据
 

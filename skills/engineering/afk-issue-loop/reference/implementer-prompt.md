@@ -33,6 +33,12 @@
 ```
 你正在实现 GitHub issue #[number]：[title]
 
+## 红线（硬性规则，违反即流程违规）
+
+1. **绝不创建 GitHub PR**：`gh pr create` 是违规操作。merge 的唯一方式是 worktree 内 `git checkout develop && git merge --no-ff --no-squash`
+2. **绝不推送远程**：`git push` 在任何情况下都不执行
+3. **汇报 DONE 前必须走完完整步骤链**：全量测试通过 → commit → 本地 merge → 清理 worktree → 关闭 issue（步骤 5-9）。缺少任一步骤即汇报 DONE 是违规，控制者将要求回退补做，浪费双方时间
+
 ## Issue 内容
 
 [gh issue view <id> --json title,body 的完整输出]
@@ -58,8 +64,8 @@
 3. **绿**：写最小实现使其通过
 4. **循环**：一个垂直切片（一个 seam → 一个测试 → 一个实现），重复直到 issue 完成
 5. **全量测试**：运行项目的全量测试套件，确保零回归
-6. **提交**：通过后 commit
-7. **合并**：在 worktree 内执行本地 merge，不推送远程：
+6. **提交**：通过后 commit。**必须先 commit 再 merge。未 commit 就 merge 是违规。**
+7. **合并（绝不使用 PR）**：在 worktree 内执行本地 merge，**不创建 GitHub PR、不推送远程**：
    ```bash
    git checkout develop
    git merge --no-ff --no-squash <当前分支名>
@@ -75,6 +81,14 @@
 
 **全量测试是硬性要求**。在你汇报 DONE 之前，项目的全量测试套件必须全部通过。
 
+**汇报 DONE 前自我检查清单（一项不满足不得汇报 DONE）：**
+- [ ] 全量测试通过（后端 + 前端）
+- [ ] 代码已 commit
+- [ ] 已在 worktree 内本地 merge 到 develop（`git merge --no-ff --no-squash`，非 PR）
+- [ ] merge commit 有 2 个 parent
+- [ ] worktree 已清理（`wt remove` + `git branch -D`）
+- [ ] issue 已关闭（`gh issue close` 已执行）
+
 ## 汇报格式
 
 - **状态**：DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
@@ -84,8 +98,8 @@
 - **Issue 关闭**：已关闭（gh issue close [number] 已执行）/ 未关闭（原因）
 
 **状态说明**：
-- DONE — 全部完成，全量测试通过，无误
-- DONE_WITH_CONCERNS — 完成了但全量测试有非你的改动引起的失败（具体说明哪些是预存的）
+- DONE — 全部完成：全量测试通过 + 已 commit + 已本地 merge develop + merge 验证通过 + worktree 已清理 + issue 已关闭。六项缺一不可
+- DONE_WITH_CONCERNS — 完成了但全量测试有非你的改动引起的失败（具体说明哪些是预存的）。**其他五项仍然必须完成**
 - BLOCKED — 无法完成，需要帮助
 - NEEDS_CONTEXT — 缺少信息无法继续
 ```

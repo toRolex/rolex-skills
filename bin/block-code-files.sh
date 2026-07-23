@@ -4,8 +4,9 @@
 
 INPUT=$(cat)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODES_DIR="$SCRIPT_DIR/modes"
 TTY_ID=$(tty 2>/dev/null | tr -c 'a-zA-Z0-9' '_' || echo "unknown")
-MODE_FILE="$SCRIPT_DIR/current-mode-$TTY_ID"
+MODE_FILE="$MODES_DIR/current-mode-$TTY_ID"
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 [ -z "$FILE_PATH" ] && exit 0

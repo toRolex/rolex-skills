@@ -205,6 +205,16 @@ gh release view vX.Y.Z --json name,tagName          # release 已发布
 
 完成标志：所有五项检查均返回预期结果。
 
+### 14. 清理 release branch
+
+```bash
+/clean-branches
+```
+
+通过 `/clean-branches` 清理已合并的 `release/X.Y.Z` 本地和远端分支。
+
+完成标志：已合并的 release branch 已从本地和远端移除。
+
 ## 参考
 
 - **权威来源**：git tag 是规范的版本号；版本文件只是镜像。**Tag 必须始终指向 `origin/main` 上的 commit**，绝不能指向 release branch、本地 `main` 或 develop。**`origin/main` 上的每一个 commit 都必须有 tag**——main 始终处于已打 tag、可发布的状态。
