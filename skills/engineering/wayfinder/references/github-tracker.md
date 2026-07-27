@@ -4,42 +4,24 @@
 
 SKILL.md 要求先探测 tracker 暴露的原生关系能力。本文件只给**创建接线**用的规范——探测与故障兜底不重复。
 
+> 需要 gh ≥ 2.55 才支持 `--add-sub-issue` / `--add-blocked-by`。旧版本需要走 GraphQL `addSubIssue` / `addBlockedBy` mutation + `gh issue view <number> --json id` 取 Node ID。
+
 ## 创建 Sub-issue
 
 ```bash
-gh api graphql -f query='
-mutation($issueId: ID!, $subIssueId: ID!) {
-  addSubIssue(input: { issueId: $issueId, subIssueId: $subIssueId }) {
-    issue { number }
-    subIssue { number }
-  }
-}
-' -f issueId="$PARENT_ID" -f subIssueId="$CHILD_ID"
+gh issue edit <父号> --add-sub-issue <子号>
 ```
 
 ## 创建 Blocked-by
 
 ```bash
-gh api graphql -f query='
-mutation($issueId: ID!, $blockingIssueId: ID!) {
-  addBlockedBy(input: { issueId: $issueId, blockingIssueId: $blockingIssueId }) {
-    issue { number }
-  }
-}
-' -f issueId="$BLOCKED_ID" -f blockingIssueId="$BLOCKER_ID"
+gh issue edit <被阻塞号> --add-blocked-by <阻塞者号>
 ```
 
-**参数方向容易反**：`blockingIssueId` 是**阻塞者**（更早完成的 ticket），不是被阻塞的 ticket。Schema 写得清楚但容易记错。
+**参数方向容易反**：第二个数是**阻塞者**（更早完成的 ticket），不是被阻塞的 ticket。
 
-## 取 GraphQL Node ID
-
-两个 mutation 都要的是 GraphQL 全局 ID（`I_kwDO...` 形式），不是 issue 编号 `#363`。
-
-```bash
-gh issue view <number> --json id
-```
+反向 `blocking` 边会自动建立。
 
 ## 不要做
 
-- 不要用 `gh issue edit --add-blocked-by`——那是 gh CLI 的旧接口，行为与 GraphQL `addBlockedBy` 不一致；统一用上面的 GraphQL mutation。
 - 不要在 shell heredoc 里写 issue body——反引号、`$()`、f-string 都会被 zsh 解释掉。改用脚本 + `--body-file`。
