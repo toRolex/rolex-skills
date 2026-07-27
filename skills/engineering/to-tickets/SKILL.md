@@ -70,7 +70,7 @@ issue tracker 和 triage 标签词汇应该已经提供给你——如果没有�
 发布已批准的 tickets。**方式**取决于 `/setup-rolex-skills` 配置的 tracker——tickets 本身是一样的，只有阻塞边的形式不同：
 
 - **本地文件** → 每个 ticket 一个文件放在 `.scratch/<feature-slug>/issues/<NN>-<slug>.md` 下，从 `01` 开始按依赖顺序编号（阻塞者优先）。每个文件的"被阻塞者"列出它依赖的编号/标题。使用下面的每 ticket 文件模板——每个文件一个 ticket，永远不要一个合并文件。
-- **真实 issue tracker（GitHub、Linear...）** → 按依赖顺序发布一个 issue 对应一个 ticket（阻塞者优先），这样每个 ticket 的阻塞边可以引用真实标识符。在 tracker 原生支持的地方使用原生阻塞/子 issue 关系；否则在每个 ticket 的"被阻塞者"中设置阻塞 issue。除非另有指示，应用 `ready-for-agent` triage 标签——tickets 默认就是 agent 可接取的。
+- **真实 issue tracker（GitHub、Linear...）** → 按依赖顺序发布一个 issue 对应一个 ticket（阻塞者优先），这样每个 ticket 的阻塞边可以引用真实标识符。在 tracker 原生支持的地方使用原生阻塞/子 issue 关系；否则在每个 ticket 的"被阻塞者"中设置阻塞 issue。除非另有指示，应用 `ready-for-agent` triage 标签——tickets 默认就是 agent 可接取的。对 GitHub 额外用 `gh issue edit <父号> --add-sub-issue <子号>,...` 挂子 issue，`gh issue edit <子号> --add-blocked-by <阻塞者号>` 设阻塞关系（自动建立反向 blocking）。
 
 处理**前沿**：所有阻塞者都已完成的任何 ticket。对于纯线性链意味着从上到下。
 
@@ -103,5 +103,7 @@ issue tracker 和 triage 标签词汇应该已经提供给你——如果没有�
 ## 被阻塞者
 
 - 对每个阻塞 ticket 的引用，或"无——可以立即开始"。
+
+> **GitHub Issues 注意：** body 中的 `## 被阻塞者` 段是辅助文档，GitHub 的原生 blocked-by 关系是主机制。两个都保留，不冲突。
 
 在两种形式中，避免具体的文件路径或代码片段——它们很快过时。例外：如果原型产生了比散文更精确地编码决策的片段（状态机、reducer、schema、类型形状），内联它并简要注明来自原型。裁剪到决策丰富的部分——不是工作演示，只是重要的部分。

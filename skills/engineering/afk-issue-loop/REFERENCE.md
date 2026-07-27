@@ -113,10 +113,106 @@ claude 初始化需要时间，不能立即 wait：
 
 ```bash
 sleep 15                         # 等 claude 加载插件和 skill
-herdr wait agent-status $WS:pX --status idle --timeout 300000
-herdr pane run $WS:pX "prompt"   # 确认 idle 后再发指令
-herdr wait agent-status $WS:pX --status idle --timeout 300000
-result=$(herdr pane read $WS:pX --source recent-unwrapped)
+herdr agent wait <agent名称> --until idle --timeout 300000
+# 注意：命令是 `herdr agent wait <目标> --until <状态>`，不是 `herdr wait agent-status`
 ```
 
-发指令用 `pane run`，不是 `agent send`（`send` 只粘贴不回车）。Wait 用 pane ID（`$WS:pX`），不用命名 target。已完成 agent 用 `herdr pane close $WS:pX` 关闭腾位置。
+### 发送指令（两种方式）
+
+**方式 A（推荐）：`herdr pane send-text + send-keys Enter`**
+
+```bash
+herdr pane send-text $WS:pX "完整prompt文本"
+sleep 1
+herdr pane send-keys $WS:pX Enter
+```
+
+**方式 B：`herdr agent prompt`**
+
+```bash
+herdr agent prompt <agent名称> "prompt文本" --wait --timeout 600000
+```
+注意：**不要加 `&` 后台化**，必须前台等待提交完成。agent prompt 等待的是 idle 状态（Claude Code 完成后回到 idle 不是 done）。
+
+`herdr pane run` 在某些场景下只粘贴不提交，推荐优先使用上面的显式方式。
+
+### 发后验证（新增——必须执行）
+
+下发指令后 10s 内验证 agent 确实开始工作：
+
+```bash
+sleep 5
+herdr agent list | grep <agent名称>
+# 确认:
+# - agent_status = working（不是 idle）
+# - terminal_title 变为实现标题（不是 "Claude Code"）
+# - state_change_seq 有变化
+# - 可选：cwd 显示已在 worktree 内
+```
+
+验证不通过（agent 仍 idle、标题未变）→ 重试发送，可换 `send-text + Enter` 方式。
+
+### 轮询协议（新增——必须执行）
+
+herdr agent 完成后回到 idle 状态但**不会通知控制者**。控制者必须主动轮询。
+
+**基础轮询**（每 5 分钟执行）：
+
+```bash
+herdr agent list | grep <agent名称>
+# 重点检查 agent_status 和 terminal_title
+```
+
+**轮询时机**：
+- 简单 issue（单文件、机械操作）：dispatch 后 2-3 分钟开始轮询
+- 中等问题（1-3 文件）：dispatch 后 5-10 分钟开始轮询
+- 复杂 issue（跨模块、>3 文件）：dispatch 后 10-20 分钟开始轮询
+
+**发现完成后的验证**：
+
+```bash
+# 1. 读取 agent 最终输出
+herdr agent read <agent名称> --source recent-unwrapped | tail -80
+
+# 2. 检查汇报格式：应有 DONE 状态、测试结果、merge commit、issue 关闭
+# 3. 外部验证三项：
+gh issue view <id> --json state           # → CLOSED
+git log --oneline develop -5              # → 含对应 merge commit
+wt list | grep <issue-id>                 # → 无匹配（worktree 已清理）
+
+# 4. 完成 → 关闭 pane，解锁依赖
+herdr pane close $WS:pX
+```
+
+**关闭所有未验证 agent 的 pane**：issue 全部完成后，执行 `herdr pane list | grep "issue-"` 确认无残留。
+
+### 场景：Seam 确认等待
+
+agent 需要 seam 确认时会等待控制者输入。此时 agent 状态为 idle 但 terminal_title 显示正在等待。控制者读取输出后发送确认：
+
+```bash
+herdr pane read <pane> --source recent-unwrapped | tail -30
+# 看到 seam 列表后确认
+herdr pane send-text <pane> "Seam 确认通过。开始 TDD 实现。"
+sleep 0.5
+herdr pane send-keys <pane> Enter
+```
+
+确认后 agent 从 idle 变为 working。如果 10s 后仍 idle，重试确认发送。
+
+---
+
+## 完整 dispatch 流程（herdr 模式速查）
+
+```
+1. pane split --direction right       # 创建 pane
+2. agent start <名称> --kind claude   # 启动 agent
+3. sleep 15                           # 等待初始化
+4. agent wait <名称> --until idle     # 确认就绪
+5. pane run / send-text+Enter         # 发送 prompt
+6. sleep 5 + agent list 验证          # 确认 agent 开始工作
+7. 5分钟后开始轮询                     # 主动检查完成
+8. agent read + 外部验证              # 验证完成
+9. pane close                         # 关闭 pane
+10. 解锁依赖, dispatch 被阻塞的 issue
+```

@@ -86,12 +86,19 @@ agent 在该 worktree 中按 implementer-prompt 流程工作：seam 确认 → T
 流程与 subagent 模式完全一致（seam 确认 → TDD → 全量测试 → commit → 本地 merge → 清理 worktree → 关 issue），区别只在于交付方式：
 
 1. 按 `/herdr-instances` 布局规则在**当前 tab** 创建 pane
-2. 启动 agent，按 implementer-prompt 模板构造 prompt（工作目录段替换为自行 `wt switch -c <前缀>/<id>-<名称> -b develop` 的版本），通过 `herdr pane run` 下发
+2. 启动 agent，按 implementer-prompt 模板构造 prompt（工作目录段替换为自行 `wt switch -c <前缀>/<id>-<名称> -b develop` 的版本），通过 `herdr pane run` 或 `send-text + Enter` 下发
+3. **发后验证**：下发后 10s 内检查 agent 是否真的开始工作（`agent list | grep <名称>` 确认 `agent_status=working` 且 title 变为实现标题）。未开始则重试。
+4. **轮询协议**（关键）：agent 完成不会通知控制者。每 5 分钟（或预期完成时间后）执行轮询，见 REFERENCE.md#控制者轮询协议
 
 **踩过的坑**（详见 REFERENCE.md）：
 - agent start 必须指定 `--cwd "$(pwd)"`，否则 agent 工作目录为根目录
 - agent start 必须指定 `--env "PATH=$PATH"`，否则 nvm 管理的 node 等工具找不到
 - 新启动的 agent 需先 `sleep 15` 等待 claude 初始化，再 `wait --status idle`
+- **`pane run` 在某些场景下只粘贴不提交**——如果 agent 长时间 idle 无反应，改用 `send-text + Enter`
+- **`agent prompt` 加 `&` 后台化会导致提交失败**——必须前台执行或使用 `send-text + Enter`
+- **herdr agent 不会主动通知完成**——控制者必须主动轮询
+- **控制者必须验证 agent 确实开始工作**——下发后 10s 内检查 agent 状态，超时或 idle 说明发布失败
+- **`herdr agent wait` 命令是 `herdr agent wait <目标> --until idle`**，不是 `herdr wait agent-status`
 
 ---
 
