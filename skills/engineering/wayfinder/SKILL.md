@@ -40,7 +40,7 @@ Map 是本 repo issue tracker 上的一个 issue，标注 `wayfinder:map`——�
 
 Map 是一个**索引**，不是存储。它列出已做出的决策并指向持有细节的 tickets；一个决策只存在一个地方——它的 ticket——所以 map 永远不会重述它，只做摘要和链接。
 
-**Map、它的子 tickets、阻塞关系和 frontier 查询具体位于 tracker 的哪个位置，取决于 tracker 类型。** Issue tracker 应该已经提供给你——如果没有，运行 `/setup-rolex-skills`。关于此 repo 如何表达它们，请查阅 tracker 文档的"Wayfinding operations"部分。如果没有提供 tracker，默认使用本地 markdown tracker。
+**Map、它的子 tickets、阻塞关系和 frontier 查询具体位于 tracker 的哪个位置，取决于 tracker 类型。** Tracker 特定的接线细节（原生关系 API、label 命名约定、frontier 查询写法）见 `references/<tracker>.md`。**Charting 之前**先用一次小探测确认 tracker 的原生关系能力（sub-issue / blocked-by / 自定义字段），再批量发 ticket——避免走 body 文字降级；如果只有 body 约定可用，停下来跟用户确认走降级方案。
 
 ### Map 正文
 
@@ -86,6 +86,8 @@ Map 是一个**索引**，不是存储。它列出已做出的决策并指向持
 
 阻塞使用 tracker 的**原生**依赖关系——这至关重要，因为它使 frontier 在 tracker 自己的 UI 中_可见_，这样人类不需要打开 map 就能看到什么可以领取。只有在 tracker 缺乏原生阻塞时才回退到正文约定。一个 ticket 在阻塞它的所有 ticket 都关闭时**解除阻塞**；**frontier** 是打开的、未阻塞的、未认领的子 issue——已知的边缘。
 
+**完成标准**：每个 chart 出来的 ticket 都能在 tracker UI 上查到 frontier（= 已勾选 sub-issue 关系 + 阻塞边），而不是只在 map 的 Decisions so far 文本里或 issue body 文字里看到"Blocks: #N"。Tracker 原生 API / CLI / UI 任一路径都可以，但接线**必须落地到原生关系**，不能停在"我在 body 里写了 Blocks: #N"这种降级方案上。
+
 答案不是正文的一部分——它在解决时记录（见[通过 map 工作](#通过-map-工作)）。解决 ticket 时创建的资产从 issue 链接，而不是粘贴进来。
 
 ## Ticket 类型
@@ -129,7 +131,12 @@ Map 的 **Not yet specified** 部分就是记录这个模糊视图的地方：�
 1. **命名 destination。** 运行 `/grilling` 和 `/domain-modeling` 会话以确定此 map 在找什么——spec、决策或变更。Destination 固定了 scope，所以先确定它。
 2. 绘制 frontier。** 再次 grilling，这次**广度优先**：在整个空间内展开而不是深入任何一个线程，浮现开放的决策和现在可以迈出的第一步。**如果没有浮现迷雾**——通往 destination 的路已经清晰，整个旅程小到一个会话——你不需要 map。停下来问用户想怎么继续。
 3. **创建 map**（标签 `wayfinder:map`）：填写 Destination 和 Notes，Decisions so far 为空，将迷雾勾勒到 **Not yet specified** 中。
-4. **创建你现在可以明确的 tickets** 作为 map 的子 issue——然后在**第二轮**中连接阻塞边（issue 需要先有 id 才能互相引用）。连接将它们排序为 frontier 和被阻塞；所有你现在还不能明确的内容留在迷雾中——即 **Not yet specified** 部分。
+4. **创建 tickets 并连接阻塞边**。顺序：
+   1. **探测**：用一次小的 GraphQL query（或其他 tracker 等价手段）确认 tracker 暴露的原生关系能力（sub-issue / blocked-by / 自定义字段）。如果只有 body 约定可用，停下来跟用户确认走降级。详见 `references/<tracker>.md`。
+   2. **批量发**：用脚本（不是 shell heredoc）批量创建 map + 子 ticket，body 写到临时文件再用 `--body-file`，避免转义陷阱。
+   3. **一次接线**：拿到全部 id 后，一次性调用原生 mutation 把 sub-issue + blocked-by 接好。**完成标准**：跑一次 GraphQL query 列出子 ticket 的 `blockedBy`，确认真阻塞关系已落库。
+
+   接线将它们排序为 frontier 和被阻塞；所有你现在还不能明确的内容留在迷雾中——即 **Not yet specified** 部分。
 5. 停止——绘制 map 是一个会话的工作；不要同时解决 tickets。
 
 ### 通过 Map 工作
