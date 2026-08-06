@@ -1,44 +1,44 @@
-# Design It Twice
+# Design It Twice（设计两遍）
 
-When the user wants to explore alternative interfaces for a chosen deepening candidate, use this parallel sub-agent pattern. Based on "Design It Twice" (Ousterhout) — your first idea is unlikely to be the best.
+当用户想为选定的深化候选探索替代 interface 时，使用这种并行 sub-agent 模式。基于 "Design It Twice"（Ousterhout）——你的第一个想法不太可能是最好的。
 
-Uses the vocabulary in [SKILL.md](SKILL.md) — **module**, **interface**, **seam**, **adapter**, **leverage**.
+使用 [SKILL.md](SKILL.md) 中的词汇——**module**、**interface**、**seam**、**adapter**、**leverage**。
 
-## Process
+## 流程
 
-### 1. Frame the problem space
+### 1. 框定问题空间
 
-Before spawning sub-agents, write a user-facing explanation of the problem space for the chosen candidate:
+在启动 sub-agents 之前，为选定的候选写一份面向用户的、关于问题空间的说明：
 
-- The constraints any new interface would need to satisfy
-- The dependencies it would rely on, and which category they fall into (see [DEEPENING.md](DEEPENING.md))
-- A rough illustrative code sketch to ground the constraints — not a proposal, just a way to make the constraints concrete
+- 任何新 interface 需要满足的约束
+- 它依赖什么，以及它们属于哪个类别（见 [DEEPENING.md](DEEPENING.md)）
+- 一个粗略的示例代码草图，让约束落地——不是 proposal，只是让约束变得具体的方式
 
-Show this to the user, then immediately proceed to Step 2. The user reads and thinks while the sub-agents work in parallel.
+把它展示给用户，然后立即进入步骤 2。sub-agents 并行工作时，用户阅读并思考。
 
-### 2. Spawn sub-agents
+### 2. 启动 sub-agents
 
-Spawn 3+ sub-agents in parallel using the Agent tool. Each must produce a **radically different** interface for the deepened module.
+使用 Agent 工具并行启动 3+ 个 sub-agents。每个都必须为深化后的模块产出一个**截然不同**的 interface。
 
-Prompt each sub-agent with a separate technical brief (file paths, coupling details, dependency category from [DEEPENING.md](DEEPENING.md), what sits behind the seam). The brief is independent of the user-facing problem-space explanation in Step 1. Give each agent a different design constraint:
+为每个 sub-agent 提供单独的技术 brief（文件路径、coupling 细节、来自 [DEEPENING.md](DEEPENING.md) 的依赖类别、seam 后面是什么）。这个 brief 独立于步骤 1 中面向用户的问题空间说明。给每个 agent 一个不同的设计约束：
 
-- Agent 1: "Minimize the interface — aim for 1–3 entry points max. Maximise leverage per entry point."
-- Agent 2: "Maximise flexibility — support many use cases and extension."
-- Agent 3: "Optimise for the most common caller — make the default case trivial."
-- Agent 4 (if applicable): "Design around ports & adapters for cross-seam dependencies."
+- Agent 1："最小化 interface——最多瞄准 1–3 个入口点。最大化每个入口点的 leverage。"
+- Agent 2："最大化灵活性——支持许多用例和扩展。"
+- Agent 3："为最常见的调用者优化——让默认情况变得微不足道。"
+- Agent 4（如果适用）："围绕 ports & adapters 设计，以处理跨 seam 的依赖。"
 
-Include both [SKILL.md](SKILL.md) vocabulary and CONTEXT.md vocabulary in the brief so each sub-agent names things consistently with the architecture language and the project's domain language.
+把 [SKILL.md](SKILL.md) 词汇和 CONTEXT.md 词汇都包含在 brief 中，这样每个 sub-agent 的命名都与架构语言和项目的领域语言一致。
 
-Each sub-agent outputs:
+每个 sub-agent 输出：
 
-1. Interface (types, methods, params — plus invariants, ordering, error modes)
-2. Usage example showing how callers use it
-3. What the implementation hides behind the seam
-4. Dependency strategy and adapters (see [DEEPENING.md](DEEPENING.md))
-5. Trade-offs — where leverage is high, where it's thin
+1. Interface（类型、方法、参数——外加不变量、排序约束、错误模式）
+2. 展示调用者如何使用它的用法示例
+3. implementation 在 seam 后面隐藏了什么
+4. 依赖策略和 adapters（见 [DEEPENING.md](DEEPENING.md)）
+5. 权衡——leverage 高在哪里、薄在哪里
 
-### 3. Present and compare
+### 3. 呈现并比较
 
-Present designs sequentially so the user can absorb each one, then compare them in prose. Contrast by **depth** (leverage at the interface), **locality** (where change concentrates), and **seam placement**.
+按顺序呈现设计，让用户逐个吸收，然后用文字比较它们。按 **depth**（interface 处的 leverage）、**locality**（变更集中在哪里）和 **seam 放置**进行对比。
 
-After comparing, give your own recommendation: which design you think is strongest and why. If elements from different designs would combine well, propose a hybrid. Be opinionated — the user wants a strong read, not a menu.
+比较之后，给出你自己的推荐：你认为哪个设计最强，为什么。如果不同设计的元素能很好地结合，提出一个混合方案。要有主见——用户要的是一个强判断，不是一个菜单。

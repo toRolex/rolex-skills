@@ -1,6 +1,6 @@
 ---
 name: wayfinder
-description: 规划一大块工作——超过一个 agent 会话能容纳的体量——将其作为 issue tracker 上调研 ticket 的共享地图，然后逐个解决，直到通往目的地的道路清晰可见。
+description: 规划一大块工作——超过一个 agent 会话能容纳的体量——将其作为 issue tracker 上决策 ticket 的共享地图，然后逐个解决，直到通往目的地的道路清晰可见。
 disable-model-invocation: true
 ---
 
@@ -22,7 +22,7 @@ disable-model-invocation: true
 > | grilling | grilling（不翻译，skill 名称） |
 > | research / prototype / task | 调研 / 原型 / 任务 |
 
-一个模糊的想法到来了——太大，一个 agent 会话装不下，而且笼罩在迷雾中：从这里到 **destination** 的路还看不到。Wayfinding 是关于找到那条路，而不是冲向 destination。本 skill 将路径绘制为 repo issue tracker 上的**共享地图（map）**，然后一次一个地处理 tickets，直到路线清晰。
+一个模糊的想法到来了——太大，一个 agent 会话装不下，而且笼罩在迷雾中：从这里到 **destination** 的路还看不到。Wayfinding 是关于找到那条路，而不是冲向 destination。本 skill 将路径绘制为 repo issue tracker 上的**共享地图（map）**，然后一次一个地处理它的 **decision tickets**——解决即决策、而非要执行的构建切片——直到路线清晰。
 
 每个工作的 destination 不同，命名它是绘制的第一个动作——它塑造了每个 ticket。它可能是一个要交付和迭代的 spec、一个在计划开始前需要锁定的决策、或一个像数据结构迁移那样原地进行的变更。Map 是领域无关的——工程工作、课程内容、任何适合这个形状的东西。
 
@@ -32,7 +32,7 @@ Wayfinder 默认是**计划**性的：每个 ticket 解决一个决策，当路�
 
 ## 用名称引用
 
-每个 map 和 ticket 都是一个 issue，所以它有一个**名称**——它的标题。在人类阅读的所有内容中——叙述、map 的 Decisons so far——用名称引用它，永远不要用裸 id、编号或 slug。一堆 `#42、#43、#44` 难以阅读；名称一眼就能看明白。id 和 URL 不会消失——一个名称包装了它的链接——但它们*在*名称内部，不能代替名称。
+每个 map 和 ticket 都是一个 issue，所以它有一个**名称**——它的标题。在人类阅读的所有内容中——叙述、map 的 Decisions so far——用名称引用它，永远不要用裸 id、编号或 slug。一堆 `#42、#43、#44` 难以阅读；名称一眼就能看明白。id 和 URL 不会消失——一个名称包装了它的链接——但它们*在*名称内部，不能代替名称。
 
 ## Map
 
@@ -94,8 +94,8 @@ Map 是一个**索引**，不是存储。它列出已做出的决策并指向持
 
 每个 ticket 要么是 **HITL**——人在循环中，与能为自己说话的人一起工作——要么是 **AFK**（离线自主），由 agent 单独驱动。HITL ticket 只能通过现场交流解决；agent 从不代表人类一方回答问题（一个自己回答自己问题的 grilling agent 已经违背了这一点）。
 
-- **Research（调研）**（AFK）：阅读文档、第三方 API 或知识库等本地资源。创建 markdown 摘要作为链接资产。当需要当前工作目录之外的知识时使用。
-- **Prototype（原型）**（HITL）：通过制作cheap、rough、concrete的工件——提纲、粗略想法、桩代码、或通过 /prototype skill 生成的 UI/逻辑代码——来提高讨论的保真度。链接原型作为资产。当"how should it look"或"how should it behave"是关键问题时使用。
+- **Research（调研）**（AFK）：阅读文档、第三方 API 或知识库等本地资源，以浮现决策所等待的事实。由 `/research` **subagent** 解决。当需要当前工作目录之外的知识时使用。
+- **Prototype（原型）**（HITL）：通过制作廉价、粗略、具体的工件——提纲、粗略想法、桩代码、或通过 /prototype skill 生成的 UI/逻辑代码——来提高讨论的保真度。链接原型作为资产。当"how should it look"或"how should it behave"是关键问题时使用。
 - **Grilling（访谈）**（HITL）：通过 /grilling 和 /domain-modeling skill 的对话，一次一个问题。默认情况。
 - **Task（任务）**（HITL 或 AFK）：在做出*决策*之前必须完成的动手工作——没有要决定、原型或调研的内容，但讨论被阻塞直到完成。注册服务以便判断它的 API、开通访问权限、移动数据以便看到它的形状。这是唯一种产出**执行方案**而非决策的类型——它通过识别要改什么、怎么改、波及范围来解除决策的阻塞。它的"解决"是交付一份精确的执行规范（影响文件列表、变更要点、风险、验收标准），**不是实际修改代码**。Agent 在能做到的地方独自驱动（AFK）；否则交给人类一个精确的检查清单（HITL）。当工作完成时解决；答案记录做了什么以及任何后续 tickets 依赖的结果事实（凭据位置、新 URL、行数）。
 
@@ -129,7 +129,7 @@ Map 的 **Not yet specified** 部分就是记录这个模糊视图的地方：�
 用户用一个模糊的想法调用。
 
 1. **命名 destination。** 运行 `/grilling` 和 `/domain-modeling` 会话以确定此 map 在找什么——spec、决策或变更。Destination 固定了 scope，所以先确定它。
-2. 绘制 frontier。** 再次 grilling，这次**广度优先**：在整个空间内展开而不是深入任何一个线程，浮现开放的决策和现在可以迈出的第一步。**如果没有浮现迷雾**——通往 destination 的路已经清晰，整个旅程小到一个会话——你不需要 map。停下来问用户想怎么继续。
+**2. 绘制 frontier。** 再次 grilling，这次**广度优先**：在整个空间内展开而不是深入任何一个线程，浮现开放的决策和现在可以迈出的第一步。**如果没有浮现迷雾**——通往 destination 的路已经清晰，整个旅程小到一个会话——你不需要 map。停下来问用户想怎么继续。
 3. **创建 map**（标签 `wayfinder:map`）：填写 Destination 和 Notes，Decisions so far 为空，将迷雾勾勒到 **Not yet specified** 中。
 4. **创建 tickets 并连接阻塞边**。顺序：
    1. **探测**：用一次小的 GraphQL query（或其他 tracker 等价手段）确认 tracker 暴露的原生关系能力（sub-issue / blocked-by / 自定义字段）。如果只有 body 约定可用，停下来跟用户确认走降级。详见 `references/<tracker>.md`。

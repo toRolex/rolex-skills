@@ -1,6 +1,6 @@
-# CONTEXT.md Format
+# CONTEXT.md 格式
 
-## Structure
+## 结构
 
 ```md
 # {Context Name}
@@ -22,18 +22,18 @@ A person or organization that places orders.
 _Avoid_: Client, buyer, account
 ```
 
-## Rules
+## 规则
 
-- **Be opinionated.** When multiple words exist for the same concept, pick the best one and list the others under `_Avoid_`.
-- **Keep definitions tight.** One or two sentences max. Define what it IS, not what it does.
-- **Only include terms specific to this project's context.** General programming concepts (timeouts, error types, utility patterns) don't belong even if the project uses them extensively. Before adding a term, ask: is this a concept unique to this context, or a general programming concept? Only the former belongs.
-- **Group terms under subheadings** when natural clusters emerge. If all terms belong to a single cohesive area, a flat list is fine.
+- **要有主见。** 当同一个概念存在多个词时，选出最好的一个，把其他的列在 `_Avoid_` 下面。
+- **定义保持精炼。** 最多一两句话。定义它是什么，不是它做什么。
+- **只包含对这个项目上下文特有的术语。** 通用的编程概念（timeouts、error types、utility patterns）不属于这里，即使项目大量使用它们。在添加术语之前问一问：这是这个上下文独有的概念，还是一个通用编程概念？只有前者才属于这里。
+- **当自然聚类出现时，把术语归组到子标题下。** 如果所有术语都属于一个内聚的领域，扁平列表也没问题。
 
-## Single vs multi-context repos
+## 单上下文与多上下文仓库
 
-**Single context (most repos):** One `CONTEXT.md` at the repo root.
+**单上下文（大多数仓库）：** 在仓库根目录放一个 `CONTEXT.md`。
 
-**Multiple contexts:** A `CONTEXT-MAP.md` at the repo root lists the contexts, where they live, and how they relate to each other:
+**多上下文：** 根目录的 `CONTEXT-MAP.md` 列出所有上下文、它们的位置以及它们之间的关系：
 
 ```md
 # Context Map
@@ -51,10 +51,10 @@ _Avoid_: Client, buyer, account
 - **Ordering ↔ Billing**: Shared types for `CustomerId` and `Money`
 ```
 
-The skill infers which structure applies:
+这个 skill 会推断应用哪种结构：
 
-- If `CONTEXT-MAP.md` exists, read it to find contexts
-- If only a root `CONTEXT.md` exists, single context
-- If neither exists, create a root `CONTEXT.md` lazily when the first term is resolved
+- 如果 `CONTEXT-MAP.md` 存在，读它来找到上下文
+- 如果只有根目录的 `CONTEXT.md` 存在，就是单上下文
+- 如果两者都不存在，在第一个术语被解决时惰性创建根目录的 `CONTEXT.md`
 
-When multiple contexts exist, infer which one the current topic relates to. If unclear, ask.
+当存在多个上下文时，推断当前主题与哪个相关。如果不清楚，就问。
