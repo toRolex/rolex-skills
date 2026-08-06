@@ -1,5 +1,17 @@
 # rolex-skills
 
+## 1.2.0
+
+### Minor Changes
+
+- fix: 校对 engineering skill 翻译，修复错译与漏译，补译全部附属文档
+  - 修复 diagnosing-bugs 日志标签句语义颠倒错译（带标签/未带标签主语反转）
+  - 补译 improve-codebase-architecture Explore 节 YAGNI 范围界定整段（含 `git log` 指令）
+  - 修复 wayfinder 决策 ticket 错译与定义子句漏译，清理残留英文（cheap/rough/concrete）
+  - 恢复 to-tickets 本地 ticket 模板占位符（`<NN> — <Ticket title>`）
+  - 统一 tdd/to-spec 标题译法与术语；修正 codebase-design/domain-modeling/prototype 硬译
+  - 补译 15 个附属文档（tdd/triage/codebase-design/domain-modeling/prototype/improve-codebase-architecture/setup-rolex-skills），技术术语保留英文
+
 ## 1.1.0
 
 ### Minor Changes
