@@ -5,17 +5,6 @@ argument-hint: "What will the next session be used for?"
 disable-model-invocation: true
 ---
 
-> **术语约定：**
-> | English | 中文 |
-> |---|---|
-> | handoff | handoff（不翻译） |
-> | agent | agent（不翻译） |
-> | session | session（不翻译） |
-> | workspace | workspace（不翻译） |
-> | artifact | artifact（不翻译） |
-> | skill | skill（不翻译） |
-> | argument | argument（不翻译） |
-
 撰写一份 handoff 文档，总结当前对话，以便新 agent 可以继续工作。将文档保存到用户操作系统的临时目录，而不是当前 workspace。
 
 在文档中包含"suggested skills"小节，推荐新 agent 应调用的 skill。

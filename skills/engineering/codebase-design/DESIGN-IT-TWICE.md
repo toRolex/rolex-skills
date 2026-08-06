@@ -1,6 +1,6 @@
 # Design It Twice（设计两遍）
 
-当用户想为选定的深化候选探索替代 interface 时，使用这种并行 sub-agent 模式。基于 "Design It Twice"（Ousterhout）——你的第一个想法不太可能是最好的。
+当用户想为选定的深化 candidate 探索替代 interface 时，使用这种并行 sub-agent 模式。基于 "Design It Twice"（Ousterhout）——你的第一个想法不太可能是最好的。
 
 使用 [SKILL.md](SKILL.md) 中的词汇——**module**、**interface**、**seam**、**adapter**、**leverage**。
 
@@ -8,7 +8,7 @@
 
 ### 1. 框定问题空间
 
-在启动 sub-agents 之前，为选定的候选写一份面向用户的、关于问题空间的说明：
+在启动 sub-agents 之前，为选定的 candidate 写一份面向用户的、关于问题空间的说明：
 
 - 任何新 interface 需要满足的约束
 - 它依赖什么，以及它们属于哪个类别（见 [DEEPENING.md](DEEPENING.md)）
@@ -18,7 +18,7 @@
 
 ### 2. 启动 sub-agents
 
-使用 Agent 工具并行启动 3+ 个 sub-agents。每个都必须为深化后的模块产出一个**截然不同**的 interface。
+使用 Agent 工具并行启动 3+ 个 sub-agents。每个都必须为深化后的 module 产出一个**截然不同**的 interface。
 
 为每个 sub-agent 提供单独的技术 brief（文件路径、coupling 细节、来自 [DEEPENING.md](DEEPENING.md) 的依赖类别、seam 后面是什么）。这个 brief 独立于步骤 1 中面向用户的问题空间说明。给每个 agent 一个不同的设计约束：
 
@@ -27,7 +27,7 @@
 - Agent 3："为最常见的调用者优化——让默认情况变得微不足道。"
 - Agent 4（如果适用）："围绕 ports & adapters 设计，以处理跨 seam 的依赖。"
 
-把 [SKILL.md](SKILL.md) 词汇和 CONTEXT.md 词汇都包含在 brief 中，这样每个 sub-agent 的命名都与架构语言和项目的领域语言一致。
+把 [SKILL.md](SKILL.md) 词汇和 CONTEXT.md 词汇都包含在 brief 中，这样每个 sub-agent 的命名都与 architecture 语言和项目的领域语言一致。
 
 每个 sub-agent 输出：
 

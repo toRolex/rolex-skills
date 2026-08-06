@@ -1,4 +1,4 @@
-# 超出范围知识库
+# Out of scope 知识库
 
 仓库中的 `.out-of-scope/` 目录保存被拒绝的功能请求的持久记录。它有两个目的：
 
@@ -73,9 +73,9 @@ interface ThemeConfig {
 
 - 检查请求是否与现有的 out-of-scope 概念匹配
 - 匹配依据概念相似性，而非关键词——"night theme" 匹配 `dark-mode.md`
-- 如果有匹配，把它浮现给维护者："这类似于 `.out-of-scope/dark-mode.md` —— 我们之前拒绝过，因为[理由]。你仍然这么认为吗？"
+- 如果有匹配，把它浮现给 maintainer："这类似于 `.out-of-scope/dark-mode.md` —— 我们之前拒绝过，因为[理由]。你仍然这么认为吗？"
 
-维护者可以：
+maintainer 可以：
 
 - **确认** —— 新 issue 被添加到现有文件的 "Prior requests" 列表中，然后关闭
 - **重新考虑** —— out-of-scope 文件被删除或更新，issue 走正常 triage 流程
@@ -89,7 +89,7 @@ interface ThemeConfig {
 
 流程：
 
-1. 维护者判定功能请求超出范围
+1. maintainer 判定功能请求 out of scope
 2. 检查是否存在匹配的 `.out-of-scope/` 文件
 3. 如果是：将新 issue 追加到 "Prior requests" 列表
 4. 如果否：用概念名称、决策、理由和第一个 prior request 创建一个新文件
@@ -98,7 +98,7 @@ interface ThemeConfig {
 
 ## 更新或删除 out-of-scope 文件
 
-如果维护者改变了他们对先前拒绝的概念的看法：
+如果 maintainer 改变了他们对先前拒绝的概念的看法：
 
 - 删除 `.out-of-scope/` 文件
 - skill 不需要重新打开旧 issue——它们是历史记录

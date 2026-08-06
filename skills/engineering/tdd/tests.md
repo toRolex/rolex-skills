@@ -2,7 +2,7 @@
 
 ## 好测试
 
-**集成风格（Integration-style）**：通过真实接口测试，而不是 mock 内部部分。
+**集成风格（Integration-style）**：通过真实 interface 测试，而不是 mock 内部部分。
 
 ```typescript
 // GOOD: Tests observable behavior
@@ -42,7 +42,7 @@ test("checkout calls paymentService.process", async () => {
 - 断言调用次数/顺序
 - 重构时行为没变但测试却失败
 - 测试名称描述 HOW 而不是 WHAT
-- 通过外部手段而非接口进行验证
+- 通过外部手段而非 interface 进行验证
 
 ```typescript
 // BAD: Bypasses interface to verify

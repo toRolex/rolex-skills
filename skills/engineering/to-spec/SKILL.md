@@ -6,17 +6,6 @@ disable-model-invocation: true
 
 # To Spec（生成 Spec）
 
-> **术语约定：** 以下关键术语保持固定译法，含英文源词以便对照：
->
-> | English | 中文 |
-> |---------|------|
-> | `spec` | spec |
-> | `seam` | seam |
-> | `issue tracker` | issue tracker |
-> | `triage` | triage |
-> | `out of scope` | 超出范围 |
-> | `prototype` | 原型 |
-
 本 skill 获取当前对话上下文和代码库理解，产出 spec（你可能称之为 PRD）。**不要**访谈用户——只综合你已经知道的。
 
 issue tracker 和 triage 标签词汇应该已经提供给你——如果没有，运行 `/setup-rolex-skills`。
@@ -67,7 +56,7 @@ issue tracker 和 triage 标签词汇应该已经提供给你——如果没有�
 
 **不要**包含具体的文件路径或代码片段。它们可能很快过时。
 
-例外：如果原型产生了比散文更精确地编码决策的片段（状态机、reducer、schema、类型形状），在相关决策内内联它并简要注明它来自原型。裁剪到决策丰富的部分——不是工作演示，只是重要的部分。
+例外：如果 prototype 产生了比散文更精确地编码决策的片段（状态机、reducer、schema、类型形状），在相关决策内内联它并简要注明它来自 prototype。裁剪到决策丰富的部分——不是工作演示，只是重要的部分。
 
 ## 测试决策
 
@@ -79,7 +68,7 @@ issue tracker 和 triage 标签词汇应该已经提供给你——如果没有�
 
 ## 超出范围
 
-此 spec 超出范围的内容的描述。
+此 spec out of scope 的内容的描述。
 
 ## 进一步备注
 

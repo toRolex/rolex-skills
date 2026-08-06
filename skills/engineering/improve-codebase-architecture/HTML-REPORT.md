@@ -1,6 +1,6 @@
 # HTML Report 格式
 
-架构审查被渲染为 OS 临时目录里的单个自包含 HTML 文件。Tailwind 和 Mermaid 都来自 CDN。Mermaid 可靠地处理图状图表；手工构建的 div 和内联 SVG 处理更具编辑性的视觉元素（质量图、截面）。把两者混用——不要什么都依赖 Mermaid，否则它会开始看起来千篇一律。
+architecture 审查被渲染为 OS 临时目录里的单个自包含 HTML 文件。Tailwind 和 Mermaid 都来自 CDN。Mermaid 可靠地处理图状图表；手工构建的 div 和内联 SVG 处理更具编辑性的视觉元素（质量图、截面）。把两者混用——不要什么都依赖 Mermaid，否则它会开始看起来千篇一律。
 
 ## Scaffold（脚手架）
 
@@ -35,13 +35,13 @@
 
 ## Header（头部区）
 
-仓库名、日期，以及一个紧凑的图例：实线框 = module，虚线 = seam，红色箭头 = leakage，厚深色框 = deep module。没有引言段落——直接进入候选项。
+仓库名、日期，以及一个紧凑的图例：实线框 = module，虚线 = seam，红色箭头 = leakage，厚深色框 = deep module。没有引言段落——直接进入 candidate。
 
-## 候选项卡片
+## candidate 卡片
 
-图表承担分量。文字稀疏、平实，使用（来自 `/codebase-design` skill 的）词汇表术语，不绕弯子。
+图表承担分量。文字稀疏、平实，使用（来自 `/codebase-design` skill 的）glossary 术语，不绕弯子。
 
-每个候选项是一个 `<article>`：
+每个 candidate 是一个 `<article>`：
 
 - **标题**——简短，命名这次深化（例如"折叠 Order intake 流水线"）。
 - **徽章行**——推荐强度（`Strong` = emerald，`Worth exploring` = amber，`Speculative` = slate），外加一个依赖类别标签（`in-process`、`local-substitutable`、`ports & adapters`、`mock`）。
@@ -56,7 +56,7 @@
 
 ## 图表模式
 
-选择适合候选项的模式。混用它们。不要让每个图表看起来都一样——多样性本来就是重点的一部分。
+选择适合 candidate 的模式。混用它们。不要让每个图表看起来都一样——多样性本来就是重点的一部分。
 
 ### Mermaid graph（依赖 / 调用流的主力）
 
@@ -101,11 +101,11 @@ Before：一棵渲染成嵌套盒子的函数调用树。After：同一棵树折
 
 ## Top recommendation 部分
 
-一张更大的卡片。候选项名称、一句话说明为什么、指向它卡片的锚点链接。就这些。
+一张更大的卡片。candidate 名称、一句话说明为什么、指向它卡片的锚点链接。就这些。
 
 ## 语气
 
-平实的英文、简洁——但架构名词和动词直接来自 `/codebase-design` skill。简洁不是漂移的借口。
+平实的英文、简洁——但 architecture 名词和动词直接来自 `/codebase-design` skill。简洁不是漂移的借口。
 
 **精确使用：** module、interface、implementation、depth、deep、shallow、seam、adapter、leverage、locality。
 
@@ -118,6 +118,6 @@ Before：一棵渲染成嵌套盒子的函数调用树。After：同一棵树折
 - "深化：一个 interface，一个测试的地方。"
 - "两个 adapter 为 seam 提供合理性：prod 用 HTTP，测试用 in-memory。"
 
-**收益要点**用词汇表术语命名收益：*"locality：bug 集中在同一个 module"*、*"leverage：一个 interface，N 个调用点"*、*"interface 收缩；implementation 吸收 wrapper"*。不要写 *"easier to maintain"* 或 *"cleaner code"*——这些术语不在词汇表里，也不配拥有自己的位置。
+**收益要点**用 glossary 术语命名收益：*"locality：bug 集中在同一个 module"*、*"leverage：一个 interface，N 个调用点"*、*"interface 收缩；implementation 吸收 wrapper"*。不要写 *"easier to maintain"* 或 *"cleaner code"*——这些术语不在 glossary 里，也不配拥有自己的位置。
 
-不要含糊其辞，不要清嗓子，不要"it's worth noting that…"。如果一个句子可以是要点，就把它写成要点。如果一条要点可以被删掉，就删掉它。如果一个术语不在 `/codebase-design` 词汇表里，在发明新词之前，先找一个在词汇表里的。
+不要含糊其辞，不要清嗓子，不要"it's worth noting that…"。如果一个句子可以是要点，就把它写成要点。如果一条要点可以被删掉，就删掉它。如果一个术语不在 `/codebase-design` glossary 里，在发明新词之前，先找一个在 glossary 里的。

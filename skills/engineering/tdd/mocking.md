@@ -9,13 +9,13 @@
 
 不要 mock：
 
-- 你自己的类/模块
+- 你自己的类/module
 - 内部协作者
 - 任何你掌控的东西
 
 ## 为可 mock 性而设计
 
-在系统边界处，设计易于 mock 的接口：
+在系统边界处，设计易于 mock 的 interface：
 
 **1. 使用依赖注入**
 
@@ -34,7 +34,7 @@ function processPayment(order) {
 }
 ```
 
-**2. 优先使用 SDK 风格接口而非通用 fetcher**
+**2. 优先使用 SDK 风格 interface 而非通用 fetcher**
 
 为每个外部操作创建专门的函数，而不是用一个带条件逻辑的通用函数：
 
