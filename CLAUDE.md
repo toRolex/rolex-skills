@@ -17,9 +17,10 @@ Skills 按 bucket 文件夹组织在 `skills/` 下：
 
 - `engineering/` — 日常编码工作
 - `productivity/` — 日常非编码工作流工具
+- `personal/` — Rolex 原创的个人 skill，覆盖 Git 运维到批量处理
 - `misc/` — 保留但很少使用，不推广
 
-`engineering/` 或 `productivity/` 中的每个 skill（**已推广的** buckets）必须在顶层 `README.md` 中有引用，并在 `.claude-plugin/plugin.json` 中有条目。`misc/` 中的 skill 不能出现在两者中的任何一个。
+`engineering/`、`productivity/` 或 `personal/` 中的每个 skill（**已推广的** buckets）必须在顶层 `README.md` 中有引用，并在 `.claude-plugin/plugin.json` 中有条目。`misc/` 中的 skill 不能出现在两者中的任何一个。
 
 顶层 `README.md` 中的每个 skill 条目必须将 skill 名称链接到其 `SKILL.md`。
 

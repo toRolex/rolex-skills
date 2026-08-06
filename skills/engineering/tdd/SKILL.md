@@ -35,6 +35,8 @@ A **seam** 是你进行测试的公共边界：在不窥探内部的情况下观
 
 问："公共接口是什么？我们应该测试哪些 seams？"
 
+当接口本身的形状存疑时——模块多深、seam 该在哪里、接口应该暴露什么——用 `/codebase-design` skill 获取词汇。它是 module、interface、depth、seam、adapter、leverage 和 locality 这些术语的共享来源，是一份参考来查阅，不是一个要运行的会话。
+
 ## Anti-patterns
 
 - **耦合实现** —— mock 内部协作者、测试私有方法、或通过旁路验证（查询数据库而不是使用接口）。典型特征：重构时测试失败，但行为并没有变化。

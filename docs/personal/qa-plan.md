@@ -6,7 +6,7 @@ cd rolex-skills
 bash scripts/link-skills.sh
 ```
 
-[源码](https://github.com/toRolex/rolex-skills/tree/main/skills/engineering/qa-plan)
+[源码](https://github.com/toRolex/rolex-skills/tree/main/skills/personal/qa-plan)
 
 ## 功能
 

@@ -124,6 +124,7 @@ flowchart LR
 | `/resolving-merge-conflicts` | 自动/手动 | 按意图（非文本）解决合并冲突 |
 | `/domain-modeling` | 自动/手动 | 打磨领域术语，更新 CONTEXT.md 和 ADR |
 | `/codebase-design` | 自动/手动 | 深度模块设计词汇（module/interface/depth/seam） |
+| `/wizard` | 自动/手动 | 生成交互式 bash wizard，引导人类完成只有他们能执行的步骤 |
 
 ### 日常效率
 
@@ -133,6 +134,9 @@ flowchart LR
 | `/grill-me` | 手动 | 无代码库的轻量拷问（/grill-with-docs 无状态版） |
 | `/handoff` | 自动 | 长会话压缩交接文档 |
 | `/teach` | 手动 | 跨 session 长期教学 |
+| `/to-questionnaire` | 手动 | 把无法独自回答的决策变成问卷，交给别人填写 |
+| `/wait-what` | 手动 | 上一条消息没讲清楚时的纠正 |
+| `/writing-for-agents` | 自动/手动 | 面向 agent 的文档写作参考（skill、AGENTS.md、CLAUDE.md） |
 
 ### 路由器
 

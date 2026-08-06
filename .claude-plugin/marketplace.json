@@ -29,17 +29,21 @@
         "./skills/engineering/domain-modeling",
         "./skills/engineering/codebase-design",
         "./skills/engineering/resolving-merge-conflicts",
-        "./skills/engineering/safe-pull",
-        "./skills/engineering/clean-branches",
-        "./skills/engineering/git-flow-conventions",
-        "./skills/engineering/publish-release",
-        "./skills/engineering/qa-plan",
-        "./skills/engineering/afk-issue-loop",
+        "./skills/engineering/wizard",
+        "./skills/personal/afk-issue-loop",
+        "./skills/personal/clean-branches",
+        "./skills/personal/git-flow-conventions",
+        "./skills/personal/publish-release",
+        "./skills/personal/qa-plan",
+        "./skills/personal/safe-pull",
         "./skills/productivity/grill-me",
         "./skills/productivity/grilling",
         "./skills/productivity/handoff",
         "./skills/productivity/teach",
-        "./skills/productivity/writing-great-skills"
+        "./skills/productivity/writing-great-skills",
+        "./skills/productivity/to-questionnaire",
+        "./skills/productivity/wait-what",
+        "./skills/productivity/writing-for-agents"
       ]
     }
   ]

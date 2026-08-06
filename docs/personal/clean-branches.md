@@ -6,7 +6,7 @@ cd rolex-skills
 bash scripts/link-skills.sh
 ```
 
-[源码](https://github.com/toRolex/rolex-skills/tree/main/skills/engineering/clean-branches)
+[源码](https://github.com/toRolex/rolex-skills/tree/main/skills/personal/clean-branches)
 
 ## 功能
 

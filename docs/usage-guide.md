@@ -2,7 +2,7 @@
 
 ## 一、Skill 全景
 
-源码按两大类组织：**engineering/** 和 **productivity/**。
+源码按三大类组织：**engineering/**、**productivity/** 和 **personal/**。
 
 ### 总览
 
@@ -12,11 +12,10 @@
 | **Main Chain** | 5 | `grill-with-docs` → `to-spec` → `to-tickets` → `implement` → `code-review` |
 | **On-ramps** | 3 | `wayfinder`, `triage`, `improve-codebase-architecture` |
 | **Standalone** | 6 | `prototype`, `diagnosing-bugs`, `research`, `resolving-merge-conflicts`, `domain-modeling`, `codebase-design` |
-| **Git Tools** | 4 | `safe-pull`, `clean-branches`, `git-flow-conventions`, `publish-release` |
 | **Productivity** | 5 | `grilling`, `grill-me`, `handoff`, `teach`, `writing-great-skills` |
+| **Personal（原创）** | 6 | `safe-pull`, `clean-branches`, `git-flow-conventions`, `publish-release`, `afk-issue-loop`, `qa-plan` |
 | **Router** | 1 | `ask-rolex` |
 | **Internal Engines** | 2 | `tdd`（implement 内部）、`grilling`（grill-with-docs 等内部）、`domain-modeling` / `codebase-design`（共享词汇层） |
-| **User-invoked extras** | 2 | `afk-issue-loop`, `qa-plan` |
 
 ### 详细清单
 
@@ -58,8 +57,11 @@ grill-with-docs → to-spec → to-tickets → implement → code-review
 | `diagnosing-bugs` | `/diagnosing-bugs` 或自动 | 严谨 Bug 诊断：建立 tight loop → 假设排序 → 修复 → 回归测试 |
 | `research` | `/research` 或自动 | 基于一手资料的研究，输出带引用的 Markdown |
 | `resolving-merge-conflicts` | 自动 | 按意图（而非文本）解决合并冲突 |
+| `wizard` | 自动 | 生成交互式 bash wizard，引导人类完成只有他们能执行的步骤（开通基础设施、设置凭据/CI secrets、一次性迁移） |
 
-#### Git 实用工具（原创）
+#### Personal（原创）
+
+Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 
 | Skill | 触发 | 职责 |
 |-------|------|------|
@@ -67,6 +69,8 @@ grill-with-docs → to-spec → to-tickets → implement → code-review
 | `clean-branches` | 自动 | 清理已合并的本地和远程分支，也清理残留 worktree |
 | `git-flow-conventions` | 自动 | Git Flow 分支命名、commit 格式、PR 流程、发版规范 |
 | `publish-release` | `/publish-release` 或自动 | 从 develop 发版：bump 版本、更新 changelog、打 tag、合并到 main |
+| `afk-issue-loop` | `/afk-issue-loop` | 遍历 `ready-for-agent` 的 issue，逐个分发给独立 agent 处理 |
+| `qa-plan` | `/qa-plan` | 从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue |
 
 #### Shared Vocabulary（共享词汇层）
 
@@ -84,13 +88,9 @@ grill-with-docs → to-spec → to-tickets → implement → code-review
 | `handoff` | `/handoff` | **Handoff** | 会话压缩：生成交接文档供新 Agent 接手 |
 | `teach` | `/teach` | **Learning** | 跨 session 的长期教学 workspace |
 | `writing-great-skills` | `/writing-great-skills` | **Reference** | 编写/编辑 Skill 的标准框架 |
-
-#### 用户手动调用的原创工具
-
-| Skill | 触发 | 职责 |
-|-------|------|------|
-| `afk-issue-loop` | `/afk-issue-loop` | 遍历 `ready-for-agent` 的 issue，逐个分发给独立 agent 处理 |
-| `qa-plan` | `/qa-plan` | 从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue |
+| `writing-for-agents` | `/writing-for-agents` 或自动 | **Reference** | 面向 agent 的文档写作：skill、AGENTS.md、CLAUDE.md |
+| `to-questionnaire` | `/to-questionnaire` | **Document** | 把无法独自回答的决策变成问卷，交给别人填写 |
+| `wait-what` | `/wait-what` | **Corrective** | 上一条消息没讲清楚时的纠正：重新讲一遍 |
 
 #### Router
 

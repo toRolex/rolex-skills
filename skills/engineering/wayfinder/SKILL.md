@@ -137,7 +137,8 @@ Map 的 **Not yet specified** 部分就是记录这个模糊视图的地方：�
    3. **一次接线**：拿到全部 id 后，一次性调用原生 mutation 把 sub-issue + blocked-by 接好。**完成标准**：跑一次 GraphQL query 列出子 ticket 的 `blockedBy`，确认真阻塞关系已落库。
 
    接线将它们排序为 frontier 和被阻塞；所有你现在还不能明确的内容留在迷雾中——即 **Not yet specified** 部分。
-5. 停止——绘制 map 是一个会话的工作；不要同时解决 tickets。
+5. **触发 research subagents。** 对你刚创建的每个 `research` ticket，启动一个 `/research` subagent 并行解决它，把发现捕获到一个一次性的 `research/<name>` 分支上，从 ticket 留一个上下文指针。
+6. 停止——绘制 map 是一个会话的工作；它不手工解决任何东西。
 
 ### 通过 Map 工作
 

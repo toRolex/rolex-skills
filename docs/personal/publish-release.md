@@ -6,7 +6,7 @@ cd rolex-skills
 bash scripts/link-skills.sh
 ```
 
-[源码](https://github.com/toRolex/rolex-skills/tree/main/skills/engineering/publish-release)
+[源码](https://github.com/toRolex/rolex-skills/tree/main/skills/personal/publish-release)
 
 ## 功能
 
