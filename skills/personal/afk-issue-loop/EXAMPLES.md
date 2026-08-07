@@ -18,7 +18,12 @@ $ gh issue list --label ready-for-agent --state open
 ```
 用户输入：/afk-issue-loop
 
-Agent 执行 gh issue list，展示 3 个 issue，用户确认。
+Agent 先执行分支模型检测：
+  git branch -a | grep -Eq '(^|[[:space:]/])develop$' && TARGET_BRANCH=develop || TARGET_BRANCH=main
+  # 本示例仓库有 develop 分支 → TARGET_BRANCH=develop（Git flow）
+  # 若只有 main → TARGET_BRANCH=main（trunk-based，不新建 develop）
+
+然后执行 gh issue list，展示 3 个 issue，用户确认。
 ```
 
 ### 阶段 2：逐 issue 实现
@@ -26,33 +31,33 @@ Agent 执行 gh issue list，展示 3 个 issue，用户确认。
 **Issue #42**（涉及 2 个文件，用 `sonnet`）：
 
 ```
-wt switch -c feature/42-add-verbose-flag -b develop
+wt switch -c feature/42-add-verbose-flag -b ${TARGET_BRANCH}
 
 分派 Agent(sonnet, general-purpose)，prompt 注入：
 - issue #42 的 body
 - CONTEXT.md（领域术语：command/flag/logger）
 - 工作目录路径
 
-agent 按流程：确认 seam → TDD → 全量测试 → commit → `wt merge develop --no-ff --no-squash` → 关闭 issue
+agent 按流程：确认 seam → TDD → 全量测试 → commit → `wt merge ${TARGET_BRANCH} --no-ff --no-squash` → 关闭 issue
 agent 汇报 DONE，控制者检查依赖图。
 ```
 
 **Issue #43**（涉及 4 个文件，用 `opus`）：
 
 ```
-wt switch -c feature/43-wire-logger -b develop
+wt switch -c feature/43-wire-logger -b ${TARGET_BRANCH}
 
 分派 Agent(opus, general-purpose)，同上流程。
 agent 汇报 DONE_WITH_CONCERNS："logger 的接口有些不一致，但不影响功能"
-确认是观察性疑虑，agent 已自行 `wt merge develop --no-ff --no-squash` 到 develop 并清理 worktree。
+确认是观察性疑虑，agent 已自行 `wt merge ${TARGET_BRANCH} --no-ff --no-squash` 到 ${TARGET_BRANCH} 并清理 worktree。
 ```
 
 **Issue #44**（涉及 2 个文件，用 `sonnet`）：
 
 ```
-wt switch -c feature/44-verbose-output -b develop
+wt switch -c feature/44-verbose-output -b ${TARGET_BRANCH}
 
-分派 Agent，实现，TDD → 全量测试通过 → `wt merge develop --no-ff --no-squash` → 关闭 issue。
+分派 Agent，实现，TDD → 全量测试通过 → `wt merge ${TARGET_BRANCH} --no-ff --no-squash` → 关闭 issue。
 ```
 
 ### 阶段 3：QA

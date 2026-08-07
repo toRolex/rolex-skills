@@ -1,15 +1,15 @@
 ---
 name: afk-issue-loop
-description: 遍历标记为 ready-for-agent 的 GitHub issue，将每个 issue 分派到隔离 git worktree 中的全新上下文的子 agent。所有 issue 完成后，提醒用户手动运行 code review 或 QA。当用户希望将 AFK agent 用于 issue、提到 "Ralph loop"、"夜班"、"AFK 实现"、"让 agent 自己跑 issue"、"帮我逐个处理 issue"、"批量实现 issue"、或希望遍历 ready-for-agent 的 issue 时使用。
+description: 遍历标记为 ready-for-agent 的 GitHub issue，逐个分派到隔离 git worktree 的子 agent 批量实现，全部完成后提示手动 code review 或 QA。用户通过 /afk-issue-loop 调用。
 disable-model-invocation: true
-argument-hint: "[auto-approve] [auto-merge] [mode=subagent|herdr] [model=haiku|sonnet|opus]"
+argument-hint: "[mode=subagent|herdr]"
 ---
 
 # AFK Issue Loop
 
 Matt Pocock 的 Ralph loop 的轻量替代——不需要 Docker/Sandcastle，用 `wt` worktree + `Agent` 工具实现相同效果。
 
-**前置条件**：项目已跑过 `/setup-matt-pocock-skills`，仓库有 `CONTEXT.md`。herdr 模式额外需要 herdr CLI 已安装。
+**前置条件**：项目已跑过 `/setup-rolex-skills`，仓库有 `CONTEXT.md`。herdr 模式额外需要 herdr CLI 已安装。
 
 ## 模式选择
 
@@ -35,7 +35,18 @@ herdr 模式下控制者只做扫描和验证，实现 agent 在独立 claude �
 
 ## Workflows
 
-### 阶段 1：扫描与依赖解析
+### 阶段 1：分支模型检测、扫描与依赖解析
+
+**分支模型检测**（决定 `TARGET_BRANCH`，后续所有命令中的 `${TARGET_BRANCH}` 都指这个值）：
+
+```bash
+# 本地或远程有 develop 分支 → Git flow；只有 main → trunk-based
+git branch -a | grep -Eq '(^|[[:space:]/])develop$' && TARGET_BRANCH=develop || TARGET_BRANCH=main
+echo "TARGET_BRANCH=$TARGET_BRANCH"
+```
+
+- 有 `develop` 分支（本地或远程）→ **Git flow**：`TARGET_BRANCH=develop`，worktree 从 develop 创建，merge 到 develop
+- 只有 `main` → **trunk-based**：`TARGET_BRANCH=main`，worktree 从 main 创建，merge 到 main。**绝不新建 `develop` 分支**——项目维护者只用 main 时，新建 develop 会扰乱他们的分支管理
 
 ```bash
 gh issue list --label ready-for-agent --state open --limit 20 --json number,title,body,labels
@@ -67,10 +78,10 @@ gh issue list --label ready-for-agent --state open --limit 20 --json number,titl
 
 #### subagent 模式（默认）
 
-创建 worktree（从 `develop` 分支，如项目用 `main` 则替换）：
+创建 worktree（从 `${TARGET_BRANCH}`——阶段 1 检测出的 `develop` 或 `main`）：
 
 ```bash
-wt switch -c <prefix>/<issue-id>-<short-name> -b develop
+wt switch -c <prefix>/<issue-id>-<short-name> -b ${TARGET_BRANCH}
 ```
 
 用 `Agent` 工具（**不带 `isolation` 参数**——worktree 已由 `wt switch -c` 创建），按 `reference/implementer-prompt.md` 模板构造 prompt，必须注入：
@@ -79,43 +90,33 @@ wt switch -c <prefix>/<issue-id>-<short-name> -b develop
 - 相关 ADR（如存在）
 - worktree 的绝对路径（`wt` 创建的 `<project>.<prefix>-<id>-<name>` 目录）
 
-agent 在该 worktree 中按 implementer-prompt 流程工作：seam 确认 → TDD → 全量测试 → commit → 本地 merge develop（**绝不创建 PR，绝不推送远程**）→ 清理 worktree → 关闭 issue。
+agent 在该 worktree 中按 implementer-prompt 的**步骤链**执行（见 [reference/implementer-prompt.md](reference/implementer-prompt.md)）。
 
 #### herdr 模式
 
-流程与 subagent 模式完全一致（seam 确认 → TDD → 全量测试 → commit → 本地 merge → 清理 worktree → 关 issue），区别只在于交付方式：
+流程与 subagent 模式完全一致（同一步骤链），区别只在于交付方式：
 
 1. 按 `/herdr-instances` 布局规则在**当前 tab** 创建 pane
-2. 启动 agent，按 implementer-prompt 模板构造 prompt（工作目录段替换为自行 `wt switch -c <前缀>/<id>-<名称> -b develop` 的版本），通过 `herdr pane run` 或 `send-text + Enter` 下发
+2. 启动 agent，按 implementer-prompt 模板构造 prompt（工作目录段替换为自行 `wt switch -c <前缀>/<id>-<名称> -b ${TARGET_BRANCH}` 的版本），通过 `herdr pane run` 或 `send-text + Enter` 下发
 3. **发后验证**：下发后 10s 内检查 agent 是否真的开始工作（`agent list | grep <名称>` 确认 `agent_status=working` 且 title 变为实现标题）。未开始则重试。
 4. **轮询协议**（关键）：agent 完成不会通知控制者。每 5 分钟（或预期完成时间后）执行轮询，见 REFERENCE.md#控制者轮询协议
 
-**踩过的坑**（详见 REFERENCE.md）：
-- agent start 必须指定 `--cwd "$(pwd)"`，否则 agent 工作目录为根目录
-- agent start 必须指定 `--env "PATH=$PATH"`，否则 nvm 管理的 node 等工具找不到
-- 新启动的 agent 需先 `sleep 15` 等待 claude 初始化，再 `wait --status idle`
-- **`pane run` 在某些场景下只粘贴不提交**——如果 agent 长时间 idle 无反应，改用 `send-text + Enter`
-- **`agent prompt` 加 `&` 后台化会导致提交失败**——必须前台执行或使用 `send-text + Enter`
-- **herdr agent 不会主动通知完成**——控制者必须主动轮询
-- **控制者必须验证 agent 确实开始工作**——下发后 10s 内检查 agent 状态，超时或 idle 说明发布失败
-- **`herdr agent wait` 命令是 `herdr agent wait <目标> --until idle`**，不是 `herdr wait agent-status`
+**herdr 操作细节与踩坑**（agent start 三要素、指令发送方式、发后验证、轮询协议、`wait` 命令语法等）见 [REFERENCE.md](REFERENCE.md#herdr-模式注意事项)。
 
 ---
 
 #### 两种模式后续共用
 
-**红线（控制者遵守）：**
-- 控制者只做编排：扫描、分派、验证。**绝不手动写任何实现代码。**
-- **绝不推送到远程**。所有 merge 只发生在本地 develop。如果本地 develop 与 origin/develop 因外部事件（如 PR）分歧，**不推送、不 merge origin/develop、不解决冲突**。分歧不影响后续 issue 的本地 worktree 创建（`wt switch -c` 从本地 develop 创建）。
-- **绝不 git push origin develop**。在任何情况下都不执行此命令。
-- agent 创建了 GitHub PR 是严重的流程错误——**该 issue 标记为失败**，回滚 merge，通过本地 `git merge --no-ff --no-squash` 重做，绝不用 `git push` 去"追平"远程。
+**红线（控制者遵守；完整清单见 [REFERENCE.md](REFERENCE.md#红线)）：**
+- 每个 issue 通过 Agent 分派，控制者只做编排——扫描、分派、验证。
+- 所有 merge 只发生在本地 `${TARGET_BRANCH}`，**绝不推送远程、绝不创建 PR**。本地 `${TARGET_BRANCH}` 与 `origin/${TARGET_BRANCH}` 分歧时保留分歧、不解决，不影响后续 worktree 创建。
 
 **处理 agent 状态**：详见 [REFERENCE.md](REFERENCE.md#状态处理)。
 
 **DONE 后**：验证三件事后检查依赖图：
 - `gh issue view <id> --json state` 返回 CLOSED
 - `wt list` 中不再出现该 worktree
-- **确认 merge 是本地完成的**：`git log --oneline develop -5` 应包含对应的 merge commit 或 squash commit（非 `origin/develop` 上的 commit）。如果 commit 来自 GitHub PR（含 `(#N)` 标记），该 issue 标记为流程错误，按"红线"规则回滚重做
+- **确认 merge 是本地完成的**：`git log --oneline ${TARGET_BRANCH} -5` 应包含对应的 merge commit 或 squash commit（非 `origin/${TARGET_BRANCH}` 上的 commit）。如果 commit 来自 GitHub PR（含 `(#N)` 标记），该 issue 标记为流程错误，按"红线"规则回滚重做
 - herdr 模式额外关闭 agent pane：`herdr pane close $WS:pX`
 - 验证通过后检查依赖图：是否有被此 issue 阻塞的 issue 现在可以开始。有则立即分派。
 
