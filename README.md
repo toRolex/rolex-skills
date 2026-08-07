@@ -137,6 +137,7 @@ flowchart LR
 | `/to-questionnaire` | 手动 | 把无法独自回答的决策变成问卷，交给别人填写 |
 | `/wait-what` | 手动 | 上一条消息没讲清楚时的纠正 |
 | `/writing-for-agents` | 自动/手动 | 面向 agent 的文档写作参考（skill、AGENTS.md、CLAUDE.md） |
+| `/writing-great-skills` | 手动 | skill 编写的共享词汇与原则参考（predictability 等，与 writing-for-agents 互补） |
 
 ### 路由器
 
@@ -184,7 +185,7 @@ flowchart LR
 npx skills@latest add toRolex/rolex-skills
 ```
 
-选择你要安装的技能，记得勾选 `/setup-rolex-skills`。然后在项目里运行：
+选择你要安装的技能（安装界面按 4 组分栏展示：`主流程：想法到交付`、`开发工具`、`原创工具`、`通用技能`），记得勾选 `/setup-rolex-skills`。然后在项目里运行：
 
 ```
 /setup-rolex-skills
