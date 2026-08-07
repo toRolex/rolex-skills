@@ -1,11 +1,11 @@
 ---
 name: domain-modeling
-description: 构建并打磨项目的领域模型。当用户想要确定领域术语或统一语言、记录架构决策，或其他 skill 需要维护领域模型时使用。
+description: 构建并打磨项目的 domain model。当用户希望确定领域术语或 ubiquitous language、记录架构决策，或另一个 skill 需要维护 domain model 时使用。
 ---
 
-# Domain Modeling（领域建模）
+# Domain Modeling
 
-在设计过程中主动构建并打磨项目的 domain model。这是*主动的*纪律——挑战术语、发明 edge case、在词汇表和决策刚固化时立即写下来。（仅仅*阅读* `CONTEXT.md` 来获取词汇不是此 skill——那是任何 skill 都能做的一行习惯。此 skill 适用于你在*更改*模型，而不仅仅是消费它的时候。）
+在设计中主动构建并打磨项目的 domain model。这是一门 *主动* 的功夫——质疑术语、编造 edge case 场景，并在 glossary 和 decisions 一经成形时立刻把它们写下来。（仅仅 *读* `CONTEXT.md` 来取词汇并不是这个 skill——那是任何 skill 都能做到的一行习惯。这个 skill 适用于你在*改变*模型，而不只是消费它。）
 
 ## 文件结构
 
@@ -21,54 +21,54 @@ description: 构建并打磨项目的领域模型。当用户想要确定领域�
 └── src/
 ```
 
-如果根目录存在 `CONTEXT-MAP.md`，说明仓库有多个 context。该地图指向每个 context 的位置：
+如果根目录存在 `CONTEXT-MAP.md`，说明仓库有多个 contexts。map 会指出每个 context 所在的位置：
 
 ```
 /
 ├── CONTEXT-MAP.md
 ├── docs/
-│   └── adr/                          ← 系统级决策
+│   └── adr/                          ← system-wide decisions
 ├── src/
 │   ├── ordering/
 │   │   ├── CONTEXT.md
-│   │   └── docs/adr/                 ← 上下文特有决策
+│   │   └── docs/adr/                 ← context-specific decisions
 │   └── billing/
 │       ├── CONTEXT.md
 │       └── docs/adr/
 ```
 
-惰性创建文件——只在有东西要写时。如果 `CONTEXT.md` 不存在，在第一个术语被解决时创建。如果 `docs/adr/` 不存在，在第一个 ADR 需要时创建。
+懒创建文件——只在你有东西要写时才创建。如果不存在 `CONTEXT.md`，在第一个术语被确定时创建它。如果不存在 `docs/adr/`，在第一个 ADR 需要时创建它。
 
 ## 会话期间
 
-### 对照词汇质疑
+### 用 glossary 提出质疑
 
-当用户使用的术语与 `CONTEXT.md` 中已有的语言冲突时，立即指出来。"你的 glossary 将'取消'定义为 X，但你似乎指的是 Y——是哪一个？"
+当用户使用一个与 `CONTEXT.md` 中现有语言冲突的术语时，立刻指出来。「你的 glossary 把 'cancellation' 定义为 X，但你看起来想说的是 Y——到底是哪个？」
 
-### 锐化模糊语言
+### 打磨模糊的语言
 
-当用户使用模糊或一词多义的术语时，提出一个精确的规范术语。"你说的'账户'——是指客户还是用户？它们是不同的东西。"
+当用户使用模糊或过载的术语时，提出一个精确的规范术语。「你说的是 'account'——你指的是 Customer 还是 User？两者是不同的东西。」
 
 ### 讨论具体场景
 
-当领域关系正在讨论时，用具体场景进行压力测试。发明探测 edge case 的场景，迫使用户在概念之间的界限上变得精确。
+当讨论领域关系时，用具体场景做压力测试。编造能探测 edge cases、迫使用户对概念之间的边界做到精确的场景。
 
-### 与代码交叉引用
+### 与代码交叉核对
 
-当用户陈述某事如何工作时，检查代码是否同意。如果发现矛盾，提出它："你的代码取消整个订单，但你刚刚说部分取消是可能的——哪个是正确的？"
+当用户描述某件事如何运作时，检查代码是否一致。如果发现矛盾，就把它摆出来：「你的代码取消的是整个 Orders，但你刚才说可以部分取消——哪个才是对的？」
 
 ### 就地更新 CONTEXT.md
 
-当一个术语被解决时，立即更新 `CONTEXT.md`。不要批量做这些——在它们发生时捕获。使用 [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md) 中的格式。
+当一个术语被确定时，就地更新 `CONTEXT.md`。不要攒起来——随时发生随时记录。使用 [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md) 中的格式。
 
-`CONTEXT.md` 应完全不含实现细节。不要将 `CONTEXT.md` 当作 spec、草稿或实现决策的存放处。它只是一个 glossary，别的什么都不是。
+`CONTEXT.md` 应该完全不含实现细节。不要把 `CONTEXT.md` 当作 spec、草稿本或实现决策的仓库。它只是一个 glossary，仅此而已。
 
-### 谨慎提供 ADR
+### 审慎地提供 ADRs
 
-只有在三个条件都满足时才提供创建 ADR：
+只有以下三条全部成立时才主动提出创建 ADR：
 
-1. **难以逆转** —— 以后改变主意的成本是显著的
-2. **没有 context 会让人惊讶** —— 未来的读者会想知道"他们为什么这样做？"
-3. **是真正权衡的结果** —— 存在真正的替代方案，你因为特定原因选择了其中一个
+1. **Hard to reverse**——日后改变主意的代价是实质性的
+2. **Surprising without context**——未来的读者会疑惑"他们为什么这样做？"
+3. **The result of a real trade-off**——存在真正的备选方案，而你基于特定理由选了一个
 
-如果三个中任何一个缺失，跳过 ADR。使用 [ADR-FORMAT.md](./ADR-FORMAT.md) 中的格式。
+三条缺一，就跳过 ADR。使用 [ADR-FORMAT.md](./ADR-FORMAT.md) 中的格式。

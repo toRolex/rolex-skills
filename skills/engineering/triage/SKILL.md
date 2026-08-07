@@ -1,6 +1,6 @@
 ---
 name: triage
-description: 将 issue 和外部 PR 通过一个分类角色状态机进行 triage 流转——分类、验证、如有需要，grill（追问澄清），并编写 agent-ready brief。
+description: 将 issue 和外部 PR 通过一个分类角色 state machine 进行 triage 流转——分类、验证、如有需要，grill（追问澄清），并编写 agent-ready brief。
 disable-model-invocation: true
 ---
 

@@ -50,7 +50,7 @@ model-invoked 的 **description** 做两件事——说明 skill 是什么，列
 **granularity**是你将 skill 划分的精细程度，每次切割消耗两种负载之一，所以只有切割能带来回报时才拆分。两种拆分：
 
 - **按 invocation 方式拆分** —— 当你有一个应该独立 trigger 的**leading word**，或其他 skill 必须 invoke 它时，拆出一个 **model-invoked** skill。你为新的始终加载的 **description** 支付**context load**，所以这种独立可达必须值得。
-- **按顺序拆分** —— 当剩余的 step（step 的**后续 step**）诱使 agent 急于完成当前 step（**premature completion**）时，拆分一系列**step**。将它们保持不可见，鼓励 agent 在当前任务上做更多**legwork**。
+- **按顺序拆分** —— 当剩余的 step（step 的 **post-completion steps**）诱使 agent 急于完成当前 step（**premature completion**）时，拆分一系列**step**。将它们保持不可见，鼓励 agent 在当前任务上做更多**legwork**。
 
 ## Pruning（修剪）
 
@@ -77,7 +77,7 @@ model-invoked 的 **description** 做两件事——说明 skill 是什么，列
 
 用这些来诊断用户可能遇到的 skill 问题。
 
-- **premature completion** —— 在 step 真正完成前结束，注意力滑向_已做完_。防御，按顺序：首先锐化 completion criterion（便宜、局部）；只有它在本质上模糊_并且_你观察到匆忙，才通过拆分隐藏后续 step（顺序切割）。
+- **premature completion** —— 在 step 真正完成前结束，注意力滑向_已做完_。防御，按顺序：首先锐化 completion criterion（便宜、局部）；只有它在本质上模糊_并且_你观察到匆忙，才通过拆分隐藏 post-completion steps（顺序切割）。
 - **duplication** —— 同一含义出现在多个地方。消耗维护成本和 tokens，并膨胀含义在阶梯上的突出程度超出其实际级别。
 - **sediment** —— 因添加感觉安全而删除感觉冒险而沉淀的陈旧层。任何没有修剪纪律的 skill 的默认命运。
 - **sprawl** —— skill 太长了，即使每一行都是活跃且唯一的。损害可读性和可维护性，浪费 tokens。解法是阶梯：将**reference**披露到指针后面，并按**branch**或顺序拆分，这样每条路径只携带它需要的内容。

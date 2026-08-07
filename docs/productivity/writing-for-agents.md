@@ -14,13 +14,13 @@ bash scripts/link-skills.sh
 
 核心概念：
 
-- **上下文指针** — 引用上下文外材料并编码到达条件的措辞
-- **两种负载** — 上下文负载（常驻材料花的 token）与认知负载（人类记住文档存在的成本）
-- **信息层级** — 从文件内步骤到披露参考的阶梯
-- **引导词** — 招募模型预训练先验的紧凑概念
-- **修剪** — 单一真相来源、相关性、逐句 no-op 测试
+- **context pointer** — 引用上下文外材料并编码到达条件的措辞
+- **两种 load** — context load（常驻材料花的 token）与 cognitive load（人类记住文档存在的成本）
+- **information hierarchy** — 从文件内 steps 到披露 reference 的阶梯
+- **leading word** — 招募模型预训练先验的紧凑概念
+- **pruning** — single source of truth、relevance、逐句 no-op 测试
 
-当文档是 skill 时，读 `SKILL-MECHANICS.md` 了解 frontmatter、调用选择和 router skills。
+当文档是 skill 时，读 `SKILL-MECHANICS.md` 了解 frontmatter、invocation 选择和 router skills。
 
 ## 何时使用
 
