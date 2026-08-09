@@ -80,7 +80,7 @@ blocked（本轮等待）：
 - `git push origin ${TARGET_BRANCH}` 在任何情况下都不执行；`gh pr create`、Web UI 合并或任何远程 merge 都是违规
 - 本地 `${TARGET_BRANCH}` 与 `origin/${TARGET_BRANCH}` 分歧时保留分歧，不 merge origin、不解决冲突——分歧是预期状态，由项目维护者决定何时同步
 - squash commit message：`feat/chore/fix: <标题>（#N）`（功能前缀，延续中文风格）；前缀由 issue label 推导——`enhancement`→`feat`、`bug`→`fix`、其他（chore/refactor/无 label）→`chore`
-- 分支内 commit 用中文描述，不带任何英文字母前缀（不沿用上游 sandcastle 的英文前缀风格）
+- 分支内 commit 用中文描述（不沿用上游 sandcastle 的英文前缀风格）
 - squash 后删除分支（`git branch -D afk/issue-{N}`）+ 清理 worktree
 - 验证：`${TARGET_BRANCH}` 出现 **1-parent** squash commit（`git cat-file -p HEAD | grep "^parent"` 只输出 1 行）
 - **PR 误判修正**：只有匹配 `Merge pull request #N` 才是 GitHub PR merge；agent 自写 message 带 `（#N）` 不算
@@ -138,7 +138,7 @@ Merger 后验证三件事：
 
 ## 并行冲突处理
 
-- 跨 issue 并行 ≤4（信号量）；同 issue 内 Implementer→Reviewer 严格串行
+- 并发纪律（跨 issue ≤4 / 同 issue 内严格串行）见[红线](#红线)「分派前」
 - 空间冲突的 issue 由 Planner 判为 blocked 避免并发；已并行的重叠分支由 Merger 统一合并时读两侧解决
 - 分支冲突**禁 `-X theirs/ours`**，必须读两侧再选正确结果
 - Merger 合并顺序：每分支合完立即跑全量测试，失败先修复再继续下一个

@@ -7,16 +7,14 @@ argument-hint: "[mode=subagent|herdr]"
 
 # AFK Issue Loop（sandcastle 式四角色编排）
 
-Matt Pocock 的 Ralph loop 的轻量替代——不需要 Docker/Sandcastle。控制者（当前会话）扮演 sandcastle `run.ts` 的编排器，用 `wt` worktree + 当前会话的 `Agent` 工具（或 herdr pane）跑四角色循环：
+Matt Pocock 的 Ralph loop 的轻量替代（sandcastle 式四角色编排），控制者扮演 `run.ts` 编排器，无需 Docker：
 
 - **Planner** 分析 issue 依赖 → 输出 `<plan>` JSON（只含当前 unblocked 的 issue）
 - **Implementer** 每 issue 一个，在 `afk/issue-N` 分支 TDD 实现
 - **Reviewer** Implementer 完全结束后同分支审查
 - **Merger** 主仓库统一 `git merge --squash` 并关 issue
 
-与 sandcastle 的对应：控制者 = `run.ts` 编排器；`wt` worktree = Docker 沙箱；四角色与信号（`<plan>` / `<promise>COMPLETE`）语义一致。
-
-**前置条件**：项目已跑过 `/setup-rolex-skills`，仓库有 `CONTEXT.md`（缺失时见 [REFERENCE.md](REFERENCE.md#contextmd-缺失策略)——控制者基于 CLAUDE.md + docs/adr/ 创建或替代注入）。herdr 模式额外需要 herdr CLI 已安装。
+**前置条件**：项目已跑过 `/setup-rolex-skills`，仓库有 `CONTEXT.md`（缺失时按 [REFERENCE.md](REFERENCE.md#contextmd-缺失策略) 处理）。herdr 模式额外需要 herdr CLI 已安装。
 
 ## 模式选择（载体）
 
@@ -124,7 +122,7 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 - `CONTEXT.md` 内容（如存在）+ 相关 ADR
 - worktree 绝对路径（subagent）或自行 `wt switch -c` 的指令（herdr）
 - **Seam 预确认**：控制者分派时基于 issue body 的 Testing Decisions 段和相关测试预确认 seam，agent **不等待**（解决 subagent 卡死）
-- 红线：TDD → 全量测试（贴实际输出）→ commit（**中文描述，不带英文字母前缀**）→ 输出 `<promise>COMPLETE</promise>`；**不关 issue**
+- 红线：TDD → 全量测试（贴实际输出）→ commit（**中文描述**）→ 输出 `<promise>COMPLETE</promise>`；**不关 issue**
 - 模型：按复杂度选（见 [REFERENCE.md](REFERENCE.md#模型选择)，AFK 向上取整）
 
 **3. 超时与完成求值**：控制者分派时记录 deadline + 后台计时器（见 [REFERENCE.md](REFERENCE.md#超时协议)）。Implementer **完全结束**（正常完成 / 超时 / 抛错）后，查分支 commit：
@@ -160,7 +158,7 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 ## Reference
 
 - [REFERENCE.md](REFERENCE.md) — 依赖解析、协议机制、模型选择、红线、状态处理、超时协议、并行冲突、agent 中断恢复、CONTEXT.md 缺失策略、herdr 模式注意事项、收尾流程
-- [EXAMPLES.md](EXAMPLES.md) — 完整使用示例
+- [EXAMPLES.md](EXAMPLES.md) — 完整一轮示例；不确定某阶段的具体命令 / 信号格式时先读它
 - [reference/implementer-prompt.md](reference/implementer-prompt.md) — Implementer 分派模板
 
 全部 issue 完成后，提示用户：

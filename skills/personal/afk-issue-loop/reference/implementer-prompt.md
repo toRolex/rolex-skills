@@ -72,13 +72,13 @@
 3. **循环**：一个垂直切片（一个 seam → 一个测试 → 一个实现）重复，直到 issue 完成
 4. **重构**：整理代码，消除重复，保持可读性
 5. **全量测试**：运行项目的全量测试套件（如 `npm run test` / `uv run pytest`，视项目而定），确保零回归
-6. **提交**：通过后 commit。**commit 描述用中文，不带任何英文字母前缀**（分支内 commit 不写 `feat:`/`fix:` 之类前缀；squash commit 的前缀规范由 Merger 负责）
+6. **提交**：通过后 commit。**commit 描述用中文**（分支内 commit 不写 `feat:`/`fix:` 之类前缀；squash commit 的前缀规范由 Merger 负责）
 
 **全量测试是硬性要求**。零回归才可输出 COMPLETE。
 
 **汇报前自检清单（一项不满足不得输出 COMPLETE）：**
 - [ ] 全量测试通过（后端 + 前端，贴实际输出）
-- [ ] 代码已 commit（中文描述，无英文字母前缀）
+- [ ] 代码已 commit（中文描述）
 - [ ] 未 merge、未 push、未创建 PR、未关闭 issue（关闭只发生在 Merger），已输出 `<promise>COMPLETE</promise>`
 
 ## 汇报格式

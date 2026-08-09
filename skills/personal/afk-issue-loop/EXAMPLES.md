@@ -85,7 +85,7 @@ prompt 红线片段（摘自 implementer-prompt.md）：
 3. 绝不 merge、绝不关闭 issue：merge 与关 issue 由 Merger 统一负责
 4. 汇报前必须走完：全量测试通过 → commit（中文描述）→ <promise>COMPLETE</promise>
 
-严格遵循 TDD：红 → 绿 → 循环 → 重构 → 全量测试（贴实际输出）→ commit（中文，无英文字母前缀）
+严格遵循 TDD：红 → 绿 → 循环 → 重构 → 全量测试（贴实际输出）→ commit（中文）
 ```
 
 Implementer 输出：
@@ -106,7 +106,7 @@ DONE
 你正在审查分支 afk/issue-42 上对 issue #42：Add --verbose flag to root command 的改动。
 读 git diff ${TARGET_BRANCH}..HEAD（本分支相对目标分支的全部改动）。
 若本分支相对 ${TARGET_BRANCH} 无任何改动，直接输出 <promise>COMPLETE</promise>，不做任何动作。
-发现可改进：直接在本分支修改 → 重跑全量测试 → commit（中文，无英文字母前缀）。
+发现可改进：直接在本分支修改 → 重跑全量测试 → commit（中文）。
 ```
 
 Reviewer 发现 flag 解析分支可简化 → 修改 → 重跑测试 → commit → 输出：
