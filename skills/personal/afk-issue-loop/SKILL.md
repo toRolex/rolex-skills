@@ -1,130 +1,167 @@
 ---
 name: afk-issue-loop
-description: 遍历标记为 ready-for-agent 的 GitHub issue，逐个分派到隔离 git worktree 的子 agent 批量实现，全部完成后提示手动 code review 或 QA。用户通过 /afk-issue-loop 调用。
+description: 遍历标记为 ready-for-agent 的 GitHub issue，用 Planner/Implementer/Reviewer/Merger 四角色循环批量实现并统一 squash merge，全部完成后提示手动 code review 或 QA。用户通过 /afk-issue-loop 调用。
 disable-model-invocation: true
 argument-hint: "[mode=subagent|herdr]"
 ---
 
-# AFK Issue Loop
+# AFK Issue Loop（sandcastle 式四角色编排）
 
-Matt Pocock 的 Ralph loop 的轻量替代——不需要 Docker/Sandcastle，用 `wt` worktree + `Agent` 工具实现相同效果。
+Matt Pocock 的 Ralph loop 的轻量替代——不需要 Docker/Sandcastle。控制者（当前会话）扮演 sandcastle `run.ts` 的编排器，用 `wt` worktree + 当前会话的 `Agent` 工具（或 herdr pane）跑四角色循环：
 
-**前置条件**：项目已跑过 `/setup-rolex-skills`，仓库有 `CONTEXT.md`。herdr 模式额外需要 herdr CLI 已安装。
+- **Planner** 分析 issue 依赖 → 输出 `<plan>` JSON（只含当前 unblocked 的 issue）
+- **Implementer** 每 issue 一个，在 `afk/issue-N` 分支 TDD 实现
+- **Reviewer** Implementer 完全结束后同分支审查
+- **Merger** 主仓库统一 `git merge --squash` 并关 issue
 
-## 模式选择
+与 sandcastle 的对应：控制者 = `run.ts` 编排器；`wt` worktree = Docker 沙箱；四角色与信号（`<plan>` / `<promise>COMPLETE`）语义一致。
 
-通过 `[mode=subagent|herdr]` 参数选择。无参数时默认 `subagent`。
+**前置条件**：项目已跑过 `/setup-rolex-skills`，仓库有 `CONTEXT.md`（缺失时见 [REFERENCE.md](REFERENCE.md#contextmd-缺失策略)——控制者基于 CLAUDE.md + docs/adr/ 创建或替代注入）。herdr 模式额外需要 herdr CLI 已安装。
 
-| 模式 | 原理 | 适用场景 |
+## 模式选择（载体）
+
+通过 `[mode=subagent|herdr]` 参数选择载体。无参数时默认 `subagent`。
+
+| 载体 | 原理 | 适用场景 |
 |------|------|----------|
-| `subagent` | 当前会话中用 `Agent` 工具分派子 agent | 少量 issue（≤5）、需要实时看子 agent 进度 |
-| `herdr` | 调用 `/herdr-instances` 开新 pane 启动独立 claude 实例 | 大量 issue、想并行跑满、不占当前会话上下文 |
+| `subagent`（默认） | 当前会话中用 `Agent` 工具分派角色子代理 | 少量 issue（≤5）、需要实时看子代理进度 |
+| `herdr` | 独立 session pane（新 claude 实例）运行角色 | 大量 issue、想并行跑满、不占当前会话上下文 |
 
-herdr 模式下控制者只做扫描和验证，实现 agent 在独立 claude 窗口中运行。具体的 pane 创建、指令下发、等待、结果收集等操作，直接遵循 `/herdr-instances` skill 的核心工作流和布局规则（主编排 pane 不可上下分割，左右/上下分割各自不超过 3）。
+**载体与角色正交**：四种角色在任何载体下都用同一套 prompt 语义（依赖分析、`<plan>`、`<promise>COMPLETE`、确定性分支名、squash merge 都不变），区别只在「谁来跑」。
+
+herdr 模式下 pane 创建、指令下发、等待、轮询等操作，直接遵循 `/herdr` 和 `/herdr-instances` skill 的核心工作流与布局规则（主编排 pane 不可上下分割，左右/上下分割各自不超过 3）。
+
+## 角色架构
+
+| 角色 | 职责 | 产出信号 |
+|------|------|----------|
+| **Planner** | 扫 `gh issue list --label ready-for-agent --state open`，依赖分析，分配确定性分支名 `afk/issue-{N}` | `<plan>` JSON |
+| **Implementer** | 每 issue 一个，在 `afk/issue-N` 分支，TDD→全量测试→commit（中文描述） | `<promise>COMPLETE</promise>`；**不关 issue** |
+| **Reviewer** | Implementer 完全结束后（含退出/超时/抛错后求值）同分支触发，读 `git diff ${TARGET_BRANCH}..HEAD`，可改进并 commit；分支无 commit 则跳过 | 改进 commit 或跳过 |
+| **Merger** | `${TARGET_BRANCH}` 上逐个 `git merge --squash <分支>`，冲突读两侧解决；每分支合完跑全量测试；统一关 issue（含父 PRD） | squash commit（1 parent）+ 关闭的 issue |
+
+**控制者职责**（不写实现代码）：发起启动各角色子代理（按载体）→ 解析 Planner 的 `<plan>` JSON → 分派 Implementer / Reviewer → 分派 Merger → 验证（issue 关闭 / worktree 清理 / `${TARGET_BRANCH}` 出现对应 1-parent squash commit）→ 异常处置（BLOCKED / NEEDS_CONTEXT，沿用状态处理表）。
+
+**编排循环**（每轮重 Plan）：
+
+```
+循环：
+  Planner ──► <plan> JSON（当前 unblocked 的 issue）
+    │  控制者解析 <plan>，校验 number/title/branch
+    ▼
+  Implementer（每 issue 一个，afk/issue-N，跨 issue ≤4 并行）
+    │  <promise>COMPLETE
+    ▼
+  Reviewer（同分支，严格串行；分支无 commit 则跳过）
+    ▼
+  Merger（逐个 squash merge → 全量测试 → 关 issue）
+    │
+    └──► 回到 Planner，直到 <plan> 为空
+```
+
+- **并行度**：跨 issue ≤4（信号量）；同 issue 内 Implementer→Reviewer 严格串行
+- **完成判定**：真正的完成（关 issue）只在 Merger。Implementer / Reviewer 都不关 issue
 
 ## Quick start
 
 ```
 用户：我已经 /to-issues 拆好了，让 agent 逐个实现这些 issue
 
-1. 扫描：gh issue list --label ready-for-agent --state open
-2. 解析依赖关系 → 无阻塞的 issue 并行分派
-3. 每个 issue 完成后检查是否解锁新 issue → 继续分派
-4. 全部完成后 → 提示用户进行 code review 或 QA
+1. 阶段 0：分支模型检测 → TARGET_BRANCH（develop / main）
+2. 阶段 1：Planner → 依赖分析 → <plan> JSON
+3. 阶段 2：控制者解析 <plan>，每 issue 分派 Implementer（≤4 并行）
+   → <promise>COMPLETE → 同分支 Reviewer
+4. 阶段 3：Merger 统一 squash merge + 关 issue
+5. 回到 Planner，直到 <plan> 为空
+6. 全部完成 → 提示用户进行 code review 或 QA
 ```
 
 ## Workflows
 
-### 阶段 1：分支模型检测、扫描与依赖解析
+### 阶段 0：分支模型检测（TARGET_BRANCH）
 
-**分支模型检测**（决定 `TARGET_BRANCH`，后续所有命令中的 `${TARGET_BRANCH}` 都指这个值）：
+后续所有 `${TARGET_BRANCH}` 都指这个值：
 
 ```bash
-# 本地或远程有 develop 分支 → Git flow；只有 main → trunk-based
 git branch -a | grep -Eq '(^|[[:space:]/])develop$' && TARGET_BRANCH=develop || TARGET_BRANCH=main
 echo "TARGET_BRANCH=$TARGET_BRANCH"
 ```
 
 - 有 `develop` 分支（本地或远程）→ **Git flow**：`TARGET_BRANCH=develop`，worktree 从 develop 创建，merge 到 develop
-- 只有 `main` → **trunk-based**：`TARGET_BRANCH=main`，worktree 从 main 创建，merge 到 main。**绝不新建 `develop` 分支**——项目维护者只用 main 时，新建 develop 会扰乱他们的分支管理
+- 只有 `main` → **trunk-based**：`TARGET_BRANCH=main`，worktree 从 main 创建，merge 到 main。**绝不新建 `develop`**——项目维护者只用 main 时，新建 develop 会扰乱他们的分支管理
 
-```bash
-gh issue list --label ready-for-agent --state open --limit 20 --json number,title,body,labels
+检查 `CONTEXT.md` 是否存在；缺失时按 [REFERENCE.md](REFERENCE.md#contextmd-缺失策略) 处理。
+
+### 阶段 1：Planner 分派与依赖解析
+
+分派 Planner（按载体：subagent 用 Agent 工具 / herdr 开 pane）。Planner 职责：
+
+1. 扫 `gh issue list --label ready-for-agent --state open --limit 100 --json number,title,body,labels,comments`
+2. 依赖分析：`Blocked by` 字段优先，其次三条补充（资源 / 空间 / 契约，见 [REFERENCE.md](REFERENCE.md#依赖解析)）。有实现 issue 链接的 PRD 不作为实现对象
+3. 为每个 unblocked 的 issue 分配确定性分支名 `afk/issue-{N}`
+4. 输出 `<plan>` JSON：
+
+```
+<plan>
+{"issues": [{"number": 42, "title": "修复认证 bug", "branch": "afk/issue-42"}]}
+</plan>
 ```
 
-从每个 issue 的 body 中提取 `Blocked by` 字段，构建依赖图。
+**控制者解析**：用正则提取 `<plan>...</plan>` 包裹的 JSON，校验每项 `number/title/branch`。空列表 `{"issues":[]}` → 结束循环。
 
-- 无未满足依赖的 issue → 可立即分派（可并行）
-- 有未满足依赖的 issue → 等待依赖完成后分派
+**全 blocked 判断逻辑**：无 unblocked 时，Planner 默认输出单个最高优先候选（依赖最少/最弱）继续推进；当候选为 PRD、或阻塞源在本轮内无解锁路径（外部依赖/需人工）、或已无任何可推进项时输出空列表结束循环。
 
-展示分组后的 issue 列表（可立即开始 / 等待依赖），让用户确认。
+### 阶段 2：Implementer + Reviewer（每 issue：worktree → 实现 → 审查）
 
-### 阶段 2：分派实现
+对 `<plan>` 中每个 issue（跨 issue 信号量 ≤4）：
 
-对每个可立即开始的 issue（互不依赖的 issue 可并行分派）。根据 `mode` 参数选择分派方式。
+**1. 创建 worktree**（确定性分支 `afk/issue-{N}`）：
+- subagent：控制者预创建 `wt switch -c afk/issue-{N} -b ${TARGET_BRANCH}`
+- herdr：agent 自行创建（同一命令）
 
-**选择模型**：按任务复杂度选择，详见 [REFERENCE.md](REFERENCE.md#模型选择)。简要规则：纯机械操作用 Haiku，常规实现用 Sonnet，架构决策或跨模块集成用 Opus。
+**2. 分派 Implementer**，prompt 注入：
+- issue 完整文本 + comments（`gh issue view <id> --json title,body,comments`）；如有父 PRD 一并注入
+- `CONTEXT.md` 内容（如存在）+ 相关 ADR
+- worktree 绝对路径（subagent）或自行 `wt switch -c` 的指令（herdr）
+- **Seam 预确认**：控制者分派时基于 issue body 的 Testing Decisions 段和相关测试预确认 seam，agent **不等待**（解决 subagent 卡死）
+- 红线：TDD → 全量测试（贴实际输出）→ commit（**中文描述，不带英文字母前缀**）→ 输出 `<promise>COMPLETE</promise>`；**不关 issue**
+- 模型：按复杂度选（见 [REFERENCE.md](REFERENCE.md#模型选择)，AFK 向上取整）
 
-**分支前缀**（两种模式共用），根据 issue label 选择：
+**3. 超时与完成求值**：控制者分派时记录 deadline + 后台计时器（见 [REFERENCE.md](REFERENCE.md#超时协议)）。Implementer **完全结束**（正常完成 / 超时 / 抛错）后，查分支 commit：
+- >0 → 触发同分支 Reviewer
+- ==0 → 跳过 Reviewer，标记后交由下轮 Planner 处理
 
-| Label | 前缀 | 用途 |
-|---|---|---|
-| `enhancement` | `feature/` | 新功能 |
-| `bug` | `bugfix/` | 修 bug |
-| `hotfix` | `hotfix/` | 紧急修复 |
-| 其他（chore、refactor 等）或无 label | `chore/` | 日常维护 |
+**4. 同分支触发 Reviewer**：
+- 读 `git diff ${TARGET_BRANCH}..HEAD`，可改进并 commit（中文）；分支无 commit 则跳过
+- 输出 `<promise>COMPLETE</promise>`；不关 issue
 
----
+**5. 处理状态**：异常（NEEDS_CONTEXT / BLOCKED 等）按 [REFERENCE.md](REFERENCE.md#状态处理) 处置。
 
-#### subagent 模式（默认）
+### 阶段 3：Merger（统一 squash merge + 关 issue）
 
-创建 worktree（从 `${TARGET_BRANCH}`——阶段 1 检测出的 `develop` 或 `main`）：
+本轮 Implementer / Reviewer 全部结束后，分派 Merger：
 
-```bash
-wt switch -c <prefix>/<issue-id>-<short-name> -b ${TARGET_BRANCH}
-```
+- **位置**：在主仓库（已检出 `${TARGET_BRANCH}`）执行，**不在 worktree 内执行**——git 禁止同一分支在两个 worktree 同时检出
+- 分派 Merger 前，在主仓库执行 `git checkout ${TARGET_BRANCH}`，确认处于目标分支
+- 命令：逐个 `git merge --squash afk/issue-{N}`，冲突读两侧解决（**禁 `-X theirs/ours`**）
+- squash commit message：`feat/chore/fix: <标题>（#N）`（功能前缀，延续中文风格）
+- **每分支合完跑全量测试**；失败先修复再继续下一个
+- 验证：`${TARGET_BRANCH}` 出现 **1-parent** squash commit；PR 误判修正——只有匹配 `Merge pull request #N` 才是 GitHub PR merge（agent 自写 message 带 `（#N）` 不算）
+- squash 后删除分支
+- **统一关 issue**：`gh issue close <N>`；若父 PRD 因该 issue 完成而全部完成，一并关闭
+- 完成信号：`<promise>COMPLETE</promise>`
 
-用 `Agent` 工具（**不带 `isolation` 参数**——worktree 已由 `wt switch -c` 创建），按 `reference/implementer-prompt.md` 模板构造 prompt，必须注入：
-- issue 完整文本（`gh issue view <id> --json title,body`）
-- `CONTEXT.md` 内容（如存在）
-- 相关 ADR（如存在）
-- worktree 的绝对路径（`wt` 创建的 `<project>.<prefix>-<id>-<name>` 目录）
+### 循环：回到 Planner
 
-agent 在该 worktree 中按 implementer-prompt 的**步骤链**执行（见 [reference/implementer-prompt.md](reference/implementer-prompt.md)）。
-
-#### herdr 模式
-
-流程与 subagent 模式完全一致（同一步骤链），区别只在于交付方式：
-
-1. 按 `/herdr-instances` 布局规则在**当前 tab** 创建 pane
-2. 启动 agent，按 implementer-prompt 模板构造 prompt（工作目录段替换为自行 `wt switch -c <前缀>/<id>-<名称> -b ${TARGET_BRANCH}` 的版本），通过 `herdr pane run` 或 `send-text + Enter` 下发
-3. **发后验证**：下发后 10s 内检查 agent 是否真的开始工作（`agent list | grep <名称>` 确认 `agent_status=working` 且 title 变为实现标题）。未开始则重试。
-4. **轮询协议**（关键）：agent 完成不会通知控制者。每 5 分钟（或预期完成时间后）执行轮询，见 REFERENCE.md#控制者轮询协议
-
-**herdr 操作细节与踩坑**（agent start 三要素、指令发送方式、发后验证、轮询协议、`wait` 命令语法等）见 [REFERENCE.md](REFERENCE.md#herdr-模式注意事项)。
-
----
-
-#### 两种模式后续共用
-
-**红线（控制者遵守；完整清单见 [REFERENCE.md](REFERENCE.md#红线)）：**
-- 每个 issue 通过 Agent 分派，控制者只做编排——扫描、分派、验证。
-- 所有 merge 只发生在本地 `${TARGET_BRANCH}`，**绝不推送远程、绝不创建 PR**。本地 `${TARGET_BRANCH}` 与 `origin/${TARGET_BRANCH}` 分歧时保留分歧、不解决，不影响后续 worktree 创建。
-
-**处理 agent 状态**：详见 [REFERENCE.md](REFERENCE.md#状态处理)。
-
-**DONE 后**：验证三件事后检查依赖图：
-- `gh issue view <id> --json state` 返回 CLOSED
-- `wt list` 中不再出现该 worktree
-- **确认 merge 是本地完成的**：`git log --oneline ${TARGET_BRANCH} -5` 应包含对应的 merge commit 或 squash commit（非 `origin/${TARGET_BRANCH}` 上的 commit）。如果 commit 来自 GitHub PR（含 `(#N)` 标记），该 issue 标记为流程错误，按"红线"规则回滚重做
-- herdr 模式额外关闭 agent pane：`herdr pane close $WS:pX`
-- 验证通过后检查依赖图：是否有被此 issue 阻塞的 issue 现在可以开始。有则立即分派。
+- Merger 完成后回到阶段 1，重新 Planner（**每轮重 Plan**），直到 `<plan>` 为空
+- 控制者可为循环设最大轮数（如 10），防止依赖分析错误导致死循环
+- 全部完成 → 提示用户 code review / QA
 
 ## Reference
 
-- [REFERENCE.md](REFERENCE.md) — 状态处理表、模型选择、红线、收尾流程
+- [REFERENCE.md](REFERENCE.md) — 依赖解析、协议机制、模型选择、红线、状态处理、超时协议、并行冲突、agent 中断恢复、CONTEXT.md 缺失策略、herdr 模式注意事项、收尾流程
 - [EXAMPLES.md](EXAMPLES.md) — 完整使用示例
-- [reference/implementer-prompt.md](reference/implementer-prompt.md) — 实现 agent 分派模板
+- [reference/implementer-prompt.md](reference/implementer-prompt.md) — Implementer 分派模板
 
 全部 issue 完成后，提示用户：
 

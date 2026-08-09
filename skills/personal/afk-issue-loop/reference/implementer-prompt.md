@@ -1,8 +1,12 @@
-# 实现 agent 分派模板
+# Implementer 分派模板
 
-两种模式使用同一模板，仅工作目录段不同。其余步骤（seam 确认 → TDD → 全量测试 → commit → 本地 merge → 清理 worktree → 关 issue）完全一致。
+两种载体（subagent / herdr）使用同一模板，仅「工作目录」段不同；其余步骤（Seam 已预确认 → TDD → 全量测试 → commit → 输出 COMPLETE）完全一致。
 
-> **控制者填充**：生成最终 prompt 前，将下列所有 `${TARGET_BRANCH}` 替换为阶段 1 分支检测出的实际值（`develop` 或 `main`）。
+> **控制者填充项**（生成最终 prompt 前替换为实际值）：
+> - `{{ISSUE_NUMBER}}` / `{{ISSUE_TITLE}}`：issue 编号与标题
+> - `{{BRANCH}}`：分支名（确定性 `afk/issue-{N}`）
+> - `${TARGET_BRANCH}`：阶段 0 分支模型检测结果（`develop` 或 `main`）
+> - 「Issue 内容」「领域上下文」「工作目录」三段按实际情况填充
 
 ---
 
@@ -11,7 +15,7 @@
 ```
 ## 工作目录
 
-[worktree 的绝对路径，已由 `wt switch -c <prefix>/<issue-id>-<name> -b ${TARGET_BRANCH}` 预创建]
+[worktree 的绝对路径，已由控制者 `wt switch -c {{BRANCH}} -b ${TARGET_BRANCH}` 预创建]
 
 你在这个 worktree 中直接工作，不需要自己创建分支或隔离环境。
 ```
@@ -23,7 +27,7 @@
 
 你没有预置 worktree。请先自行创建并切换：
 
-  wt switch -c <prefix>/<issue-id>-<short-name> -b ${TARGET_BRANCH}
+  wt switch -c {{BRANCH}} -b ${TARGET_BRANCH}
 
 确认已在 worktree 目录内后，再进行后续步骤。
 ```
@@ -33,22 +37,22 @@
 完整模板（合并工作目录段后）：
 
 ```
-你正在实现 GitHub issue #[number]：[title]
+你正在实现 GitHub issue #{{ISSUE_NUMBER}}：{{ISSUE_TITLE}}。只做这一件事，不旁及其它 issue / 任务。
 
 ## 红线（硬性规则，违反即流程违规）
 
-1. **绝不创建 GitHub PR**：`gh pr create` 是违规操作。merge 的唯一方式是 worktree 内 `git checkout ${TARGET_BRANCH} && git merge --no-ff --no-squash`
+1. **绝不创建 GitHub PR**：`gh pr create` 是违规操作
 2. **绝不推送远程**：`git push` 在任何情况下都不执行
-3. **汇报 DONE 前必须走完完整步骤链**：全量测试通过 → commit → 本地 merge → 清理 worktree → 关闭 issue（步骤 5-9）。缺少任一步骤即汇报 DONE 是违规，控制者将要求回退补做，浪费双方时间
+3. **绝不 merge、绝不关闭 issue**：merge 与关 issue 由 Merger 统一负责。你只负责实现 + commit + 输出 `<promise>COMPLETE</promise>`
+4. **汇报前必须走完完整步骤链**：全量测试通过 → commit（中文描述）→ 输出 `<promise>COMPLETE</promise>`。缺少任一步骤即输出 COMPLETE 是违规
 
 ## Issue 内容
 
-[gh issue view <id> --json title,body 的完整输出]
+[gh issue view {{ISSUE_NUMBER}} --json title,body,comments 的完整输出；如有父 PRD 一并注入]
 
 ## 领域上下文
 
 [粘贴 CONTEXT.md 完整内容，如存在]
-
 [粘贴相关 ADR 内容，如存在]
 
 ## 工作目录
@@ -57,51 +61,39 @@
 
 ## 你的工作
 
-**边界规则**：你只能在 worktree 目录内工作。禁止 `cd` 回主仓库或在主仓库执行 git 命令。
+**边界规则**：只能在 worktree 目录内工作。禁止 `cd` 回主仓库或在主仓库执行 git 命令。
+
+**Seam 预确认**：控制者已基于 issue body 的 Testing Decisions 段和相关测试预确认 seam。你**直接进入 TDD，不等待确认**。若发现 seam 与 issue 需求不符，继续实现并在汇报中注明疑虑。
 
 严格遵循 TDD 流程，不允许直接写实现代码：
 
-1. **确认 seam**：阅读 issue body 中的 Testing Decisions 段落和代码库中相关测试。列出你计划测试的 seam（一行一句，标注测试所在文件和方法），**在写任何代码前向控制者确认这些 seam 是否正确**。控制者确认后你才能进入第 2 步。
-2. **红**：确认后，先写一个失败测试
-3. **绿**：写最小实现使其通过
-4. **循环**：一个垂直切片（一个 seam → 一个测试 → 一个实现），重复直到 issue 完成
-5. **全量测试**：运行项目的全量测试套件，确保零回归
-6. **提交**：通过后 commit。**必须先 commit 再 merge。未 commit 就 merge 是违规。**
-7. **合并（绝不使用 PR）**：在 worktree 内执行本地 merge，**不创建 GitHub PR、不推送远程**：
-   ```bash
-   git checkout ${TARGET_BRANCH}
-   git merge --no-ff --no-squash <当前分支名>
-   ```
-   然后手动清理 worktree 和分支：
-   ```bash
-   cd /path/to/main/repo  # 退出 worktree
-   wt remove <worktree路径>
-   git branch -D <当前分支名>
-   ```
-8. **验证 merge**：确认 merge commit 有 2 个 parent：`git cat-file -p HEAD | grep "^parent"`。如果只有 1 个 parent，说明 merge 未生效，**不得关闭 issue**，先排查原因。
-9. **关闭 issue**：`gh issue close [number]` — **硬性要求，汇报 DONE 前必须执行**
+1. **红**：先写一个失败测试
+2. **绿**：写最小实现使其通过
+3. **循环**：一个垂直切片（一个 seam → 一个测试 → 一个实现）重复，直到 issue 完成
+4. **重构**：整理代码，消除重复，保持可读性
+5. **全量测试**：运行项目的全量测试套件（如 `npm run test` / `uv run pytest`，视项目而定），确保零回归
+6. **提交**：通过后 commit。**commit 描述用中文，不带任何英文字母前缀**（分支内 commit 不写 `feat:`/`fix:` 之类前缀；squash commit 的前缀规范由 Merger 负责）
 
-**全量测试是硬性要求**。在你汇报 DONE 之前，项目的全量测试套件必须全部通过。
+**全量测试是硬性要求**。零回归才可输出 COMPLETE。
 
-**汇报 DONE 前自我检查清单（一项不满足不得汇报 DONE）：**
-- [ ] 全量测试通过（后端 + 前端）
-- [ ] 代码已 commit
-- [ ] 已在 worktree 内本地 merge 到 ${TARGET_BRANCH}（`git merge --no-ff --no-squash`，非 PR）
-- [ ] merge commit 有 2 个 parent
-- [ ] worktree 已清理（`wt remove` + `git branch -D`）
-- [ ] issue 已关闭（`gh issue close` 已执行）
+**汇报前自检清单（一项不满足不得输出 COMPLETE）：**
+- [ ] 全量测试通过（后端 + 前端，贴实际输出）
+- [ ] 代码已 commit（中文描述，无英文字母前缀）
+- [ ] 未 merge、未 push、未创建 PR、未关闭 issue（关闭只发生在 Merger），已输出 `<promise>COMPLETE</promise>`
 
 ## 汇报格式
 
-- **状态**：DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
-- 实现了什么（或被阻塞时尝试了什么）
-- **全量测试结果**（必须贴实际输出）：命令 + 通过/失败数量
-- 修改了哪些文件
-- **Issue 关闭**：已关闭（gh issue close [number] 已执行）/ 未关闭（原因）
+1. **给自然人读的摘要**（在 `<promise>COMPLETE</promise>` 标签**之前**输出）：
+   - 实现了什么
+   - 全量测试结果（必须贴实际输出：命令 + 通过/失败数量）
+   - 修改了哪些文件
+   - 未 merge、未关闭 issue（由 Merger 统一负责）
+2. **完成信号**：全部完成后输出 `<promise>COMPLETE</promise>`
+3. **人读状态**（在标签**之后**输出）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
 
 **状态说明**：
-- DONE — 全部完成：全量测试通过 + 已 commit + 已本地 merge ${TARGET_BRANCH} + merge 验证通过 + worktree 已清理 + issue 已关闭。六项缺一不可
-- DONE_WITH_CONCERNS — 完成了但全量测试有非你的改动引起的失败（具体说明哪些是预存的）。**其他五项仍然必须完成**
+- DONE — 全部完成：全量测试通过 + 已 commit（中文）+ 未 merge/未关 issue
+- DONE_WITH_CONCERNS — 完成了但全量测试有非你的改动引起的失败（具体说明哪些是预存的），或有其他疑虑
 - BLOCKED — 无法完成，需要帮助
 - NEEDS_CONTEXT — 缺少信息无法继续
 ```
