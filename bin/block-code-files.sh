@@ -3,9 +3,10 @@
 # restricted 模式下阻止代码文件写入
 
 INPUT=$(cat)
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODES_DIR="$SCRIPT_DIR/modes"
-MODE_FILE="$MODES_DIR/current-mode-$$"
+MODE_FILE="$MODES_DIR/current-mode-${SESSION_ID:-global}"
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
 [ -z "$FILE_PATH" ] && exit 0

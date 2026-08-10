@@ -6,9 +6,10 @@
 
 INPUT=$(cat)
 CMD=$(echo "$INPUT" | jq -r '.command_name // empty')
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODES_DIR="$SCRIPT_DIR/modes"
-MODE_FILE="$MODES_DIR/current-mode-$$"
+MODE_FILE="$MODES_DIR/current-mode-${SESSION_ID:-global}"
 
 mkdir -p "$MODES_DIR"
 
