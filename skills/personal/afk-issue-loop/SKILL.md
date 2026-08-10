@@ -81,7 +81,12 @@ herdr 模式下 pane 创建、指令下发、等待、轮询等操作，直接�
 后续所有 `${TARGET_BRANCH}` 都指这个值：
 
 ```bash
-git branch -a | grep -Eq '(^|[[:space:]/])develop$' && TARGET_BRANCH=develop || TARGET_BRANCH=main
+# 直接查 ref 而非解析 git branch -a 文本：当前检出的 develop 显示为 "* develop"、本地分支带缩进、远程分支带 remotes/ 前缀，grep 正则易误判
+if git rev-parse --verify --quiet refs/heads/develop >/dev/null 2>&1 || git rev-parse --verify --quiet refs/remotes/origin/develop >/dev/null 2>&1; then
+  TARGET_BRANCH=develop
+else
+  TARGET_BRANCH=main
+fi
 echo "TARGET_BRANCH=$TARGET_BRANCH"
 ```
 

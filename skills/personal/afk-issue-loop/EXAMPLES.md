@@ -24,7 +24,12 @@ $ gh issue list --label ready-for-agent --state open
 ### 阶段 0：分支模型检测 → TARGET_BRANCH
 
 ```bash
-git branch -a | grep -Eq '(^|[[:space:]/])develop$' && TARGET_BRANCH=develop || TARGET_BRANCH=main
+# 直接查 ref 而非解析 git branch -a 文本（* develop 前缀/缩进/remotes/ 前缀易致正则误判）
+if git rev-parse --verify --quiet refs/heads/develop >/dev/null 2>&1 || git rev-parse --verify --quiet refs/remotes/origin/develop >/dev/null 2>&1; then
+  TARGET_BRANCH=develop
+else
+  TARGET_BRANCH=main
+fi
 echo "TARGET_BRANCH=$TARGET_BRANCH"    # 本示例仓库有 develop 分支 → develop（Git flow）
 # 若只有 main → main（trunk-based，绝不新建 develop）
 ```
