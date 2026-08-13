@@ -6,6 +6,7 @@
 > - `{{ISSUE_NUMBER}}` / `{{ISSUE_TITLE}}`：issue 编号与标题
 > - `{{BRANCH}}`：分支名（确定性 `afk/issue-{N}`）
 > - `${TARGET_BRANCH}`：阶段 0 分支模型检测结果（`develop` 或 `main`）
+> - `{{REVIEW_AGENT_NAME}}`：对应 Reviewer 的 agent 名字——修复完成后 `SendMessage` 通知它复查
 > - 「Issue 内容」「领域上下文」「工作目录」三段按实际情况填充
 
 ---
@@ -80,6 +81,16 @@
 - [ ] 全量测试通过（后端 + 前端，贴实际输出）
 - [ ] 代码已 commit（中文描述）
 - [ ] 未 merge、未 push、未创建 PR、未关闭 issue（关闭只发生在 Merger），已输出 `<promise>COMPLETE</promise>`
+
+## 反馈修复（review-N 反馈后 resume 时执行）
+
+你实现完成（已输出 COMPLETE）后，若收到 review-N 通过 `SendMessage` 发来的问题反馈，你会自动 resume：
+
+1. 按反馈逐条修复（TDD → 全量测试 → commit，红线不变）
+2. 全部修复并 commit 后，**`SendMessage(to={{REVIEW_AGENT_NAME}}, "已修复，请复查")`** 通知 Reviewer 复查
+3. 复查若仍有问题且 1 轮已满，由 Reviewer 上报控制者，你无需再自行处理
+
+未收到反馈则跳过本段。
 
 ## 汇报格式
 

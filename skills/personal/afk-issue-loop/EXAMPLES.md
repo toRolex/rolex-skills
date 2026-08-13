@@ -111,14 +111,14 @@ DONE
 你正在审查分支 afk/issue-42 上对 issue #42：Add --verbose flag to root command 的改动。
 读 git diff ${TARGET_BRANCH}..HEAD（本分支相对目标分支的全部改动）。
 若本分支相对 ${TARGET_BRANCH} 无任何改动，直接输出 <promise>COMPLETE</promise>，不做任何动作。
-发现可改进：直接在本分支修改 → 重跑全量测试 → commit（中文）。
+发现可改进：SendMessage 直连 impl-42 反馈（只反馈，不自己改）→ impl-42 修复 → 复查。
 ```
 
-Reviewer 发现 flag 解析分支可简化 → 修改 → 重跑测试 → commit → 输出：
+Reviewer 发现 flag 解析分支可简化 → SendMessage(impl-42) 反馈 → impl-42 修复并 commit → 复查通过 → 输出：
 
 ```
-简化 flag 解析逻辑（cli/args.py）
-全量测试：uv run pytest → 142 passed
+已反馈 impl-42：简化 flag 解析分支（cli/args.py）。
+impl-42 已修复并 commit。复查通过。
 <promise>COMPLETE</promise>
 DONE
 ```
@@ -135,7 +135,7 @@ git merge --squash afk/issue-42          # 分支全部改动暂存为单条，�
 # 冲突读两侧解决，禁 -X theirs/ours（本示例无冲突）
 uv run pytest                             # 每分支合完跑全量测试 → 142 passed
 git commit -m "feat: Add --verbose flag to root command（#42）"
-git branch -D afk/issue-42                # squash 后删分支
+wt remove afk/issue-42 -D --foreground    # squash 后删分支 + 清理 worktree
 gh issue close 42                         # 统一关 issue；若父 PRD 已全部完成一并关闭
 ```
 
@@ -198,4 +198,4 @@ DONE
 2. **无残留 worktree**：`wt list` 中不再出现 `afk/issue-{N}`
 3. **无 PR / 无 push**：`gh pr list` 无匹配；本地 merge 不推送。PR 误判修正——只有 `Merge pull request #N` 才是 GitHub PR merge
 4. **issue 已关闭**：`gh issue view <id> --json state` → CLOSED；父 PRD 在子 issue 全部关闭后一并关闭
-5. **分支已删**：squash 后 `git branch -D afk/issue-{N}`
+5. **分支已删、worktree 已清理**：squash 后 `wt remove afk/issue-{N} -D --foreground`

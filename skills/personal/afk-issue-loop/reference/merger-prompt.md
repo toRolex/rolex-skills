@@ -40,7 +40,7 @@
    - 功能前缀按改动性质 / issue label：`enhancement`→`feat`、`bug`→`fix`、其他（chore/refactor/无 label）→`chore`
    - `<标题>` 与 issue 标题对应；`（#N）` 是你自写 message 的一部分，不是 GitHub PR merge
 5. **跑全量测试**（如 `npm run test` / `uv run pytest`，视项目而定），贴实际输出。失败先修复（额外 commit）再合下一个
-6. **删除已合并分支**：`git branch -D afk/issue-{N}`
+6. **删除已合并分支并清理 worktree**：`wt remove afk/issue-{N} -D --foreground`（移除 worktree 并强制删除分支；squash 合入后分支对 git 视为未合并，必须带 `-D`）
 
 ## 统一关 issue
 
@@ -52,6 +52,7 @@
 ## 验证
 
 - ${TARGET_BRANCH} 出现每个分支对应的 **1-parent** squash commit（`git cat-file -p <squash commit> | grep "^parent"` 只输出 1 行）
+- `wt list` 中不再出现已合并分支的 worktree
 - 注意：只有匹配 `Merge pull request #N` 才是 GitHub PR merge；agent 自写 message 带 `（#N）` 不算
 
 ## 汇报格式

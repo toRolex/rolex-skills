@@ -1,17 +1,17 @@
 ---
 name: afk-issue-loop
-description: 遍历标记为 ready-for-agent 的 GitHub issue，用 Planner/Implementer/Reviewer/Merger 四角色循环批量实现并统一 squash merge，全部完成后提示手动 code review 或 QA。用户通过 /afk-issue-loop 调用。
+description: 遍历标记为 ready-for-agent 的 GitHub issue，用 Planner/Implementer/Reviewer/Merger 四角色循环批量实现并统一 squash merge，全部完成后提示手动 code review 或 QA。
 disable-model-invocation: true
 argument-hint: "[mode=subagent|herdr]"
 ---
 
 # AFK Issue Loop（sandcastle 式四角色编排）
 
-Matt Pocock 的 Ralph loop 的轻量替代（sandcastle 式四角色编排），控制者扮演 `run.ts` 编排器，无需 Docker：
+Matt Pocock 的 Ralph loop 的轻量替代，控制者扮演 `run.ts` 编排器，无需 Docker：
 
 - **Planner** 分析 issue 依赖 → 输出 `<plan>` JSON（只含当前 unblocked 的 issue）
 - **Implementer** 每 issue 一个，在 `afk/issue-N` 分支 TDD 实现
-- **Reviewer** Implementer 完全结束后同分支审查
+- **Reviewer** Implementer 完全结束后同分支审查，问题 `SendMessage` 直连对应 Implementer 修复（只反馈，不自己改代码）
 - **Merger** 主仓库统一 `git merge --squash` 并关 issue
 
 **前置条件**：项目已跑过 `/setup-rolex-skills`，仓库有 `CONTEXT.md`（缺失时按 [REFERENCE.md](REFERENCE.md#contextmd-缺失策略) 处理）。herdr 模式额外需要 herdr CLI 已安装。
@@ -27,7 +27,7 @@ Matt Pocock 的 Ralph loop 的轻量替代（sandcastle 式四角色编排），
 
 **载体与角色正交**：四种角色在任何载体下都用同一套 prompt 语义（依赖分析、`<plan>`、`<promise>COMPLETE`、确定性分支名、squash merge 都不变），区别只在「谁来跑」。
 
-herdr 模式下 pane 创建、指令下发、等待、轮询等操作，直接遵循 `/herdr` 和 `/herdr-instances` skill 的核心工作流与布局规则（主编排 pane 不可上下分割，左右/上下分割各自不超过 3）。
+herdr 模式下 pane 创建、指令下发、等待、轮询等操作见 [reference/herdr-notes.md](reference/herdr-notes.md)；布局规则遵循 `/herdr-instances`（主编排 pane 不可上下分割，左右/上下分割各自不超过 3）。
 
 ## 角色架构
 
@@ -35,7 +35,7 @@ herdr 模式下 pane 创建、指令下发、等待、轮询等操作，直接�
 |------|------|----------|
 | **Planner** | 扫 `gh issue list --label ready-for-agent --state open`，依赖分析，分配确定性分支名 `afk/issue-{N}` | `<plan>` JSON |
 | **Implementer** | 每 issue 一个，在 `afk/issue-N` 分支，TDD→全量测试→commit（中文描述） | `<promise>COMPLETE</promise>`；**不关 issue** |
-| **Reviewer** | Implementer 完全结束后（含退出/超时/抛错后求值）同分支触发，读 `git diff ${TARGET_BRANCH}..HEAD`，可改进并 commit；分支无 commit 则跳过 | 改进 commit 或跳过 |
+| **Reviewer** | Implementer 完全结束后（含退出/超时/抛错后求值）同分支触发，读 `git diff ${TARGET_BRANCH}..HEAD`，问题 `SendMessage` 直连 impl-N 修复（只反馈不自己改）；分支无 commit 则跳过 | 反馈或跳过 |
 | **Merger** | `${TARGET_BRANCH}` 上逐个 `git merge --squash <分支>`，冲突读两侧解决；每分支合完跑全量测试；统一关 issue（含父 PRD） | squash commit（1 parent）+ 关闭的 issue |
 
 **控制者职责**（不写实现代码）：发起启动各角色子代理（按载体）→ 解析 Planner 的 `<plan>` JSON → 分派 Implementer / Reviewer → 分派 Merger → 验证（issue 关闭 / worktree 清理 / `${TARGET_BRANCH}` 出现对应 1-parent squash commit）→ 异常处置（BLOCKED / NEEDS_CONTEXT，沿用状态处理表）。
@@ -59,20 +59,6 @@ herdr 模式下 pane 创建、指令下发、等待、轮询等操作，直接�
 
 - **并行度**：跨 issue ≤4（信号量）；同 issue 内 Implementer→Reviewer 严格串行
 - **完成判定**：真正的完成（关 issue）只在 Merger。Implementer / Reviewer 都不关 issue
-
-## Quick start
-
-```
-用户：我已经 /to-issues 拆好了，让 agent 逐个实现这些 issue
-
-1. 阶段 0：分支模型检测 → TARGET_BRANCH（develop / main）
-2. 阶段 1：Planner → 依赖分析 → <plan> JSON
-3. 阶段 2：控制者解析 <plan>，每 issue 分派 Implementer（≤4 并行）
-   → <promise>COMPLETE → 同分支 Reviewer
-4. 阶段 3：Merger 统一 squash merge + 关 issue
-5. 回到 Planner，直到 <plan> 为空
-6. 全部完成 → 提示用户进行 code review 或 QA
-```
 
 ## Workflows
 
@@ -134,25 +120,27 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 - >0 → 触发同分支 Reviewer
 - ==0 → 跳过 Reviewer，标记后交由下轮 Planner 处理
 
-**4. 同分支触发 Reviewer**：
-- 读 `git diff ${TARGET_BRANCH}..HEAD`，可改进并 commit（中文）；分支无 commit 则跳过
-- 输出 `<promise>COMPLETE</promise>`；不关 issue
+**4. 同分支触发 Reviewer**（分派时注入 `{{IMPL_AGENT_NAME}}`）：
+- 读 `git diff ${TARGET_BRANCH}..HEAD`；分支无 commit 则跳过
+- 发现可改进 → **`SendMessage(to=impl-N)` 直连反馈**（只反馈不自己改），状态 `FEEDBACK_SENT`；impl-N 自动 resume 修复 → commit → 回信 review-N → 复查
+- 复查通过 → 进 Merger；**1 轮不通过 → 带诊断上报**（换强模型 / 拆分 / 上报，见 [REFERENCE.md](REFERENCE.md#状态处理)）
+- 不关 issue
 
-**5. 处理状态**：异常（NEEDS_CONTEXT / BLOCKED 等）按 [REFERENCE.md](REFERENCE.md#状态处理) 处置。
+**5. 处理状态**：`FEEDBACK_SENT` 是闭环中（启动等待，见[超时协议](REFERENCE.md#超时协议)）；异常（NEEDS_CONTEXT / BLOCKED 等）按 [REFERENCE.md](REFERENCE.md#状态处理) 处置。
 
 ### 阶段 3：Merger（统一 squash merge + 关 issue）
 
-本轮 Implementer / Reviewer 全部结束后，分派 Merger：
+本轮 Implementer / Reviewer 全部结束后，用 [reference/merger-prompt.md](reference/merger-prompt.md) 模板分派 Merger（注入 `{{BRANCHES}}`）：
 
-- **位置**：在主仓库（已检出 `${TARGET_BRANCH}`）执行，**不在 worktree 内执行**——git 禁止同一分支在两个 worktree 同时检出
-- 分派 Merger 前，在主仓库执行 `git checkout ${TARGET_BRANCH}`，确认处于目标分支
-- 命令：逐个 `git merge --squash afk/issue-{N}`，冲突读两侧解决（**禁 `-X theirs/ours`**）
-- squash commit message：`feat/chore/fix: <标题>（#N）`（功能前缀，延续中文风格）
-- **每分支合完跑全量测试**；失败先修复再继续下一个
-- 验证：`${TARGET_BRANCH}` 出现 **1-parent** squash commit；PR 误判修正——只有匹配 `Merge pull request #N` 才是 GitHub PR merge（agent 自写 message 带 `（#N）` 不算）
-- squash 后删除分支
-- **统一关 issue**：`gh issue close <N>`；若父 PRD 因该 issue 完成而全部完成，一并关闭
+- 分派前在主仓库执行 `git checkout ${TARGET_BRANCH}`，确认处于目标分支；merge 只在主仓库执行，**不在 worktree 内执行**（git 禁止同一分支在两个 worktree 同时检出）
+- 不 push、不建 PR；与 `origin/${TARGET_BRANCH}` 分歧时保留分歧（政策全文见 [REFERENCE.md](REFERENCE.md#红线)）
+- 冲突解决、删分支与 worktree 清理、关 issue（含父 PRD）等执行细则均在模板内，控制者不代做
 - 完成信号：`<promise>COMPLETE</promise>`
+
+**Merger 完成后验证三件事**：
+1. `gh issue view <N> --json state` → CLOSED（父 PRD 在子 issue 全部关闭后一并关闭）
+2. `wt list` 中不再出现 `afk/issue-{N}` 的 worktree
+3. `${TARGET_BRANCH}` 出现对应的 **1-parent** squash commit（`git cat-file -p HEAD | grep "^parent"` 只输出 1 行；本地 commit，非 `origin/${TARGET_BRANCH}` 上的）——PR 误判修正：只有匹配 `Merge pull request #N` 才是 GitHub PR merge，agent 自写 message 带 `（#N）` 不算；若发现 PR merge，标记流程错误，按[红线](REFERENCE.md#红线)回滚重做
 
 ### 循环：回到 Planner
 
@@ -162,9 +150,13 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 
 ## Reference
 
-- [REFERENCE.md](REFERENCE.md) — 依赖解析、协议机制、模型选择、红线、状态处理、超时协议、并行冲突、agent 中断恢复、CONTEXT.md 缺失策略、herdr 模式注意事项、收尾流程
+- [REFERENCE.md](REFERENCE.md) — 依赖解析、协议机制、模型选择、红线、状态处理、超时协议、并行冲突、agent 中断恢复、CONTEXT.md 缺失策略、收尾流程
+- [reference/herdr-notes.md](reference/herdr-notes.md) — herdr 模式操作细节（仅 mode=herdr）
 - [EXAMPLES.md](EXAMPLES.md) — 完整一轮示例；不确定某阶段的具体命令 / 信号格式时先读它
+- [reference/planner-prompt.md](reference/planner-prompt.md) — Planner 分派模板
 - [reference/implementer-prompt.md](reference/implementer-prompt.md) — Implementer 分派模板
+- [reference/reviewer-prompt.md](reference/reviewer-prompt.md) — Reviewer 分派模板（含 feedback 闭环）
+- [reference/merger-prompt.md](reference/merger-prompt.md) — Merger 分派模板
 
 全部 issue 完成后，提示用户：
 

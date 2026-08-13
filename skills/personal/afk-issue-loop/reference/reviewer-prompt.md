@@ -6,6 +6,7 @@
 > - `{{ISSUE_NUMBER}}` / `{{ISSUE_TITLE}}`：issue 编号与标题
 > - `{{BRANCH}}`：分支名（确定性 `afk/issue-{N}`）
 > - `${TARGET_BRANCH}`：阶段 0 分支模型检测结果（`develop` 或 `main`）
+> - `{{IMPL_AGENT_NAME}}`：对应 Implementer 的 agent 名字（控制者分派 impl-N 时用 `Agent(name=...)` 指定）——Reviewer 用 `SendMessage` 直连它
 > - 「工作目录」段按载体模式填充
 
 ---
@@ -88,16 +89,24 @@ worktree 已由控制者预创建，请切换到该 worktree 目录：
 
 ## 执行
 
-发现可改进：
-1. **直接在本分支修改**
-2. **重跑全量测试**（如 `npm run test` / `uv run pytest`，视项目而定），贴实际输出，确保无破坏
-3. **commit**：描述用中文
+**你只审查和反馈，不修改代码**。发现的问题一律整理成「位置 + 现状 + 期望」的条目，通过 `SendMessage` 直连对应 Implementer 修复（不经控制者中转）：
 
-代码已干净且结构良好 → **不做任何改动**。
+1. 审查 diff，列出每个问题（正确性 / 需求相符 / 风格可读性）
+2. **`SendMessage(to={{IMPL_AGENT_NAME}}, ...)`** 一次性发送全部问题，并说明「请按反馈修复，完成后通知我复查」
+3. 报告「已反馈 impl-N，等待修复」，状态标 `FEEDBACK_SENT`——本轮**不输出** `<promise>COMPLETE</promise>`（审查任务尚未最终完成）
+
+代码已干净且结构良好 → **不做任何动作**，输出 `<promise>COMPLETE</promise>`，状态 `DONE`。
+
+**收到 impl-N 修复通知后复查**（此时自动 resume）：impl-N 修复并 commit 后会用 `SendMessage` 回你：
+- 复查通过 → 上报控制者，输出 `<promise>COMPLETE</promise>`，状态 `DONE`
+- 复查不通过（1 轮上限已满）→ **带诊断上报控制者**：判定是「没理解反馈」还是「能力不够」，建议换更强模型 / 拆分 issue / 上报，输出 `<promise>COMPLETE</promise>`，状态 `DONE_WITH_CONCERNS`
 
 ## 汇报格式
 
-1. **给自然人读的摘要**（在 `<promise>COMPLETE</promise>` 标签**之前**输出）：审查结论、是否修改、全量测试结果、改了哪些文件
-2. **完成信号**：输出 `<promise>COMPLETE</promise>`
-3. **人读状态**（在标签**之后**输出）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
+1. **给自然人读的摘要**（在标签**之前**输出）：审查结论、反馈了哪些问题、复查结果
+2. **完成信号**：最终输出 `<promise>COMPLETE</promise>`（第一轮反馈后不输出，只标状态 `FEEDBACK_SENT`）
+3. **人读状态**（在标签**之后**输出）：
+   - `DONE` — 无问题直接完成，或复查通过
+   - `DONE_WITH_CONCERNS` — 复查不通过（1 轮已满），附诊断
+   - `NEEDS_CONTEXT` / `BLOCKED` — 同现状
 ```
