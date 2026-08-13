@@ -10,7 +10,7 @@ bash scripts/link-skills.sh
 
 ## 功能
 
-从 develop 分支发版。处理版本号 bump、changelog 更新、Git 标签、合并到 main、推送到远程。减少发版的重复操作。
+自动检测仓库分支模型后发版：Git Flow 从 develop 分支，Trunk-based 从 main（trunk）分支。处理版本号 bump、changelog 更新、Git 标签、合并到 main、推送到远程。减少发版的重复操作。
 
 ## 何时使用
 
