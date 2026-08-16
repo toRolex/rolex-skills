@@ -96,7 +96,7 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 </plan>
 ```
 
-**控制者解析**：用正则提取 `<plan>...</plan>` 包裹的 JSON，校验每项 `number/title/branch`。空列表 `{"issues":[]}` → 结束循环。
+**控制者解析**：用正则提取 `<plan>...</plan>` 包裹的 JSON，校验每项 `number/title/branch`，识别可选 `kind` 字段（`kind=gate` = 判定类 ticket，处置见 [REFERENCE.md](REFERENCE.md#依赖解析)）。空列表 `{"issues":[]}` → 结束循环。
 
 **全 blocked 判断逻辑**：无 unblocked 时，Planner 默认输出单个最高优先候选（依赖最少/最弱）继续推进；当候选为 PRD、或阻塞源在本轮内无解锁路径（外部依赖/需人工）、或已无任何可推进项时输出空列表结束循环。
 
@@ -138,7 +138,7 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 - 完成信号：`<promise>COMPLETE</promise>`
 
 **Merger 完成后验证三件事**：
-1. `gh issue view <N> --json state` → CLOSED（父 PRD 在子 issue 全部关闭后一并关闭）
+1. `gh issue view <N> --json state` → CLOSED（父 PRD 在子 issue 全部关闭后一并关闭）；判定类 ticket 不通过时由控制者直接关闭（带结论 comment），下游保持 open——处置见 [REFERENCE.md](REFERENCE.md#依赖解析)
 2. `wt list` 中不再出现 `afk/issue-{N}` 的 worktree
 3. `${TARGET_BRANCH}` 出现对应的 **1-parent** squash commit（`git cat-file -p HEAD | grep "^parent"` 只输出 1 行；本地 commit，非 `origin/${TARGET_BRANCH}` 上的）——PR 误判修正：只有匹配 `Merge pull request #N` 才是 GitHub PR merge，agent 自写 message 带 `（#N）` 不算；若发现 PR merge，标记流程错误，按[红线](REFERENCE.md#红线)回滚重做
 
@@ -146,6 +146,7 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 
 - Merger 完成后回到阶段 1，重新 Planner（**每轮重 Plan**），直到 `<plan>` 为空
 - 控制者可为循环设最大轮数（如 10），防止依赖分析错误导致死循环
+- 若本轮有判定类 ticket 失败产生的未处置下游（保持 open），与完成统计一并列出，请用户/owner 逐条 triage 存废
 - 全部完成 → 提示用户 code review / QA
 
 ## Reference

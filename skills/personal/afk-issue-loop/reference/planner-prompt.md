@@ -40,6 +40,10 @@ issue B 被 issue A 阻塞，当满足以下任一条：
 
 有实现 issue 链接到它的 PRD 不可作为实现对象（由 Merger 在子 issue 完成后统一关闭）。
 
+## 判定类 ticket
+
+以验证/判定为目标的 issue（spike / gate / proof-of-concept），其结果（通过 / 不通过）对依赖它的下游是 go/no-go，不是实现依赖的解锁。识别为判定类时，在其 JSON 中标注 `"kind": "gate"`；仍按 `Blocked by` 判 unblocked / blocked。判定不通过时结果只终结该 ticket 自身，下游存废由 owner 评估（控制者按此处置，见 REFERENCE.md 依赖解析节）。
+
 ## 全 blocked 判断
 
 无 unblocked 时：
@@ -51,10 +55,10 @@ issue B 被 issue A 阻塞，当满足以下任一条：
 输出 `<plan>` 包裹的 JSON，只含当前 unblocked 的 issue：
 
 <plan>
-{"issues": [{"number": 42, "title": "修复认证 bug", "branch": "afk/issue-42"}]}
+{"issues": [{"number": 42, "title": "修复认证 bug", "branch": "afk/issue-42", "kind": "gate"}]}
 </plan>
 
-分支名格式必须是 `afk/issue-{N}`（确定性，重 Plan 恒得同名，进度自然保留）。空列表为 `{"issues":[]}`。
+分支名格式必须是 `afk/issue-{N}`（确定性，重 Plan 恒得同名，进度自然保留）。判定类 ticket 加可选 `"kind": "gate"` 标注，普通 issue 可省略。空列表为 `{"issues":[]}`。
 
 ## 红线
 

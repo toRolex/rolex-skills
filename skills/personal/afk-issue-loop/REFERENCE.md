@@ -20,6 +20,12 @@
 
 **PRD 规则**：有实现 issue 链接的 PRD 不可作为实现对象（由 Merger 在子 issue 完成后统一关闭）。
 
+**判定类 ticket（spike / gate / proof-of-concept）**：以验证/判定为目标，其结果（通过 / 不通过）对依赖它的下游是 go/no-go，不是实现依赖的解锁。
+
+- 结果只终结该 ticket 自身：判定不通过 → **控制者直接** `gh issue close <N> --comment <结论>`（不经 Merger——判定终结是「关 issue 只在 Merger」的例外）
+- **不级联关闭下游**：判定不通过不必然否掉所有下游（如不依赖其结果、可独立验证的 server 侧工作），下游存废由 owner 评估
+- 因判定取消的下游保持 open、不改状态、不标 wontfix，收尾列入「待 owner triage」清单报告（见[收尾流程](#收尾流程)）
+
 展示分组：
 
 ```
@@ -44,7 +50,7 @@ blocked（本轮等待）：
 
 - **确定性分支名**：`afk/issue-{N}`。同 issue 每轮重 Plan 恒得同名分支，进度自然保留（resume / 中断恢复依赖此特性）
 - **`<promise>COMPLETE</promise>` 是权威完成信号**：Implementer 发出 = 分支可审查；Reviewer 发出 = 审查完成或跳过；Merger 发出 = 全部合并 + issue 已关。`DONE` 等自然语言只是人读摘要（见[状态处理](#状态处理)）
-- **真正完成判定（关 issue）只在 Merger**；Implementer / Reviewer 都不关 issue
+- **真正完成判定（关 issue）只在 Merger**（判定类 ticket 的关闭例外见[依赖解析](#依赖解析)）；Implementer / Reviewer 都不关 issue
 - **Reviewer 反馈经 `SendMessage` 直连 impl-N，不经控制者中转**（反馈闭环细节见[状态处理](#状态处理)与[超时协议](#超时协议)）
 
 控制者解析 `<plan>`：正则提取 `<plan>([\s\S]*?)</plan>`，`JSON.parse`，校验每项 `number/title/branch`。
@@ -77,6 +83,7 @@ blocked（本轮等待）：
 - Seam 预确认：分派时预确认，agent 不等待
 - Reviewer 只审查不自己改代码；问题经 `SendMessage` 直连对应 impl-N（subagent 同会话路由；herdr 需跨会话 messaging，见[reference/herdr-notes.md](reference/herdr-notes.md)）
 - 反馈迭代上限 1 轮：复查不通过即升级，review-N 带诊断上报（区分「没理解反馈」/「能力不够」，控制者据此换强模型 / 拆分 / 上报）
+- **绝不关闭或改 label 任何本流程未实现合入的 issue**（含判定失败的下游与父 PRD）——存废由 owner 决定；判定类 ticket 自身的关闭例外见[依赖解析](#依赖解析)
 
 **本地 squash merge（不推送、不建 PR）**
 - 唯一权威 merge 方式：主仓库（已检出 `${TARGET_BRANCH}`）内 `git merge --squash <分支>`；**不在 worktree 内执行**（git 禁止同一分支在两个 worktree 同时检出）；`wt` 的 merge 子命令不再作为权威
@@ -145,4 +152,4 @@ Merger 后验证三件事（CLOSED / 无残留 worktree / 1-parent squash commit
 
 ## 收尾流程
 
-所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 squash commit），然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。
+所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 squash commit），并列出因判定类 ticket 失败而保持 open、需 owner triage 的下游 ticket；然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。

@@ -44,10 +44,11 @@
 
 ## 统一关 issue
 
-全部合并完成后：
+**只关闭本流程实际合并完成的 ticket**：
 
 1. 对每个已合并分支对应的 issue：`gh issue close <N>`
-2. 若关闭子 issue 会完成父 PRD（父 issue 的所有子 issue 均已关闭），父 PRD 一并 `gh issue close`
+2. 若关闭子 issue 会完成父 PRD（父 issue 的所有子 issue 均已合并完成），父 PRD 一并 `gh issue close`
+3. **绝不关闭未合并完成的 issue**（如判定类 ticket 失败导致的下游）：保持 open、不改状态、不标 wontfix，在汇报中列出并注明「需 owner triage」
 
 ## 验证
 
