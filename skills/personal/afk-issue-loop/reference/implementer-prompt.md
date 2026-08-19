@@ -6,7 +6,6 @@
 > - `{{ISSUE_NUMBER}}` / `{{ISSUE_TITLE}}`：issue 编号与标题
 > - `{{BRANCH}}`：分支名（确定性 `afk/issue-{N}`）
 > - `${TARGET_BRANCH}`：阶段 0 分支模型检测结果（`develop` 或 `main`）
-> - `{{REVIEW_AGENT_NAME}}`：对应 Reviewer 的 agent 名字——修复完成后 `SendMessage` 通知它复查
 > - 「Issue 内容」「领域上下文」「工作目录」三段按实际情况填充
 
 ---
@@ -73,24 +72,25 @@
 3. **循环**：一个垂直切片（一个 seam → 一个测试 → 一个实现）重复，直到 issue 完成
 4. **重构**：整理代码，消除重复，保持可读性
 5. **全量测试**：运行项目的全量测试套件（如 `npm run test` / `uv run pytest`，视项目而定），确保零回归
-6. **提交**：通过后 commit。**commit 描述用中文**（分支内 commit 不写 `feat:`/`fix:` 之类前缀；squash commit 的前缀规范由 Merger 负责）
+6. **提交**：通过后 commit。**commit 描述用中文**，分支内 commit 不写 `feat:`/`fix:` 之类前缀（前缀由 Merger 负责）
 
 **全量测试是硬性要求**。零回归才可输出 COMPLETE。
 
+**Commit 粒度（硬性规则）**：一个 commit 只表达一个完整意图。
+
+- TDD 节奏下，每个垂直切片（红→绿→重构）可以自然产生 1 个或多个 commit——这是被允许的
+- 但**禁止**一次性大改：若你的 `git status` 显示一次改动跨越 20 个文件，先 `git diff` 审一遍，**按"独立可回滚的语义单元"拆成多个 commit**
+- 拆分原则：每个 commit 编译通过 + 测试通过（或至少有清晰可独立验证的子集）；不要把"重构 + 新功能 + 修测试"塞进一个 commit
+- commit 描述写清楚"做了什么 + 为什么"，便于 Reviewer 在你之后接力（Reviewer 会继续在同一 worktree 同一 branch 叠加 commit）
+
 **汇报前自检清单（一项不满足不得输出 COMPLETE）：**
 - [ ] 全量测试通过（后端 + 前端，贴实际输出）
-- [ ] 代码已 commit（中文描述）
+- [ ] 代码已 commit（中文描述，**语义原子粒度**——大改动已拆分）
 - [ ] 未 merge、未 push、未创建 PR、未关闭 issue（关闭只发生在 Merger），已输出 `<promise>COMPLETE</promise>`
 
-## 反馈修复（review-N 反馈后 resume 时执行）
+## 失败重试
 
-你实现完成（已输出 COMPLETE）后，若收到 review-N 通过 `SendMessage` 发来的问题反馈，你会自动 resume：
-
-1. 按反馈逐条修复（TDD → 全量测试 → commit，红线不变）
-2. 全部修复并 commit 后，**`SendMessage(to={{REVIEW_AGENT_NAME}}, "已修复，请复查")`** 通知 Reviewer 复查
-3. 复查若仍有问题且 1 轮已满，由 Reviewer 上报控制者，你无需再自行处理
-
-未收到反馈则跳过本段。
+你可能因为上次超时、抛错或模型临时不可用被同 worktree 同 branch 重新分派。**直接继续**，复用已 commit 的进度（不要 reset / amend / rebase 之前的 commit），从上次中断或反馈点继续推进，再次输出 `<promise>COMPLETE</promise>` 即可。Reviewer 不再通过 `SendMessage` 回传反馈——你只对控制者负责，不对 Reviewer 负责。
 
 ## 汇报格式
 

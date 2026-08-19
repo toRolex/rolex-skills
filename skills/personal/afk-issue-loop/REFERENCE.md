@@ -1,6 +1,6 @@
 # AFK Issue Loop — Reference
 
-> `${TARGET_BRANCH}` 由 SKILL.md 阶段 0 的分支模型检测决定（`develop` 或 `main`），是 worktree 创建与 Merger squash merge 的目标分支。
+> `${TARGET_BRANCH}` 由 SKILL.md 阶段 0 的分支模型检测决定（`develop` 或 `main`），是 worktree 创建与 Merger 拓扑 merge 的目标分支。
 
 ## 依赖解析
 
@@ -16,7 +16,7 @@
 1. 从每个 issue body 提取 `Blocked by` 列表
 2. `None` 或只依赖已关闭 issue 的 → **unblocked**，可立即分派
 3. 有未关闭依赖 issue 的 → **blocked**，本轮不派
-4. 每轮 Merger 关 issue 后回到 Planner **重新 Plan**（依赖图可能变化）
+4. Planner 只在开头跑一次，输出**完整依赖图（DAG）**；每轮由控制者按拓扑序切片本轮 unblocked（unblocked 集合空即停）
 
 **PRD 规则**：有实现 issue 链接的 PRD 不可作为实现对象（由 Merger 在子 issue 完成后统一关闭）。
 
@@ -45,15 +45,15 @@ blocked（本轮等待）：
 
 | 信号 | 生产者 | 格式 / 含义 |
 |------|--------|-------------|
-| `<plan>` | Planner | `<plan>{"issues":[{"number","title","branch"}]}</plan>`，只含当前 unblocked |
+| `<plan>` | Planner（**仅开头一次**） | `<plan>{"issues":[{"number","title","branch","blocked_by":[number,...]}]}</plan>`，完整 DAG，控制者按拓扑序切片每轮 unblocked |
 | `<promise>COMPLETE</promise>` | Implementer / Reviewer / Merger | 权威完成信号 |
 
-- **确定性分支名**：`afk/issue-{N}`。同 issue 每轮重 Plan 恒得同名分支，进度自然保留（resume / 中断恢复依赖此特性）
+- **确定性分支名**：`afk/issue-{N}`。重跑 Planner 输出同一分支名（虽只跑一次，确定性仍是契约）
 - **`<promise>COMPLETE</promise>` 是权威完成信号**：Implementer 发出 = 分支可审查；Reviewer 发出 = 审查完成或跳过；Merger 发出 = 全部合并 + issue 已关。`DONE` 等自然语言只是人读摘要（见[状态处理](#状态处理)）
 - **真正完成判定（关 issue）只在 Merger**（判定类 ticket 的关闭例外见[依赖解析](#依赖解析)）；Implementer / Reviewer 都不关 issue
-- **Reviewer 反馈经 `SendMessage` 直连 impl-N，不经控制者中转**（反馈闭环细节见[状态处理](#状态处理)与[超时协议](#超时协议)）
+- **Reviewer 直接在 Implementer 的 worktree / branch 上改代码 + commit**，不反馈、不复查（对齐 sandcastle 一次性自改）；Implementer 与 Reviewer 在同一分支线性叠加 commit，Implementer 的 commit 在前、Reviewer 的 `refine:` commit 在后
 
-控制者解析 `<plan>`：正则提取 `<plan>([\s\S]*?)</plan>`，`JSON.parse`，校验每项 `number/title/branch`。
+控制者解析 `<plan>`：正则提取 `<plan>([\s\S]*?)</plan>`，`JSON.parse`，校验每项 `number/title/branch`；DAG 模式下同时校验 `blocked_by`（数组，可空）。
 
 ## 模型选择
 
@@ -79,17 +79,16 @@ blocked（本轮等待）：
 - 分支名必须用 Planner 输出的确定性 `afk/issue-{N}`，不另造名称
 
 **控制者角色**
-- 控制者只做编排——分派、解析 `<plan>`、验证、异常处置，**不写实现代码**；发现产出 bug 时分派修复 agent（可换更强模型），主会话不直接改代码
+- 控制者只做编排——分派、解析 `<plan>`、按 DAG 拓扑序切片每轮 unblocked、验证、异常处置，**不写实现代码**；发现产出 bug 时分派修复 agent（可换更强模型），主会话不直接改代码
 - Seam 预确认：分派时预确认，agent 不等待
-- Reviewer 只审查不自己改代码；问题经 `SendMessage` 直连对应 impl-N（subagent 同会话路由；herdr 需跨会话 messaging，见[reference/herdr-notes.md](reference/herdr-notes.md)）
-- 反馈迭代上限 1 轮：复查不通过即升级，review-N 带诊断上报（区分「没理解反馈」/「能力不够」，控制者据此换强模型 / 拆分 / 上报）
+- Reviewer 直接在 Implementer 的 worktree / branch 上改代码 + 跑测试 + commit（**不反馈、不复查**），对齐 sandcastle 一次性自改；Implementer 与 Reviewer 同 worktree 同 branch 线性叠加 commit
 - **绝不关闭或改 label 任何本流程未实现合入的 issue**（含判定失败的下游与父 PRD）——存废由 owner 决定；判定类 ticket 自身的关闭例外见[依赖解析](#依赖解析)
 
-**本地 squash merge（不推送、不建 PR）**
-- 唯一权威 merge 方式：主仓库（已检出 `${TARGET_BRANCH}`）内 `git merge --squash <分支>`；**不在 worktree 内执行**（git 禁止同一分支在两个 worktree 同时检出）；`wt` 的 merge 子命令不再作为权威
+**本地拓扑 merge（不推送、不建 PR）**
+- 唯一权威 merge 方式：主仓库（已检出 `${TARGET_BRANCH}`）内 `git merge <branch> --no-edit`；**不在 worktree 内执行**（git 禁止同一分支在两个 worktree 同时检出）；`wt` 的 merge 子命令不再作为权威
 - `git push origin ${TARGET_BRANCH}` 在任何情况下都不执行；`gh pr create`、Web UI 合并或任何远程 merge 都是违规
 - 本地 `${TARGET_BRANCH}` 与 `origin/${TARGET_BRANCH}` 分歧时保留分歧，不 merge origin、不解决冲突——分歧是预期状态，由项目维护者决定何时同步
-- squash message 规范、冲突解决、删分支与 worktree 清理等 Merger 执行细则见 [reference/merger-prompt.md](reference/merger-prompt.md)；验证清单见 SKILL.md 阶段 3
+- merge 冲突解决、删分支与 worktree 清理等 Merger 执行细则见 [reference/merger-prompt.md](reference/merger-prompt.md)；验证清单见 SKILL.md 阶段 3
 
 **worktree 与 Agent 环境**
 - 统一用 `wt switch -c afk/issue-{N} -b ${TARGET_BRANCH}` 创建 worktree（不用 `git worktree add`）
@@ -97,18 +96,23 @@ blocked（本轮等待）：
 
 ## 状态处理
 
-**`<promise>COMPLETE</promise>` 与状态的关系**：`<promise>` 是权威完成信号——角色发出即视为本轮求值完成；`DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED` 是自然语言状态摘要，供控制者做异常分类与处置。
+`<promise>COMPLETE</promise>` 与 `DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED` 的关系（权威信号 vs 自然语言摘要）见[协议机制](#协议机制)。
 
-| 状态 | 含义 | 控制者动作 |
-|------|------|-----------|
-| `DONE` + `<promise>COMPLETE</promise>` | Implementer 完成：TDD→全量测试→commit，分支可审 | 触发同分支 Reviewer |
-| `FEEDBACK_SENT`（无 COMPLETE） | Reviewer 已把问题 `SendMessage` 反馈 impl-N，闭环进行中 | 启动闭环等待（见[超时协议](#超时协议)），等 impl-N 修复 + review-N 复查 |
-| `DONE_WITH_CONCERNS` | Implementer：完成但有疑虑 / **Reviewer：复查不通过（1 轮已满），带诊断** | Implementer：阅读疑虑，正确性相关→分派修复 agent（不手动修）；Reviewer：读诊断（「没理解反馈」vs「能力不够」）→ 换强模型 / 拆分 / 上报 |
-| `NEEDS_CONTEXT` | 缺少信息无法继续 | 保留 worktree，提供缺失信息后重新分派（同分支，进度保留） |
-| `BLOCKED` | 无法完成，需要帮助 | 保留 worktree，评估原因后：补上下文 / 换强模型 / 拆分 issue / 上报。**绝不忽视** |
-| 超时（无状态） | 后台计时器先于 `<promise>` 触发 | 见[超时协议](#超时协议) |
+| 状态 | 控制者动作 |
+|------|-----------|
+| `DONE` + `<promise>COMPLETE</promise>` | 触发下一阶段（Implementer→Reviewer；Reviewer→Merger；Merger→下一轮控制者切片） |
+| `DONE_WITH_CONCERNS` | 阅读疑虑，正确性相关→分派修复 agent（不手动修）；能力相关→下轮换强模型 / 拆分 / 上报 |
+| `NEEDS_CONTEXT` | 保留 worktree，提供缺失信息后重新分派（同分支，进度保留） |
+| `BLOCKED` | 保留 worktree，评估原因后：补上下文 / 换强模型 / 拆分 issue / 上报。**绝不忽视** |
+| 超时（无状态） | 见[超时协议](#超时协议) |
 
-Merger 后验证三件事（CLOSED / 无残留 worktree / 1-parent squash commit）见 SKILL.md 阶段 3；若发现 GitHub PR merge，按[红线](#红线)回滚重做。
+Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3；拓扑 merge 不再验证 `git cat-file -p HEAD | grep "^parent"` 的 1-parent 约束（拓扑 merge 自然产生多 parent merge commit）。
+
+## 失败重试行为
+
+- 失败 issue **不传染下游**：DAG 上其它节点按原 `blocked_by` 推进，不因某 issue 失败而永久 blocked
+- 失败 issue **原地重试**（leading word `_原地重试_`）：失败后控制者用同一 `afk/issue-{N}` 分支与同一 worktree 再次分派（Implementer / Reviewer），commit 历史保留前次痕迹（不清理 worktree、不 reset）
+- 理论上某 issue 可能永久卡在重试循环——用户预期正常情况不会发生；极端场景（API key 失效、模型服务降级）由用户在收尾时通过 worktree 残留自查
 
 ## 超时协议
 
@@ -129,10 +133,7 @@ Merger 后验证三件事（CLOSED / 无残留 worktree / 1-parent squash commit
 
 **herdr 模式**：沿用现有轮询协议（`herdr agent list` 查 `agent_status`），见[reference/herdr-notes.md](reference/herdr-notes.md)。agent 完成回到 idle 但不会通知控制者，必须主动轮询。
 
-**闭环等待**（review-N 反馈 impl-N 后，subagent 模式）：
-- review-N 第一轮结束（`FEEDBACK_SENT`）后，控制者启动闭环 deadline（沿用上表时限，按修复量取中值）
-- deadline 内收到 review-N 最终 `COMPLETE` → 按复查结果处置（通过 → Merger；不通过 → 带诊断升级）
-- deadline 到仍无最终结果 → `TaskStop` 终止 review-N / impl-N，查分支 commit 按部分完成处理
+**Implementer / Reviewer 失败重试**：见[失败重试行为](#失败重试行为)——同 worktree 同 branch 继续重试，无次数上限。
 
 ## 并行冲突处理
 
@@ -152,4 +153,4 @@ Merger 后验证三件事（CLOSED / 无残留 worktree / 1-parent squash commit
 
 ## 收尾流程
 
-所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 squash commit），并列出因判定类 ticket 失败而保持 open、需 owner triage 的下游 ticket；然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。
+所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 merge commit 与 summarizing commit），并列出因判定类 ticket 失败而保持 open、需 owner triage 的下游 ticket；然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。

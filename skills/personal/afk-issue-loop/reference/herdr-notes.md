@@ -5,7 +5,7 @@
 
 （适配四角色：每个角色一个 pane / agent，命名建议 `planner` / `impl-{N}` / `review-{N}` / `merger`，遵守 `/herdr-instances` 布局规则——主编排 pane 不可上下分割，左右/上下分割各自不超过 3。）
 
-> **反馈闭环与 messaging 依赖**：subagent 模式的直连是会话内 `SendMessage`，不依赖额外开关；herdr 模式里 impl-N / review-N 是独立 pane，直连需跨会话 messaging——受服务端 `agents_cross_session_inbox` flag 门控（官方未灰度到本环境时不可用，需官方模型/账号环境实测）。不可用时 herdr 反馈闭环退回控制者中转（沿用状态处理表 `DONE_WITH_CONCERNS`）。
+> **DAG 与拓扑合并语义**：herdr 模式下各 pane 独立运行 Implementer / Reviewer / Merger，但 Planner **仅在开头跑一次**输出完整 DAG（在主导 pane 上下文，控制者解析后按拓扑序切片每轮 unblocked 分派）；Merger 用 `git merge <branch> --no-edit` 拓扑合并，不做 `--squash`，无需跨会话 messaging 协调。Reviewer 不再通过 `SendMessage` 回传反馈（直接在同一 worktree 改代码并 commit），所以 herdr 模式也不再有反馈闭环跨会话依赖。
 
 ### agent start 三要素
 
@@ -86,7 +86,8 @@ herdr agent list | grep <名称>
 herdr agent read <名称> --source recent-unwrapped | tail -80
 
 # 2. 检查汇报格式：应有 <promise>COMPLETE</promise>、测试结果
-# 3. 外部验证三件事（CLOSED / 无残留 worktree / 1-parent squash commit）——
+# 3. 外部验证两件事（CLOSED / 无残留 worktree）——
+#    拓扑 merge 不再验证 1-parent squash commit
 #    命令与判定标准见 SKILL.md 阶段 3
 
 # 4. 完成 → 关闭 pane，继续下一角色
