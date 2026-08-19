@@ -75,7 +75,7 @@ blocked（本轮等待）：
 
 **分派前**
 - 只有 unblocked 的 issue 才分派；跨 issue 并行 ≤4（信号量）；同 issue 内 Implementer→Reviewer 严格串行
-- 分派时注入 issue 完整文本（含 comments）与 `CONTEXT.md`（如存在），agent 不自己读 issue
+- 分派时注入 issue 完整文本（含 comments）、`CONTEXT.md` 与编码规范（均如存在），agent 不自己读 issue
 - 分支名必须用 Planner 输出的确定性 `afk/issue-{N}`，不另造名称
 
 **控制者角色**

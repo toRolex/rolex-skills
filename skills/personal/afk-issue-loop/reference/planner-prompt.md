@@ -23,7 +23,7 @@ Planner 无 per-issue 占位符（自行扫描 issue）。`${TARGET_BRANCH}` 仅
 
 ## 依赖判定标准
 
-**主判定：issue body 的 `Blocked by` 字段**（格式：`- #<id> — <描述>` 或 `None - can start immediately`）。
+**主判定：issue body 的 `Blocked by` 字段**（格式：`- #<id> — <描述>` 或 `None - can start immediately`）。`Blocked by` 指向**已关闭** issue 视为已满足（上轮已合并），不计入 `blocked_by`。
 
 issue B 被 issue A 阻塞，当满足以下任一条：
 

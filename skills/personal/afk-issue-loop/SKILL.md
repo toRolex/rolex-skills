@@ -127,7 +127,7 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 
 **2. 分派 Implementer**，prompt 注入：
 - issue 完整文本 + comments（`gh issue view <id> --json title,body,comments`）；如有父 PRD 一并注入
-- `CONTEXT.md` 内容（如存在）+ 相关 ADR
+- `CONTEXT.md` 内容（如存在）+ 相关 ADR + 编码规范文件（探测 `.sandcastle/CODING_STANDARDS.md`、`docs/` 规范文档、README 规范节，均无则跳过）
 - worktree 绝对路径（subagent）或自行 `wt switch -c` 的指令（herdr）
 - **Seam 预确认**：控制者分派时基于 issue body 的 Testing Decisions 段和相关测试预确认 seam，agent **不等待**（解决 subagent 卡死）
 - 红线：TDD → 全量测试（贴实际输出）→ commit（**中文描述、语义原子**——大改动先审 diff 再拆 commit）→ 输出 `<promise>COMPLETE</promise>`；**不关 issue**
@@ -138,6 +138,7 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 - ==0 或失败 → **失败处理**：同 worktree 同 branch 无限重试，不传染下游。理论上某 issue 可能永久卡重试——用户预期正常情况不会发生；极端场景在收尾时自查
 
 **4. 同 worktree 同 branch 触发 Reviewer**（沿用 Implementer 的 worktree）：
+- prompt 注入与 Implementer 相同：issue 完整文本 + comments、领域上下文（`CONTEXT.md` / ADR / 编码规范，均如存在）
 - 读 `git diff ${TARGET_BRANCH}..HEAD`；分支无 commit 则跳过
 - **直接改代码 → 跑测试 → `refine:` commit**（不反馈、不复查、不发 `SendMessage` 给 impl-N）——对齐 sandcastle 一次性自改
 - Implementer 与 Reviewer 在同一分支线性叠加 commit：Implementer 的 commit 在前、Reviewer 的 `refine:` commit 在后
