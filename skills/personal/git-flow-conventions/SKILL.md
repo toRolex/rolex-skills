@@ -10,42 +10,9 @@ description: >
 
 # Git Flow 分支管理与提交规范
 
-基于 Vincent Driessen 的 A Successful Git Branching Model，
-指导团队按照标准化流程进行分支操作、提交和代码合并。
+基于 Vincent Driessen 的 A Successful Git Branching Model，指导团队按 GitFlow 进行分支操作、提交和合并。
 
-## 核心分支模型
-
-```
-master (production)    ●───●─────────●────────── ● ──●
-                        \   /           \         /   /
-release                  ●─●    v1.0     ●───●   /   /
-                          \              /     \ /   /
-develop  ●────●────●──────●────●───●────●───────●───●────
-           \    \    \      /      \    \     /
-feature     ●─┐  ●─┐  ●───●        ●─┐  ●───●
-              │    │                  │    │
-hotfix        │    │                  │    ●────────────●
-              │    │                  │
-```
-
-## 分支类型与命名规范
-
-| 分支类型 | 命名格式 | 来源 | 合并目标 | 说明 |
-|---------|---------|------|---------|------|
-| `master` | `master` / `main` | — | — | 生产环境代码，只接受合并 |
-| `develop` | `develop` | `master` | — | 主开发分支 |
-| `feature` | `feature/<功能简述>` | `develop` | `develop` | 新功能开发 |
-| `release` | `release/<版本号>` | `develop` | `master` + `develop` | 发布准备 |
-| `hotfix` | `hotfix/<版本号>` | `master` | `master` + `develop` | 线上紧急修复 |
-
-### 命名示例
-
-- `feature/user-auth` — 用户认证功能
-- `feature/add-dashboard` — 新增仪表盘
-- `release/1.2.0` — 1.2.0 版本发布
-- `hotfix/1.1.1` — 修复 1.1.0 线上问题
-
-**原则**：全小写，英文单词用连字符分隔，简洁描述目的。
+完整分支模型、命名规范、红线、对比矩阵见 [`references/gitflow.md`](references/gitflow.md)。
 
 ## 操作命令速查
 
@@ -240,29 +207,18 @@ Closes #<编号>
 gh release create v<版本号> --title "v<版本号>: <简述>" --notes "<完整 note>" --target main
 ```
 
-## 关键红线
+## 扩展：其他主流工作流
 
-- **禁止** 直接在 `master`/`main` 上修改代码
-- **禁止** 直接在 `develop` 上开发功能，必须走 feature 分支
-- **禁止** 在 Release 分支打好后从 develop 合入新功能
-- **必须** 使用 `--no-ff` 合并 feature/release/hotfix 到主分支
-- **必须** 每次 Release/Hotfix 后在 master 上打 tag
-- **必须** 删除已合并的 feature/release/hotfix 远程分支
+完整 Git Flow 偏重，主干又必须稳定时，还有两种常见替代：**GitHub Flow**（轻量 + PR 强协作）和 **Trunk-Based Development**（主干高频集成）。
 
-## 简化版工作流（小型团队）
+各工作流完整内容：
 
-如果完整 Git Flow 太重，可简化为：
+- GitFlow（含横向对比矩阵 + 选型决策表）：[`references/gitflow.md`](references/gitflow.md)
+- GitHub Flow：[`references/github-flow.md`](references/github-flow.md)
+- Trunk-Based Development：[`references/trunk-based.md`](references/trunk-based.md)
 
-```
-main ●────────────●─────●
-       \          /     /
-feature ●──●──●──●     /
-         \             /
-bugfix   ●───────────●
-```
+**何时读这些 reference**：
 
-- `main` — 生产分支
-- `feature/<名称>` — 功能分支，合入 main
-- `bugfix/<名称>` — 修复分支，合入 main
-
-不区分 release/hotfix，直接在 main 上打 tag 发版。
+- 用户明确问"我们应不应该换工作流"——先读 `references/gitflow.md` 顶部拿对比矩阵和决策表
+- 用户已经在用 GitHub Flow / Trunk-Based——直接读对应文件
+- 用户在 GitFlow 上下文里讨论某条特定规则——留在主文件即可，不要跳转
