@@ -74,7 +74,7 @@ blocked（本轮等待）：
 控制者的行为规则（角色 agent 的红线见 `reference/` 下各分派模板）：
 
 **分派前**
-- 只有 unblocked 的 issue 才分派；跨 issue 并行 ≤4（信号量）；同 issue 内 Implementer→Reviewer 严格串行
+- 只有 unblocked 的 issue 才分派；跨 issue 并行 ≤4（信号量，Implementer 与 Reviewer 合计占坑）；同 issue 内 Implementer→Reviewer 严格串行；跨 issue 流水线——某 issue 的 Implementer 完成即触发其 Reviewer，不等本轮其他 issue
 - 分派时注入 issue 完整文本（含 comments）、`CONTEXT.md` 与编码规范（均如存在），agent 不自己读 issue
 - 分支名必须用 Planner 输出的确定性 `afk/issue-{N}`，不另造名称
 
@@ -137,7 +137,7 @@ Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3�
 
 ## 并行冲突处理
 
-- 并发纪律（跨 issue ≤4 / 同 issue 内严格串行）见[红线](#红线)「分派前」
+- 并发纪律（跨 issue ≤4 流水线 / 同 issue 内严格串行）见[红线](#红线)「分派前」
 - 空间冲突的 issue 由 Planner 判为 blocked 避免并发；已并行的重叠分支由 Merger 统一合并时解决（冲突处理规则见 [reference/merger-prompt.md](reference/merger-prompt.md)）
 
 ## agent 中断恢复

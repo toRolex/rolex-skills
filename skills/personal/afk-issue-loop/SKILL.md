@@ -119,7 +119,7 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"
 
 ### 阶段 2：Implementer + Reviewer（每 issue：worktree → 实现 → 自审）
 
-控制者按 DAG 拓扑序切片**本轮 unblocked**（节点 `blocked_by` 全部已完成或空），跨 issue ≤4 并行：
+控制者按 DAG 拓扑序切片**本轮 unblocked**（节点 `blocked_by` 全部已完成或空），跨 issue ≤4 并行。**流水线**：某 issue 的 Implementer 一完成（分支 commit >0）即触发其 Reviewer——不等待本轮其他 issue。信号量 ≤4 按 Implementer + Reviewer 合计占坑。
 
 **1. 创建 worktree**（确定性分支 `afk/issue-{N}`）：
 - subagent：控制者预创建 `wt switch -c afk/issue-{N} -b ${TARGET_BRANCH}`
