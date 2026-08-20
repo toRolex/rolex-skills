@@ -1,7 +1,7 @@
 #!/bin/bash
 # Hook: UserPromptExpansion
 # 根据命令名设置 skill 保护模式
-# 受限命令（wayfinder/grilling/grill-me/grill-with-docs）→ restricted
+# 受限命令（wayfinder/grilling/grill-me/grill-with-docs/domain-modeling）→ restricted
 # 其他任何命令 → normal
 
 INPUT=$(cat)
@@ -19,7 +19,7 @@ rm -f "$MODE_FILE"
 [ -z "$CMD" ] && exit 0
 
 case "$CMD" in
-  wayfinder|grilling|grill-me|grill-with-docs)
+  wayfinder|grilling|grill-me|grill-with-docs|domain-modeling)
     echo -n "restricted" > "$MODE_FILE"
     ;;
   *)
