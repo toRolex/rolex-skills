@@ -49,9 +49,9 @@ fluency strength 会给用户一种虚幻的掌握感，但 storage strength 才
 
 ## Lessons（课程）
 
-lesson 是你产出的主要内容——knowledge 和 skill 到达用户的单元。每个 lesson 是一个自包含的 HTML 文件，保存到 `./lessons/`，标题为 `0001-<短横线隔开的名字>.html`，编号每次递增。
+lesson 是你产出的主要内容：knowledge 和 skill 到达用户的单元。每个 lesson 是一个自包含的 HTML 文件，保存到 `./lessons/`，标题为 `0001-<短横线隔开的名字>.html`，编号每次递增。
 
-lesson 应该**精美**——清晰、可读的排版和布局——因为用户以后会回来复习。像 Tufte 那样思考。
+lesson 应该**精美**，有清晰、可读的排版和布局，因为用户以后会回来复习。像 Tufte 那样思考。
 
 lesson 应该简短，且能非常快速地完成。学习者的工作记忆非常小，我们需要保持在其中。但每个 lesson 应给用户一个可继续构建的切实胜利。它应直接与 mission 相关，并在用户的 zone of proximal development 内。
 
@@ -65,9 +65,9 @@ lesson 应该简短，且能非常快速地完成。学习者的工作记忆非�
 
 ## Assets（组件）
 
-lesson 由可复用的**component**构建，存储在 `./assets/` 中：样式表、测验小部件、模拟器、图表助手——任何第二个 lesson 可能复用的东西。
+lesson 由可复用的**component**构建，存储在 `./assets/` 中：样式表、测验小部件、模拟器、图表助手，以及任何第二个 lesson 可能复用的东西。
 
-复用是默认，不是例外。在编写 lesson 之前，阅读 `./assets/` 并从已存在的 component 构建。当 lesson 需要新的可复用东西时，将其作为 component 写入 `./assets/` 并链接——永远不要内联未来 lesson 会重复的代码。
+复用是默认，不是例外。在编写 lesson 之前，阅读 `./assets/` 并从已存在的 component 构建。当 lesson 需要新的可复用东西时，将其作为 component 写入 `./assets/` 并链接；永远不要内联未来 lesson 会重复的代码。
 
 共享样式表是每个 workspace 获得的第一个 component：每个 lesson 链接它，这样 lesson 看起来像一个一致的系列，而不是一堆一次性作品。随着 workspace 的增长，component 库也应增长。
 

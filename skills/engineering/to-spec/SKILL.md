@@ -1,12 +1,12 @@
 ---
 name: to-spec
-description: 把当前对话变成一份 spec，并发布到项目的 issue tracker——不做访谈，只综合你们已经讨论过的内容。
+description: 把当前对话变成一份 spec，并发布到项目的 issue tracker：不做访谈，只综合你们已经讨论过的内容。
 disable-model-invocation: true
 ---
 
-本 skill 结合当前对话上下文与对代码库的理解，产出一份 spec。不要访谈用户——只综合你已经知道的信息。
+本 skill 结合当前对话上下文与对代码库的理解，产出一份 spec。不要访谈用户；只综合你已经知道的信息。
 
-issue tracker 和 triage label 的词汇应该已经提供给你了——如果没有，运行 `/setup-rolex-skills`。
+issue tracker 和 triage label 的词汇应该已经提供给你了。如果没有，让用户运行 `/setup-rolex-skills`。
 
 ## 流程
 
@@ -52,9 +52,9 @@ issue tracker 和 triage label 的词汇应该已经提供给你了——如果�
 - API contracts
 - 具体的交互
 
-不要包含具体的文件路径或代码片段——它们可能很快就会过时。
+不要包含具体的文件路径或代码片段，它们可能很快就会过时。
 
-例外：如果 prototype 产出了一个比文字更能精确表达某个决策的片段（state machine、reducer、schema、type shape），把它内联到相关决策中，并简要注明它来自 prototype。只保留决策密集的部分——不是可运行的 demo，只是其中重要的片段。
+例外：如果 prototype 产出了一个比文字更能精确表达某个决策的片段（state machine、reducer、schema、type shape），把它内联到相关决策中，并简要注明它来自 prototype。只保留决策密集的部分，不是可运行的 demo，只是其中重要的片段。
 
 ## Testing Decisions
 

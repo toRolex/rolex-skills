@@ -1,6 +1,6 @@
 # Deepening（深化）
 
-给定依赖，如何安全地深化一组 shallow module。假定你熟悉 [SKILL.md](SKILL.md) 中的词汇——**module**、**interface**、**seam**、**adapter**。
+给定依赖，如何安全地深化一组 shallow module。假定你熟悉 [SKILL.md](SKILL.md) 中的词汇：**module**、**interface**、**seam**、**adapter**。
 
 ## 依赖类别
 
@@ -8,7 +8,7 @@
 
 ### 1. 进程内（In-process）
 
-纯计算、内存状态、无 I/O。总是可以深化——合并 module 并直接通过新 interface 测试。不需要 adapter。
+纯计算、内存状态、无 I/O。总是可以深化：合并 module 并直接通过新 interface 测试。不需要 adapter。
 
 ### 2. 本地可替代（Local-substitutable）
 
@@ -31,7 +31,7 @@
 
 ## 测试策略：替换，不要分层
 
-- 一旦深化后的 module 的 interface 处存在测试，shallow module 上旧的单元测试就变成浪费——删掉它们。
+- 一旦深化后的 module 的 interface 处存在测试，shallow module 上旧的单元测试就变成浪费；删掉它们。
 - 在深化后的 module 的 interface 处编写新测试。**interface 就是测试面。**
 - 测试断言的是通过 interface 可观察的结果，而不是内部状态。
-- 测试应该能在内部重构中存活——它们描述的是行为，不是 implementation。如果 implementation 改变时测试必须改变，它就是在越过 interface 测试。
+- 测试应该能在内部重构中存活，因为它们描述的是行为，不是 implementation。如果 implementation 改变时测试必须改变，它就是在越过 interface 测试。

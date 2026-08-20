@@ -6,7 +6,7 @@
 
 - 每个功能一个目录：`.scratch/<feature-slug>/`
 - spec 是 `.scratch/<feature-slug>/spec.md`
-- 实现 issue 是每个 ticket 一个文件，位于 `.scratch/<feature-slug>/issues/<NN>-<slug>.md`，从 `01` 开始编号——绝不用单个合并的 tickets 文件
+- 实现 issue 是每个 ticket 一个文件，位于 `.scratch/<feature-slug>/issues/<NN>-<slug>.md`，从 `01` 开始编号，绝不用单个合并的 tickets 文件
 - triage 状态记录在每份 issue 文件靠近顶部的位置，格式为 `Status:` 行（角色字符串见 `triage-labels.md`）
 - 评论和对话历史以 `## Comments` 标题追加到文件底部
 
@@ -22,7 +22,7 @@
 
 由 `/wayfinder` 使用。**map** 是一个文件，每个 ticket 对应一个 **child** 文件。
 
-- **Map**：`.scratch/<effort>/map.md`——Notes / Decisions-so-far / Fog 正文。
+- **Map**：`.scratch/<effort>/map.md`（Notes / Decisions-so-far / Fog 正文）。
 - **Child ticket**：`.scratch/<effort>/issues/NN-<slug>.md`，从 `01` 开始编号，正文包含问题。`Type:` 行记录 ticket 类型（`research`/`prototype`/`grilling`/`task`）；`Status:` 行记录 `claimed`/`resolved`。
 - **Blocking**：靠近顶部的一行 `Blocked by: NN, NN`。当它列出的每个文件都处于 `resolved` 时，ticket 解除阻塞。
 - **Frontier**：扫描 `.scratch/<effort>/issues/`，找出开放、未阻塞且未认领的文件；按编号最前者获胜。

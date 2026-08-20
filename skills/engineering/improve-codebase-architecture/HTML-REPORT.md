@@ -1,6 +1,6 @@
 # HTML Report 格式
 
-architecture 审查被渲染为 OS 临时目录里的单个自包含 HTML 文件。Tailwind 和 Mermaid 都来自 CDN。Mermaid 可靠地处理图状图表；手工构建的 div 和内联 SVG 处理更具编辑性的视觉元素（质量图、截面）。把两者混用——不要什么都依赖 Mermaid，否则它会开始看起来千篇一律。
+architecture 审查被渲染为 OS 临时目录里的单个自包含 HTML 文件。Tailwind 和 Mermaid 都来自 CDN。Mermaid 可靠地处理图状图表；手工构建的 div 和内联 SVG 处理更具编辑性的视觉元素（质量图、截面）。把两者混用：不要什么都依赖 Mermaid，否则它会开始看起来千篇一律。
 
 ## Scaffold（脚手架）
 
@@ -9,7 +9,7 @@ architecture 审查被渲染为 OS 临时目录里的单个自包含 HTML 文件
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>架构审查 — {{repo name}}</title>
+    <title>架构审查：{{repo name}}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
       import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
@@ -35,7 +35,7 @@ architecture 审查被渲染为 OS 临时目录里的单个自包含 HTML 文件
 
 ## Header（头部区）
 
-仓库名、日期，以及一个紧凑的图例：实线框 = module，虚线 = seam，红色箭头 = leakage，厚深色框 = deep module。没有引言段落——直接进入 candidate。
+仓库名、日期，以及一个紧凑的图例：实线框 = module，虚线 = seam，红色箭头 = leakage，厚深色框 = deep module。没有引言段落。直接进入 candidate。
 
 ## candidate 卡片
 
@@ -43,20 +43,20 @@ architecture 审查被渲染为 OS 临时目录里的单个自包含 HTML 文件
 
 每个 candidate 是一个 `<article>`：
 
-- **标题**——简短，命名这次深化（例如"折叠 Order intake 流水线"）。
-- **徽章行**——推荐强度（`Strong` = emerald，`Worth exploring` = amber，`Speculative` = slate），外加一个依赖类别标签（`in-process`、`local-substitutable`、`ports & adapters`、`mock`）。
-- **文件**——等宽列表，`font-mono text-sm`。
-- **Before / After 图**——中心内容。两列并排。参见下面的模式。
-- **问题**——一句话。哪里疼。
-- **解决方案**——一句话。什么会改变。
-- **收益**——要点，每条 <=6 个词。例如"测试只打一个 interface"、"Pricing 逻辑不再泄漏"、"删除 4 个浅 wrapper"。
-- **ADR 标注**（如果适用）——amber 色调盒子里的单行。
+- **标题**：简短，命名这次深化（例如"折叠 Order intake 流水线"）。
+- **徽章行**：推荐强度（`Strong` = emerald，`Worth exploring` = amber，`Speculative` = slate），外加一个依赖类别标签（`in-process`、`local-substitutable`、`ports & adapters`、`mock`）。
+- **文件**：等宽列表，`font-mono text-sm`。
+- **Before / After 图**：中心内容。两列并排。参见下面的模式。
+- **问题**：一句话。哪里疼。
+- **解决方案**：一句话。什么会改变。
+- **收益**：要点，每条 <=6 个词。例如"测试只打一个 interface"、"Pricing 逻辑不再泄漏"、"删除 4 个浅 wrapper"。
+- **ADR 标注**（如果适用）：amber 色调盒子里的单行。
 
 没有解释性段落。如果图表需要一段话才能被理解，就重画图表。
 
 ## 图表模式
 
-选择适合 candidate 的模式。混用它们。不要让每个图表看起来都一样——多样性本来就是重点的一部分。
+选择适合 candidate 的模式。混用它们。不要让每个图表看起来都一样。多样性本来就是重点的一部分。
 
 ### Mermaid graph（依赖 / 调用流的主力）
 
@@ -77,7 +77,7 @@ architecture 审查被渲染为 OS 临时目录里的单个自包含 HTML 文件
 
 ### 手工构建的 boxes-and-arrows（当 Mermaid 的布局跟你作对时）
 
-Modules 用带边框和标签的 `<div>` 表示。箭头用内联 SVG `<line>` 或 `<path>` 元素，绝对定位在 relative 容器之上。当你想要"after"图感觉像一个带粗边框、内部灰掉的 deep module 时用它——Mermaid 无法以正确的权重渲染那种效果。
+Modules 用带边框和标签的 `<div>` 表示。箭头用内联 SVG `<line>` 或 `<path>` 元素，绝对定位在 relative 容器之上。当你想要"after"图感觉像一个带粗边框、内部灰掉的 deep module 时用它，因为 Mermaid 无法以正确的权重渲染那种效果。
 
 ### Cross-section（适合分层浅度）
 
@@ -85,7 +85,7 @@ Modules 用带边框和标签的 `<div>` 表示。箭头用内联 SVG `<line>` �
 
 ### Mass diagram（适合"interface 与 implementation 一样宽"）
 
-每个 module 两个矩形——一个表示 interface 的表面积，一个表示 implementation。Before：interface 矩形几乎和 implementation 矩形一样高（浅）。After：interface 矩形短，implementation 矩形高（深）。
+每个 module 两个矩形：一个表示 interface 的表面积，一个表示 implementation。Before：interface 矩形几乎和 implementation 矩形一样高（浅）。After：interface 矩形短，implementation 矩形高（深）。
 
 ### Call-graph 折叠
 
@@ -96,8 +96,8 @@ Before：一棵渲染成嵌套盒子的函数调用树。After：同一棵树折
 - 偏编辑风格，而不是企业 dashboard 风。充足留白。标题可选 serif（`font-serif` 与 stone/slate 搭配得很好）。
 - 节制地用色：一个强调色（emerald 或 indigo），加上红色表示泄漏、amber 表示警告。
 - 让图表保持约 320px 高，这样 before/after 能舒服地并排，无需滚动。
-- 对图表内部的 module 标签使用 `text-xs uppercase tracking-wider`——它们应该读起来像示意图，而不是 UI。
-- 唯一的脚本是 Tailwind CDN 和 Mermaid ESM import。报告其余部分都是静态的——没有 app 代码，除了 Mermaid 自身的渲染之外没有任何交互。
+- 对图表内部的 module 标签使用 `text-xs uppercase tracking-wider`，这样它们读起来像示意图，而不是 UI。
+- 唯一的脚本是 Tailwind CDN 和 Mermaid ESM import。报告其余部分都是静态的：没有 app 代码，除了 Mermaid 自身的渲染之外没有任何交互。
 
 ## Top recommendation 部分
 
@@ -105,7 +105,7 @@ Before：一棵渲染成嵌套盒子的函数调用树。After：同一棵树折
 
 ## 语气
 
-平实的英文、简洁——但 architecture 名词和动词直接来自 `/codebase-design` skill。简洁不是漂移的借口。
+平实的英文、简洁，但 architecture 名词和动词直接来自 `/codebase-design` skill。简洁不是漂移的借口。
 
 **精确使用：** module、interface、implementation、depth、deep、shallow、seam、adapter、leverage、locality。
 
@@ -113,11 +113,11 @@ Before：一棵渲染成嵌套盒子的函数调用树。After：同一棵树折
 
 **符合风格的措辞：**
 
-- "Order intake module 是浅的——interface 几乎和 implementation 匹配。"
+- "Order intake module 是浅的：interface 几乎和 implementation 匹配。"
 - "Pricing 跨 seam 泄漏。"
 - "深化：一个 interface，一个测试的地方。"
 - "两个 adapter 为 seam 提供合理性：prod 用 HTTP，测试用 in-memory。"
 
-**收益要点**用 glossary 术语命名收益：*"locality：bug 集中在同一个 module"*、*"leverage：一个 interface，N 个调用点"*、*"interface 收缩；implementation 吸收 wrapper"*。不要写 *"easier to maintain"* 或 *"cleaner code"*——这些术语不在 glossary 里，也不配拥有自己的位置。
+**收益要点**用 glossary 术语命名收益：*"locality：bug 集中在同一个 module"*、*"leverage：一个 interface，N 个调用点"*、*"interface 收缩；implementation 吸收 wrapper"*。不要写 *"easier to maintain"* 或 *"cleaner code"*，因为这些术语不在 glossary 里，也不配拥有自己的位置。
 
 不要含糊其辞，不要清嗓子，不要"it's worth noting that…"。如果一个句子可以是要点，就把它写成要点。如果一条要点可以被删掉，就删掉它。如果一个术语不在 `/codebase-design` glossary 里，在发明新词之前，先找一个在 glossary 里的。

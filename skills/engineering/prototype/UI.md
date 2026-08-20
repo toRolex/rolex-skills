@@ -2,7 +2,7 @@
 
 在单一路由上生成**几个截然不同的 UI variant**，通过一个浮动的底部栏切换。用户在浏览器里在 variant 之间翻看，挑一个（或从每个里偷一点），然后把其余扔掉。
 
-如果问题是关于 logic/state 而不是关于某物长什么样——走错 branch 了。用 [LOGIC.md](LOGIC.md)。
+如果问题是关于 logic/state 而不是关于某物长什么样，就走错 branch 了。用 [LOGIC.md](LOGIC.md)。
 
 ## 什么时候这是正确的形状
 
@@ -11,21 +11,21 @@
 - "给设置页面试试不同的布局。"
 - 任何用户原本会在脑子里花一整天在三个模糊的 mockup 之间挑选的情况。
 
-## 两种子形态——强烈优先子形态 A
+## 两种子形态：强烈优先子形态 A
 
-当 UI prototype**紧贴着应用的其余部分**时——真实的 header、真实的 sidebar、真实的数据、真实的密度——它要容易判断得多。单独一条一次性路由是一个真空：每个 variant 单独看都挺好。只要存在一个合理的现有页面来承载 variant，就默认选择子形态 A。只有当 prototype 真的没有邻近的归宿时才够到子形态 B。
+当 UI prototype**紧贴着应用的其余部分**时（真实的 header、真实的 sidebar、真实的数据、真实的密度），它要容易判断得多。单独一条一次性路由是一个真空：每个 variant 单独看都挺好。只要存在一个合理的现有页面来承载 variant，就默认选择子形态 A。只有当 prototype 真的没有邻近的归宿时才够到子形态 B。
 
-### 子形态 A——对现有页面的调整（首选）
+### 子形态 A：对现有页面的调整（首选）
 
-路由已经存在。variant 渲染在**同一条路由上**，由 `?variant=` URL 搜索参数切换。现有的数据获取、参数和 auth 都保留——只有渲染被替换。这是默认选择；除非有特定理由，否则就选它。
+路由已经存在。variant 渲染在**同一条路由上**，由 `?variant=` URL 搜索参数切换。现有的数据获取、参数和 auth 都保留。只有渲染被替换。这是默认选择；除非有特定理由，否则就选它。
 
-如果 prototype 针对的东西还没有页面，但*自然会住在某个页面里*（dashboard 的一个新区块、设置页面上的一张新卡片、现有流程里的一个新步骤）——那仍然是子形态 A。把 variant 挂载进宿主页面。
+如果 prototype 针对的东西还没有页面，但*自然会住在某个页面里*（dashboard 的一个新区块、设置页面上的一张新卡片、现有流程里的一个新步骤），那仍然是子形态 A。把 variant 挂载进宿主页面。
 
-### 子形态 B——一个新页面（最后的手段）
+### 子形态 B：一个新页面（最后的手段）
 
-只有当被 prototype 化的东西真的没有现有页面可以住进去时才用它——例如一个全新的顶层 surface，或一个无法嵌入到任何合理位置的流程。
+只有当被 prototype 化的东西真的没有现有页面可以住进去时才用它（例如一个全新的顶层 surface，或一个无法嵌入到任何合理位置的流程）。
 
-创建一条**一次性路由**，遵循项目已经使用的任何路由约定——不要发明新的顶层结构。给它命名时要明显能看出是 prototype（例如在路径或文件名中包含 `prototype` 这个词）。使用同样的 `?variant=` 模式。
+创建一条**一次性路由**，遵循项目已经使用的任何路由约定。不要发明新的顶层结构。给它命名时要明显能看出是 prototype（例如在路径或文件名中包含 `prototype` 这个词）。使用同样的 `?variant=` 模式。
 
 在决定采用子形态 B 之前，做一次 sanity-check：真的没有可以嵌入它的现有页面吗？空路由会隐藏有内容的路由才会暴露出来的设计问题。
 
@@ -35,7 +35,7 @@
 
 ### 1. 陈述问题并选择 N
 
-默认 **3 个 variant**。超过 5 个就不再是截然不同，而是开始变成噪音——封顶在那里。
+默认 **3 个 variant**。超过 5 个就不再是截然不同，而是开始变成噪音，所以封顶在那里。
 
 用一行写下计划，放在 prototype 的位置或文件顶部的注释里：
 
@@ -51,14 +51,14 @@
 - 项目的组件库 / 样式系统（TailwindCSS、shadcn、MUI、plain CSS，随便什么）。
 - 清晰的导出组件名称，例如 `VariantA`、`VariantB`、`VariantC`。
 
-variant 必须**在结构上不同**——不同的布局、不同的信息 hierarchy（信息层级）、不同的主要 affordance（操作方式），而不只是不同的颜色。三个微调过的卡片网格不是 UI prototype，那是壁纸。如果两个草稿出来太相似，用明确的"不要用卡片网格"指导重做一个。
+variant 必须**在结构上不同**：不同的布局、不同的信息 hierarchy（信息层级）、不同的主要 affordance（操作方式），而不只是不同的颜色。三个微调过的卡片网格不是 UI prototype，那是壁纸。如果两个草稿出来太相似，用明确的"不要用卡片网格"指导重做一个。
 
 ### 3. 把它们接起来
 
 在路由上创建一个单一的 switcher 组件：
 
 ```tsx
-// pseudo-code — adapt to the project's framework
+// pseudo-code, adapt to the project's framework
 const variant = searchParams.get('variant') ?? 'A';
 return (
   <>
@@ -78,35 +78,35 @@ return (
 
 屏幕底部居中的一个小型 fixed-position 栏，由三部分组成：
 
-- **左箭头**——循环到上一个 variant（环绕）。
-- **variant 标签**——显示当前的 variant key，如果 variant 导出了名称，也显示那个名称。例如 `B — Sidebar layout`。
-- **右箭头**——向前循环（环绕）。
+- **左箭头**：循环到上一个 variant（环绕）。
+- **variant 标签**：显示当前的 variant key，如果 variant 导出了名称，也显示那个名称。例如 `B (Sidebar layout)`。
+- **右箭头**：向前循环（环绕）。
 
 行为：
 
-- 点击箭头会更新 URL 搜索参数（使用框架的 router——Next 上 `router.replace`，React Router 上 `navigate`，等等），这样 variant 是可分享的，刷新后也稳定。
+- 点击箭头会更新 URL 搜索参数（使用框架的 router，Next 上 `router.replace`，React Router 上 `navigate`，等等），这样 variant 是可分享的，刷新后也稳定。
 - 键盘：`←` 和 `→` 方向键也能循环。当 `<input>`、`<textarea>` 或 `[contenteditable]` 获得焦点时，不要拦截方向键。
 - 在视觉上与页面区分开（例如高对比度的 pill、微妙的阴影），这样它明显不是正在被评估的设计的一部分。
-- 在 production build 中隐藏——用 `process.env.NODE_ENV !== 'production'` 或等效检查来门控，这样一次误入的 prototype 合并不会把这条栏发给用户。
+- 在 production build 中隐藏：用 `process.env.NODE_ENV !== 'production'` 或等效检查来门控，这样一次误入的 prototype 合并不会把这条栏发给用户。
 
 把 switcher 放在一个单一的共享组件里，这样两种子形态都能复用。把它放在项目共享 UI 所在的位置。
 
 ### 5. 交给对方
 
-把 URL（和 `?variant=` 键）surface 出来。用户会在方便的时候翻看。有趣的反馈通常是**"我想要 B 的 header 配上 C 的 sidebar"**——那才是他们真正想要的设计。
+把 URL（和 `?variant=` 键）surface 出来。用户会在方便的时候翻看。有趣的反馈通常是**"我想要 B 的 header 配上 C 的 sidebar"**，那才是他们真正想要的设计。
 
 ### 6. 捕获答案并清理
 
-一旦某个 variant 胜出，捕获答案——哪个 variant 以及为什么——然后按 [SKILL](SKILL.md) 描述的方式捕获 prototype。把胜者并入真实代码，把其余移到一次性 branch 上，而不是进入 main：
+一旦某个 variant 胜出，捕获答案（哪个 variant 以及为什么），然后按 [SKILL](SKILL.md) 描述的方式捕获 prototype。把胜者并入真实代码，把其余移到一次性 branch 上，而不是进入 main：
 
-- **子形态 A**——把胜者并入现有页面；把落选 variant 和 switcher 从 main 中拿掉。
-- **子形态 B**——把胜出的 variant 提升为真实路由；把一次性路由和 switcher 从 main 中拿掉。
+- **子形态 A**：把胜者并入现有页面；把落选 variant 和 switcher 从 main 中拿掉。
+- **子形态 B**：把胜出的 variant 提升为真实路由；把一次性路由和 switcher 从 main 中拿掉。
 
-完整的 variant 集是一手来源，所以它落到一次性 branch 上，而不是垃圾桶——留在 main branch 里的 variant 组件和 switcher 会快速腐烂，并困惑下一个读者。
+完整的 variant 集是一手来源，所以它落到一次性 branch 上，而不是垃圾桶，因为留在 main branch 里的 variant 组件和 switcher 会快速腐烂，并困惑下一个读者。
 
 ## Anti-patterns
 
 - **只在颜色或文案上有差异的 variant。** 那是微调，不是 prototype。真正的 variant 在结构上意见相左。
 - **在 variant 之间共享太多代码。** 共享 `<Header>` 没问题；共享 `<Layout>` 就违背了初衷。每个 variant 都应该可以自由扔掉布局。
-- **把 variant 接到真实的 mutations 上。** 只读 prototype 没问题。如果 variant 需要 mutate，把它指向一个 stub——问题是"这应该长什么样"，而不是"backend 能不能工作"。
+- **把 variant 接到真实的 mutations 上。** 只读 prototype 没问题。如果 variant 需要 mutate，把它指向一个 stub：问题是"这应该长什么样"，而不是"backend 能不能工作"。
 - **把 prototype 直接提升到 production。** variant 代码是在 prototype 约束下写的（没有测试、极少的错误处理）。当你把它并入时，要正确地重写。
