@@ -38,18 +38,14 @@ echo "TARGET_BRANCH=$TARGET_BRANCH"    # 本示例仓库有 develop 分支 → d
 
 ### 阶段 1：Planner 一次性出 DAG
 
-控制者分派 Planner（subagent 用 `Agent` 工具，herdr 开独立 pane，prompt 相同）。prompt 关键片段：
+控制者分派 Planner（subagent 用 `Agent` 工具，herdr 开独立 pane）。**模板自加载**——prompt 只有两行，不复制模板全文：
 
 ```
-你是 Planner。分析当前仓库 open 的 ready-for-agent issue，构建完整依赖图（DAG），一次性输出全部 issue 的拓扑关系。
-
-1. 扫描：gh issue list --label ready-for-agent --state open --limit 100 --json number,title,body,labels,comments
-2. 构建 DAG：为每个 issue 列出 blocked_by 数组（数字列表，可空）
-3. 分配分支名：afk/issue-{N}（确定性）
-4. 输出：<plan> 包裹的 JSON，含所有 open issue
+Read ~/.claude/skills/afk-issue-loop/reference/planner-prompt.md 获取完整指令并执行。
+参数：TARGET_BRANCH=develop
 ```
 
-Planner 输出：
+Planner 自行扫描 issue、构建 DAG，把结果写入目标项目 `docs/afk-plan.json`，并输出：
 
 ```
 <plan>
@@ -62,7 +58,7 @@ Planner 输出：
 DONE
 ```
 
-控制者解析：正则提取 `<plan>...</plan>` → JSON.parse → 校验每项 `number/title/branch/blocked_by`（`blocked_by` 是数组，可空）→ 存入会话上下文（不持久化）。
+控制者验收：Read `docs/afk-plan.json` → 校验每项 `number/title/branch/blocked_by` → 给每节点补 `status: "pending"`（逐轮用 Edit 维护）。**状态在文件里，不在会话记忆里**——compact / `--resume` 后重读即可重建。
 
 > Planner 只在开头跑一次。之后每轮由控制者按 DAG 拓扑序切本轮 unblocked：本轮全部 issue 完成（Implementer + Reviewer）后，从"已完成节点"出发算下一轮——`blocked_by` 已全部完成的节点即为下一轮 unblocked。本示例为串行依赖链，每轮单条。
 
@@ -76,17 +72,16 @@ DONE
 wt switch -c afk/issue-42 -b ${TARGET_BRANCH}
 ```
 
-分派 Implementer，prompt 注入占位符 → 实际值：
+分派 Implementer（模板自加载 + 寻址注入，prompt 只有两行）：
 
 ```
-{{ISSUE_NUMBER}} = 42
-{{ISSUE_TITLE}} = Add --verbose flag to root command
-{{BRANCH}} = afk/issue-42
-${TARGET_BRANCH} = develop
-+ issue body 与 comments（gh issue view 42 --json title,body,comments）
-+ CONTEXT.md 完整内容 + 相关 ADR
-+ worktree 绝对路径（herdr 模式改为「自行 wt switch -c afk/issue-42 -b develop」）
+Read ~/.claude/skills/afk-issue-loop/reference/implementer-prompt.md 获取完整指令并执行。
+参数：ISSUE_NUMBER=42, BRANCH=afk/issue-42, TARGET_BRANCH=develop, WORKTREE=/path/to/worktree
 ```
+
+（herdr 模式省略 `WORKTREE`，agent 按模板自行 `wt switch -c afk/issue-42 -b develop`。issue 全文、CONTEXT.md、ADR、编码规范全由 agent 自取，控制者不代读。）
+
+分派后控制者**立即停手等系统完成通知**（禁轮询），只挂一个一次性超时计时器。
 
 prompt 红线片段（摘自 implementer-prompt.md）：
 
@@ -100,20 +95,22 @@ Commit 粒度：一个 commit 只表达一个完整意图；若一次改 20 个�
 失败重试：你可能因为上次超时被同 worktree 同 branch 重新分派，直接继续，复用已 commit 的进度。
 ```
 
-Implementer 输出：
+Implementer 输出（**极简汇报**——无摘要、无测试输出、无文件清单）：
 
 ```
-全量测试：uv run pytest → 142 passed
-commit：实现 --verbose 选项（修改 cli/args.py、cli/main.py 两个文件）
-语义原子粒度：拆为 2 个 commit（args 解析 + main 调用），各自可独立回滚
-未 merge、未关闭 issue。
 <promise>COMPLETE</promise>
 DONE
 ```
 
+控制者需要事实时自查 git（几十字节，不占 agent 汇报）：
+
+```bash
+git log --oneline develop..afk/issue-42    # → 2 个 commit（args 解析 + main 调用，语义原子）
+```
+
 控制者检查分支有 commit（`git log afk/issue-42` 非空）→ 触发同 worktree 同 branch 的 Reviewer（严格串行）。
 
-分派 Reviewer（**沿用同一 worktree**，**不再开新 worktree**），prompt 关键片段：
+分派 Reviewer（**沿用同一 worktree**，**不再开新 worktree**，模板自加载两行 prompt，参数同 Implementer），指令要点：
 
 ```
 你正在审查并精炼分支 afk/issue-42 上对 issue #42 的改动。Implementer 已在该分支 commit 了实现代码——
@@ -124,14 +121,14 @@ DONE
 发现改进点：直接改代码 → 跑测试 → refine: commit（不通过控制者、不通过 SendMessage）。
 ```
 
-Reviewer 输出（**自改、无反馈、无复查**——对齐 sandcastle 一次性自改）：
+Reviewer 输出（**自改、无反馈、无复查、极简汇报**——对齐 sandcastle 一次性自改）：
 
 ```
-已直接改进：精简 flag 解析分支（cli/args.py 内联 if/else → 字典查表）。
-refine: commit 已生成。测试 142 passed。
 <promise>COMPLETE</promise>
 DONE
 ```
+
+（改进点细节在 `refine:` commit message 里，不进汇报。）
 
 分支 `afk/issue-42` 上的 commit 序列（线性叠加，Implementer 在前 Reviewer 在后）：
 
@@ -156,12 +153,9 @@ wt remove afk/issue-42 -D --foreground  # 拓扑合入后删分支 + 清理 work
 gh issue close 42                       # 统一关 issue；若父 PRD 已全部完成一并关闭
 ```
 
-Merger 输出：
+Merger 输出（极简汇报；合并细节留在 git 历史）：
 
 ```
-合并 afk/issue-42 → develop（merge commit: Merge branch 'afk/issue-42'），测试 142 passed
-gh issue close 42 → CLOSED
-末尾 summarizing commit 已生成（message 自定，例如 "chore: merge #42 --verbose flag"）。
 <promise>COMPLETE</promise>
 DONE
 ```
@@ -206,7 +200,7 @@ wt switch -c afk/issue-43 -b ${TARGET_BRANCH}
 |------|------|------|
 | 角色运行 | 当前会话 `Agent` 工具 | 独立 pane（新 claude 实例） |
 | worktree 创建 | 控制者预创建 `wt switch -c ...` | agent 自行创建（同一命令） |
-| 完成通知 | agent 返回即知 | 需主动轮询 `herdr agent list` |
+| 完成通知 | 系统完成通知自动 re-invoke（**禁轮询**，只挂一次性超时计时器） | 无系统通知，需主动轮询 `herdr agent list` |
 | 适用场景 | ≤5 个 issue、想实时看进度 | 大量 issue、并行跑满、省主会话上下文 |
 | 反馈闭环 | 不存在（Reviewer 直接改不反馈） | 不存在（herdr 不再需要跨会话 messaging） |
 

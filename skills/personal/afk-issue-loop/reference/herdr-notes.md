@@ -5,7 +5,7 @@
 
 （适配四角色：每个角色一个 pane / agent，命名建议 `planner` / `impl-{N}` / `review-{N}` / `merger`，遵守 `/herdr-instances` 布局规则——主编排 pane 不可上下分割，左右/上下分割各自不超过 3。）
 
-> **DAG 与拓扑合并语义**：herdr 模式下各 pane 独立运行 Implementer / Reviewer / Merger，但 Planner **仅在开头跑一次**输出完整 DAG（在主导 pane 上下文，控制者解析后按拓扑序切片每轮 unblocked 分派）；Merger 用 `git merge <branch> --no-edit` 拓扑合并，不做 `--squash`，无需跨会话 messaging 协调。Reviewer 不再通过 `SendMessage` 回传反馈（直接在同一 worktree 改代码并 commit），所以 herdr 模式也不再有反馈闭环跨会话依赖。
+> **DAG 与拓扑合并语义**：herdr 模式下各 pane 独立运行 Implementer / Reviewer / Merger，但 Planner **仅在开头跑一次**输出完整 DAG 并落盘 `docs/afk-plan.json`（控制者验收后维护每节点 `status`，按拓扑序切片每轮 unblocked 分派）；Merger 用 `git merge <branch> --no-edit` 拓扑合并，不做 `--squash`，无需跨会话 messaging 协调。Reviewer 不再通过 `SendMessage` 回传反馈（直接在同一 worktree 改代码并 commit），所以 herdr 模式也不再有反馈闭环跨会话依赖。
 
 ### agent start 三要素
 
@@ -63,9 +63,9 @@ herdr agent list | grep <名称>
 
 验证不通过（agent 仍 idle、标题未变）→ 重试发送，可换 `send-text + Enter` 方式。
 
-### 轮询协议（必须执行）
+### 轮询协议（仅 herdr 模式必须执行）
 
-herdr agent 完成后回到 idle 但**不会通知控制者**。控制者必须主动轮询。
+herdr agent 完成后回到 idle 但**不会通知控制者**，控制者必须主动轮询——这是 herdr 模式特有的成本（subagent 模式相反：后台 Agent 有系统完成通知，**禁止轮询**，见 REFERENCE.md 主窗口预算）。为省主窗口，用一次性 `sleep` 后台计时器驱动轮询节奏，而不是连续手动查。
 
 **基础轮询**（每 5 分钟执行）：
 
@@ -85,7 +85,8 @@ herdr agent list | grep <名称>
 # 1. 读取 agent 最终输出
 herdr agent read <名称> --source recent-unwrapped | tail -80
 
-# 2. 检查汇报格式：应有 <promise>COMPLETE</promise>、测试结果
+# 2. 检查汇报格式（极简）：应有 <promise>COMPLETE</promise> + 一行状态；
+#    不贴测试输出是正常的（极简汇报），疑虑只在 CONCERNS/BLOCKED 时出现
 # 3. 外部验证两件事（CLOSED / 无残留 worktree）——
 #    拓扑 merge 不再验证 1-parent squash commit
 #    命令与判定标准见 SKILL.md 阶段 3
@@ -96,18 +97,18 @@ herdr pane close $WS:pX
 
 **关闭所有未验证 agent 的 pane**：全部完成后，执行 `herdr pane list | grep "afk/issue-"` 确认无残留。
 
-### 场景：Seam 确认兜底
+### 场景：agent 卡住等待兜底
 
-新架构下控制者分派时**预确认 seam**，agent 不等待。若 agent 仍进入等待确认状态（idle 但 terminal_title 显示等待），控制者读取输出后发送确认兜底：
+模板已要求 agent「直接进入 TDD，不等待确认」（无 Seam 预确认环节）。若 agent 仍进入等待状态（idle 且 terminal_title 显示等待确认），控制者读取输出后发送继续指令兜底：
 
 ```bash
 herdr pane read <pane> --source recent-unwrapped | tail -30
-herdr pane send-text <pane> "Seam 确认通过。开始 TDD 实现。"
+herdr pane send-text <pane> "无需等待确认，直接开始 TDD 实现。"
 sleep 0.5
 herdr pane send-keys <pane> Enter
 ```
 
-确认后 agent 从 idle 变为 working。如果 10s 后仍 idle，重试确认发送。
+确认后 agent 从 idle 变为 working。如果 10s 后仍 idle，重试发送。
 
 ---
 

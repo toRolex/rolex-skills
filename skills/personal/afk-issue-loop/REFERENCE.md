@@ -45,7 +45,7 @@ blocked（本轮等待）：
 
 | 信号 | 生产者 | 格式 / 含义 |
 |------|--------|-------------|
-| `<plan>` | Planner（**仅开头一次**） | `<plan>{"issues":[{"number","title","branch","blocked_by":[number,...]}]}</plan>`，完整 DAG，控制者按拓扑序切片每轮 unblocked |
+| `<plan>` | Planner（**仅开头一次**） | `<plan>{"issues":[{"number","title","branch","blocked_by":[number,...]}]}</plan>`，完整 DAG；同时落盘目标项目 `docs/afk-plan.json`，控制者按拓扑序切片每轮 unblocked |
 | `<promise>COMPLETE</promise>` | Implementer / Reviewer / Merger | 权威完成信号 |
 
 - **确定性分支名**：`afk/issue-{N}`。重跑 Planner 输出同一分支名（虽只跑一次，确定性仍是契约）
@@ -53,21 +53,20 @@ blocked（本轮等待）：
 - **真正完成判定（关 issue）只在 Merger**（判定类 ticket 的关闭例外见[依赖解析](#依赖解析)）；Implementer / Reviewer 都不关 issue
 - **Reviewer 直接在 Implementer 的 worktree / branch 上改代码 + commit**，不反馈、不复查（对齐 sandcastle 一次性自改）；Implementer 与 Reviewer 在同一分支线性叠加 commit，Implementer 的 commit 在前、Reviewer 的 `refine:` commit 在后
 
-控制者解析 `<plan>`：正则提取 `<plan>([\s\S]*?)</plan>`，`JSON.parse`，校验每项 `number/title/branch`；DAG 模式下同时校验 `blocked_by`（数组，可空）。
+控制者验收 `<plan>`：Read `docs/afk-plan.json`（Planner 已写入），校验每项 `number/title/branch`；DAG 模式下同时校验 `blocked_by`（数组，可空）。验收后给每节点补 `status` 字段并逐轮用 Edit 维护（`pending` / `dispatched` / `done` / `failed`）。
 
-## 模型选择
+## 主窗口预算
 
-按任务复杂度信号选择，不纯按文件数：
+控制者的上下文窗口是稀缺资源。四条硬规则：
 
-| 信号 | 模型 | 典型 issue |
-|---|---|---|
-| 单文件、纯机械操作（删除文件、提取常量、重命名、import 更新） | Haiku | 清理临时文件、品牌 Logo 提取为 include |
-| 需理解现有模式、1-3 文件、中等复杂度 | Sonnet | 新增模型字段+Admin、Django 模板修改 |
-| 跨模块集成、架构决策、调试、>3 文件 | Opus | M2M 迁移、合并支付逻辑 |
+1. **模板自加载**：分派 prompt 只传模板文件路径 + 参数（`ISSUE_NUMBER` / `BRANCH` / `TARGET_BRANCH` / `WORKTREE`），不复制模板全文；角色 agent 自行 Read 模板
+2. **寻址注入**：prompt 只给命令与路径（`gh issue view N`、`Read CONTEXT.md`），材料由 agent 自取；控制者不代读、不粘贴全文
+3. **极简汇报**：角色 agent 汇报只含 `<promise>COMPLETE</promise>` + 状态行 + （仅 CONCERNS/BLOCKED 时）一句疑虑；不贴测试输出、不列 commit 与文件清单——控制者需要事实时自己跑 git 命令
+4. **禁轮询**：分派后台 Agent 后立即停手等系统完成通知；禁止 `TaskOutput` 非阻塞轮询
 
-**角色建议**：Planner / Merger 建议 Opus（依赖分析与冲突解决需要全局视野）；Reviewer 与 Implementer 同级或高一档；Implementer 按上表。
+## 模型
 
-**AFK 场景下失败的代价高于交互式场景**——如果 Haiku 搞砸了，需要重新分派，浪费的不仅是 token 还有时间。不确定时向上取整（宁可用 Sonnet 不用 Haiku，宁可用 Opus 不用 Sonnet）。
+四角色统一显式 `sonnet`（分派时 `model: "sonnet"`）。不按复杂度选档、不继承主会话模型（主会话模型可任意切换，继承会让 subagent 行为不可预期）。
 
 ## 红线
 
@@ -75,12 +74,13 @@ blocked（本轮等待）：
 
 **分派前**
 - 只有 unblocked 的 issue 才分派；跨 issue 并行 ≤4（信号量，Implementer 与 Reviewer 合计占坑）；同 issue 内 Implementer→Reviewer 严格串行；跨 issue 流水线——某 issue 的 Implementer 完成即触发其 Reviewer，不等本轮其他 issue
-- 分派时注入 issue 完整文本（含 comments）、`CONTEXT.md` 与编码规范（均如存在），agent 不自己读 issue
+- **主窗口预算**：模板自加载 + 寻址注入（见[主窗口预算](#主窗口预算)），控制者不代读 issue / CONTEXT.md / 规范文件，不复制模板全文
 - 分支名必须用 Planner 输出的确定性 `afk/issue-{N}`，不另造名称
 
 **控制者角色**
-- 控制者只做编排——分派、解析 `<plan>`、按 DAG 拓扑序切片每轮 unblocked、验证、异常处置，**不写实现代码**；发现产出 bug 时分派修复 agent（可换更强模型），主会话不直接改代码
-- Seam 预确认：分派时预确认，agent 不等待
+- 控制者只做编排——分派、验收 `<plan>` 落盘、按 DAG 拓扑序切片每轮 unblocked、验证、异常处置，**不写实现代码**；发现产出 bug 时分派修复 agent，主会话不直接改代码
+- **禁轮询**：分派后台 Agent 后立即停手等系统完成通知；禁止 `TaskOutput` 非阻塞轮询（轮询条目永久占用主窗口）；超时只挂一次性后台计时器，响了才查一次
+- agent 直接进入 TDD，不做 seam 等待确认；无 Seam 预确认环节
 - Reviewer 直接在 Implementer 的 worktree / branch 上改代码 + 跑测试 + commit（**不反馈、不复查**），对齐 sandcastle 一次性自改；Implementer 与 Reviewer 同 worktree 同 branch 线性叠加 commit
 - **绝不关闭或改 label 任何本流程未实现合入的 issue**（含判定失败的下游与父 PRD）——存废由 owner 决定；判定类 ticket 自身的关闭例外见[依赖解析](#依赖解析)
 
@@ -125,11 +125,11 @@ Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3�
 | 复杂（跨模块、>3 文件） | 10-20 分钟 |
 
 **subagent 模式**：
-1. 分派时记录 deadline + 后台计时器：`Bash: sleep <分钟> && echo "<agent名> timeout"`（`run_in_background: true`）
-2. 计时器先响（先于 `<promise>COMPLETE</promise>`）→ `TaskStop` 终止 agent
-3. 查分支 commit：
+1. 分派时记录 deadline，挂**一次性**后台计时器：`Bash: sleep <分钟> && echo "<agent名> timeout"`（`run_in_background: true`）
+2. 分派后**立即停手**，等系统完成通知（后台 Agent 完成会自动 re-invoke 控制者）——**禁止 `TaskOutput` 轮询**
+3. 完成通知先到 → 正常求值；计时器先响 → 此时才查一次分支 commit：
    - **有** → 按部分完成处理，进 Reviewer 判断
-   - **无** → 标记超时，下轮 Planner 重分析或重派
+   - **无** → `TaskStop` 终止 agent，标记超时，同 worktree 同 branch 重派
 
 **herdr 模式**：沿用现有轮询协议（`herdr agent list` 查 `agent_status`），见[reference/herdr-notes.md](reference/herdr-notes.md)。agent 完成回到 idle 但不会通知控制者，必须主动轮询。
 
@@ -145,12 +145,13 @@ Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3�
 - Agent 终止后 `name` 不可达，用 **agentId** resume（Agent 工具分派后记录的原始 agentId）
 - 恢复前先查分支 commit 判断进度：有 commit → 从断点继续（同分支重派 Implementer 或直接进 Reviewer）；无 commit → 重派
 - 中断不丢已提交进度——确定性分支名 `afk/issue-{N}` 保证 resume 落到同一分支
+- 会话 compact / `--resume` 后：Read `docs/afk-plan.json` 重建 DAG 与各节点 `status`；分支名确定性 + `gh issue view <N> --json state` 可交叉复核真实进度，不依赖会话记忆
 
 ## CONTEXT.md 缺失策略
 
 - 控制者基于 `CLAUDE.md` + `docs/adr/` 创建 `CONTEXT.md`
-- 或用其替代注入：把 CLAUDE.md 核心内容 + 相关 ADR 拼成「领域上下文」段注入角色 prompt
+- 或跳过创建：模板已指引 agent 在 `CONTEXT.md` 缺失时改读 `CLAUDE.md` + `docs/adr/`（寻址注入，agent 自取，控制者不拼接内容）
 
 ## 收尾流程
 
-所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 merge commit 与 summarizing commit），并列出因判定类 ticket 失败而保持 open、需 owner triage 的下游 ticket；然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。
+所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 merge commit 与 summarizing commit），并列出因判定类 ticket 失败而保持 open、需 owner triage 的下游 ticket；删除目标项目 `docs/afk-plan.json`（运行时临时文件，不 commit；`docs/` 若因此为空可一并删）；然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。

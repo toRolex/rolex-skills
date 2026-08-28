@@ -2,11 +2,14 @@
 
 两种载体（subagent / herdr）使用同一模板，仅「工作目录」段不同。Reviewer 与 Implementer 在同一个 `{{BRANCH}}` 分支上运行（控制者创建同分支的第二 agent）——**直接改代码 + 跑测试 + commit，不反馈、不复查**（对齐 sandcastle 一次性自改）。
 
-> **控制者填充项**（生成最终 prompt 前替换为实际值）：
-> - `{{ISSUE_NUMBER}}` / `{{ISSUE_TITLE}}`：issue 编号与标题
-> - `{{BRANCH}}`：分支名（确定性 `afk/issue-{N}`）
-> - `${TARGET_BRANCH}`：阶段 0 分支模型检测结果（`develop` 或 `main`）
-> - 「工作目录」段按载体模式填充
+> **分派方式（模板自加载）**：控制者分派 prompt 只需两行——
+>
+> ```
+> Read <skill路径>/reference/reviewer-prompt.md 获取完整指令并执行。
+> 参数：ISSUE_NUMBER={N}, BRANCH=afk/issue-{N}, TARGET_BRANCH={develop|main}, WORKTREE={worktree 绝对路径}
+> ```
+>
+> agent 自读本模板，将下文 `{{...}}` / `${...}` 占位符替换为参数值。herdr 模式省略 `WORKTREE`。
 
 ---
 
@@ -37,7 +40,7 @@ worktree 已由控制者预创建，请切换到该 worktree 目录：
 完整模板（合并工作目录段后）：
 
 ```
-你正在审查并精炼分支 {{BRANCH}} 上对 issue #{{ISSUE_NUMBER}}：{{ISSUE_TITLE}} 的改动。Implementer 已在该分支 commit 了实现代码——你沿用同一 worktree 同一 branch **直接改代码 + 跑测试 + commit**，不反馈给 Implementer，不复查，对 sandcastle 一次性自改形态负责。
+你正在审查并精炼分支 {{BRANCH}} 上对 issue #{{ISSUE_NUMBER}} 的改动。Implementer 已在该分支 commit 了实现代码——你沿用同一 worktree 同一 branch **直接改代码 + 跑测试 + commit**，不反馈给 Implementer，不复查，对 sandcastle 一次性自改形态负责。
 
 你是资深代码审查者，聚焦：**正确性、清晰、一致性、可维护性、减少过度复杂，同时保留精确功能**。
 
@@ -55,15 +58,13 @@ worktree 已由控制者预创建，请切换到该 worktree 目录：
 
 **若本分支相对 ${TARGET_BRANCH} 无任何改动**，直接输出 `<promise>COMPLETE</promise>`，不做任何动作。
 
-## Issue 内容
+## Issue 内容（自取）
 
-[gh issue view {{ISSUE_NUMBER}} --json title,body,comments 的完整输出]
+自行执行 `gh issue view {{ISSUE_NUMBER}} --json title,body,comments` 获取 issue 完整内容与 comments。
 
-## 领域上下文
+## 领域上下文（自取）
 
-[粘贴 CONTEXT.md 完整内容，如存在]
-[粘贴相关 ADR 内容，如存在]
-[粘贴编码规范文件内容，如存在]
+依次 Read（均如存在，不存在则跳过）：仓库根 `CONTEXT.md`（缺失时改读 `CLAUDE.md` + `docs/adr/`）；`docs/adr/` 下相关 ADR；编码规范文件（探测 `.sandcastle/CODING_STANDARDS.md`、`docs/` 规范文档、README 规范节）。
 
 ## 工作目录
 
@@ -108,12 +109,12 @@ worktree 已由控制者预创建，请切换到该 worktree 目录：
 
 无反馈、无复查、无二次机会：Reviewer 改坏直接进 Merger，不兜底（与 sandcastle 一致）。
 
-## 汇报格式
+## 汇报格式（极简——控制者不读长报告）
 
-1. **给自然人读的摘要**（在 `<promise>COMPLETE</promise>` 标签**之前**输出）：审查结论、改进了哪些点、测试结果、产生了几个 refine commit
-2. **完成信号**：全部完成后输出 `<promise>COMPLETE</promise>`
-3. **人读状态**（在标签**之后**输出）：
+1. **完成信号**：`<promise>COMPLETE</promise>`
+2. **人读状态**（标签后一行）：
    - `DONE` — 无问题直接完成，或已 refine 全部改进点
-   - `DONE_WITH_CONCERNS` — 已改但有疑虑（具体说明）
-   - `NEEDS_CONTEXT` / `BLOCKED` — 同现状
+   - `DONE_WITH_CONCERNS` — 已改但有疑虑（附一句说明）
+   - `NEEDS_CONTEXT` / `BLOCKED` — 附一句说明缺什么
+3. DONE 时不加任何正文；改进点细节写进 `refine:` commit message，不写进汇报
 ```

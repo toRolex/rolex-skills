@@ -2,9 +2,14 @@
 
 Planner 无 per-issue 占位符（自行扫描 issue）。`${TARGET_BRANCH}` 仅作分支名上下文参考，Planner **不建 worktree、不写代码、不分轮**——一次输出**完整 DAG**，控制者按拓扑序切片每轮 unblocked。
 
-> **控制者填充项**：
-> - `${TARGET_BRANCH}`：阶段 0 分支模型检测结果（`develop` 或 `main`），用于分支名上下文说明
-> - 无需注入 issue 内容，Planner 自行 `gh issue list` 扫描
+> **分派方式（模板自加载）**：控制者分派 prompt 只需两行——
+>
+> ```
+> Read <skill路径>/reference/planner-prompt.md 获取完整指令并执行。
+> 参数：TARGET_BRANCH={develop|main}
+> ```
+>
+> Planner 自读本模板执行；无需注入 issue 内容，Planner 自行 `gh issue list` 扫描。
 
 ---
 
@@ -19,7 +24,8 @@ Planner 无 per-issue 占位符（自行扫描 issue）。`${TARGET_BRANCH}` 仅
    `gh issue list --label ready-for-agent --state open --limit 100 --json number,title,body,labels,comments`
 2. **构建 DAG**：为每个 issue 列出其 `blocked_by` 数组（数字列表，可空）
 3. **分配分支名**：为每个 issue 分配确定性分支名 `afk/issue-{N}`
-4. **输出**：`<plan>` 包裹的 JSON，含**所有** open issue（不是只含 unblocked——分轮由控制者按拓扑序运行时切片）
+4. **落盘**：把 DAG JSON 写入目标项目 `docs/afk-plan.json`（无 `docs/` 目录则新建；已存在则覆盖）
+5. **输出**：`<plan>` 包裹的同一 JSON，含**所有** open issue（不是只含 unblocked——分轮由控制者按拓扑序运行时切片）
 
 ## 依赖判定标准
 
@@ -61,6 +67,8 @@ issue B 被 issue A 阻塞，当满足以下任一条：
 </plan>
 
 分支名格式必须是 `afk/issue-{N}`（确定性，重跑 Planner 输出同一分支名）。判定类 ticket 加可选 `"kind": "gate"` 标注，普通 issue 可省略。
+
+同一 JSON 必须已写入 `docs/afk-plan.json`——控制者从**文件**验收，不从你的输出解析。
 
 ## 红线
 

@@ -1,12 +1,15 @@
 # Implementer 分派模板
 
-两种载体（subagent / herdr）使用同一模板，仅「工作目录」段不同；其余步骤（Seam 已预确认 → TDD → 全量测试 → commit → 输出 COMPLETE）完全一致。
+两种载体（subagent / herdr）使用同一模板，仅「工作目录」段不同；其余步骤（直接进入 TDD 不等待确认 → 全量测试 → commit → 输出 COMPLETE）完全一致。
 
-> **控制者填充项**（生成最终 prompt 前替换为实际值）：
-> - `{{ISSUE_NUMBER}}` / `{{ISSUE_TITLE}}`：issue 编号与标题
-> - `{{BRANCH}}`：分支名（确定性 `afk/issue-{N}`）
-> - `${TARGET_BRANCH}`：阶段 0 分支模型检测结果（`develop` 或 `main`）
-> - 「Issue 内容」「领域上下文」「工作目录」三段按实际情况填充
+> **分派方式（模板自加载）**：控制者分派 prompt 只需两行——
+>
+> ```
+> Read <skill路径>/reference/implementer-prompt.md 获取完整指令并执行。
+> 参数：ISSUE_NUMBER={N}, BRANCH=afk/issue-{N}, TARGET_BRANCH={develop|main}, WORKTREE={worktree 绝对路径}
+> ```
+>
+> agent 自读本模板，将下文 `{{...}}` / `${...}` 占位符替换为参数值。herdr 模式省略 `WORKTREE`（agent 自行创建）。重试分派时在末尾加一句"同分支继续，复用已 commit 进度"，不重注入任何材料。
 
 ---
 
@@ -37,7 +40,7 @@
 完整模板（合并工作目录段后）：
 
 ```
-你正在实现 GitHub issue #{{ISSUE_NUMBER}}：{{ISSUE_TITLE}}。只做这一件事，不旁及其它 issue / 任务。
+你正在实现 GitHub issue #{{ISSUE_NUMBER}}（分支 {{BRANCH}}）。只做这一件事，不旁及其它 issue / 任务。
 
 ## 红线（硬性规则，违反即流程违规）
 
@@ -46,14 +49,13 @@
 3. **绝不 merge、绝不关闭 issue**：merge 与关 issue 由 Merger 统一负责。你只负责实现 + commit + 输出 `<promise>COMPLETE</promise>`
 4. **汇报前必须走完完整步骤链**：全量测试通过 → commit（中文描述）→ 输出 `<promise>COMPLETE</promise>`。缺少任一步骤即输出 COMPLETE 是违规
 
-## Issue 内容
+## Issue 内容（自取）
 
-[gh issue view {{ISSUE_NUMBER}} --json title,body,comments 的完整输出；如有父 PRD 一并注入]
+自行执行 `gh issue view {{ISSUE_NUMBER}} --json title,body,comments` 获取 issue 完整内容与 comments；issue body 若链接父 PRD，一并 `gh issue view` 读取。
 
-## 领域上下文
+## 领域上下文（自取）
 
-[粘贴 CONTEXT.md 完整内容，如存在]
-[粘贴相关 ADR 内容，如存在]
+依次 Read（均如存在，不存在则跳过）：仓库根 `CONTEXT.md`（缺失时改读 `CLAUDE.md` + `docs/adr/`）；`docs/adr/` 下与本 issue 相关的 ADR；编码规范文件（探测 `.sandcastle/CODING_STANDARDS.md`、`docs/` 规范文档、README 规范节）。
 
 ## 工作目录
 
@@ -63,7 +65,7 @@
 
 **边界规则**：只能在 worktree 目录内工作。禁止 `cd` 回主仓库或在主仓库执行 git 命令。
 
-**Seam 预确认**：控制者已基于 issue body 的 Testing Decisions 段和相关测试预确认 seam。你**直接进入 TDD，不等待确认**。若发现 seam 与 issue 需求不符，继续实现并在汇报中注明疑虑。
+**不等待 seam 确认**：直接进入 TDD。issue body 若有 Testing Decisions 段，按其指示选 seam；发现 seam 与 issue 需求不符时继续实现，并在汇报状态中标 DONE_WITH_CONCERNS 注明疑虑。
 
 严格遵循 TDD 流程，不允许直接写实现代码：
 
@@ -84,7 +86,7 @@
 - commit 描述写清楚"做了什么 + 为什么"，便于 Reviewer 在你之后接力（Reviewer 会继续在同一 worktree 同一 branch 叠加 commit）
 
 **汇报前自检清单（一项不满足不得输出 COMPLETE）：**
-- [ ] 全量测试通过（后端 + 前端，贴实际输出）
+- [ ] 全量测试通过（零回归；输出留在终端即可，**不贴进汇报**）
 - [ ] 代码已 commit（中文描述，**语义原子粒度**——大改动已拆分）
 - [ ] 未 merge、未 push、未创建 PR、未关闭 issue（关闭只发生在 Merger），已输出 `<promise>COMPLETE</promise>`
 
@@ -92,19 +94,17 @@
 
 你可能因为上次超时、抛错或模型临时不可用被同 worktree 同 branch 重新分派。**直接继续**，复用已 commit 的进度（不要 reset / amend / rebase 之前的 commit），从上次中断或反馈点继续推进，再次输出 `<promise>COMPLETE</promise>` 即可。Reviewer 不再通过 `SendMessage` 回传反馈——你只对控制者负责，不对 Reviewer 负责。
 
-## 汇报格式
+## 汇报格式（极简——控制者不读长报告）
 
-1. **给自然人读的摘要**（在 `<promise>COMPLETE</promise>` 标签**之前**输出）：
-   - 实现了什么
-   - 全量测试结果（必须贴实际输出：命令 + 通过/失败数量）
-   - 修改了哪些文件
-   - 未 merge、未关闭 issue（由 Merger 统一负责）
-2. **完成信号**：全部完成后输出 `<promise>COMPLETE</promise>`
-3. **人读状态**（在标签**之后**输出）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
+1. **完成信号**：`<promise>COMPLETE</promise>`
+2. **人读状态**（标签后一行）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
+3. **仅** DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED 时附一句说明（控制者处置异常要用）；DONE 时不加任何正文
+
+不贴测试输出、不列文件清单、不写实现摘要——commit message 即档案，控制者需要事实时自查 git。
 
 **状态说明**：
 - DONE — 全部完成：全量测试通过 + 已 commit（中文）+ 未 merge/未关 issue
-- DONE_WITH_CONCERNS — 完成了但全量测试有非你的改动引起的失败（具体说明哪些是预存的），或有其他疑虑
-- BLOCKED — 无法完成，需要帮助
-- NEEDS_CONTEXT — 缺少信息无法继续
+- DONE_WITH_CONCERNS — 完成了但全量测试有非你的改动引起的失败（一句说明哪些是预存的），或有其他疑虑
+- BLOCKED — 无法完成，一句说明需要什么帮助
+- NEEDS_CONTEXT — 一句说明缺什么信息
 ```
