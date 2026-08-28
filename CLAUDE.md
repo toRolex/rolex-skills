@@ -31,3 +31,17 @@ Skills 按 bucket 文件夹组织在 `skills/` 下：
 [`ask-rolex`](./skills/engineering/ask-rolex/SKILL.md) 是路由器，映射所有用户可调用的 skill 及其相互关系。当你添加、重命名、删除或更改用户可调用 skill 在流程中的位置时，重新阅读 `ask-rolex` 的 `SKILL.md` 并更新它，使地图保持准确。
 
 要将所有 skill（重新）链接到本地 harness skill 目录（`~/.claude/skills`、`~/.agents/skills`），运行 `scripts/link-skills.sh`。每个条目是指向此仓库的符号链接，因此 `git pull` 可以保持已安装的 skill 最新；在添加、删除或重命名 skill 后重新运行该脚本。
+
+## Agent skills
+
+### Issue tracker
+
+Issue 以 GitHub issue 形式存在，所有操作用 `gh` CLI。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+五个标准 triage 标签原样使用（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`）。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单上下文：根目录 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
