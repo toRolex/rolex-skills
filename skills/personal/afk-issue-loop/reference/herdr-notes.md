@@ -86,7 +86,7 @@ herdr agent list | grep <名称>
 herdr agent read <名称> --source recent-unwrapped | tail -80
 
 # 2. 检查汇报格式（极简）：应有 <promise>COMPLETE</promise> + 一行状态；
-#    不贴测试输出是正常的（极简汇报），疑虑只在 CONCERNS/BLOCKED 时出现
+#    汇报只有这两行是正常的（极简汇报），疑虑只在 CONCERNS/BLOCKED 时出现
 # 3. 外部验证两件事（CLOSED / 无残留 worktree）——
 #    拓扑 merge 不再验证 1-parent squash commit
 #    命令与判定标准见 SKILL.md 阶段 3

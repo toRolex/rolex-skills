@@ -2,14 +2,7 @@
 
 两种载体（subagent / herdr）使用同一模板，仅「工作目录」段不同。Reviewer 与 Implementer 在同一个 `{{BRANCH}}` 分支上运行（控制者创建同分支的第二 agent）——**直接改代码 + 跑测试 + commit，不反馈、不复查**（对齐 sandcastle 一次性自改）。
 
-> **分派方式（模板自加载）**：控制者分派 prompt 只需两行——
->
-> ```
-> Read <skill路径>/reference/reviewer-prompt.md 获取完整指令并执行。
-> 参数：ISSUE_NUMBER={N}, BRANCH=afk/issue-{N}, TARGET_BRANCH={develop|main}, WORKTREE={worktree 绝对路径}
-> ```
->
-> agent 自读本模板，将下文 `{{...}}` / `${...}` 占位符替换为参数值。herdr 模式省略 `WORKTREE`。
+> **你是被分派的 Reviewer agent**：本文件即你的完整指令。下文 `{{...}}` / `${...}` 占位符替换为分派 prompt 传入的参数值；herdr 模式无 `WORKTREE` 参数，「工作目录」段用 herdr 版本。
 
 ---
 
@@ -111,10 +104,13 @@ worktree 已由控制者预创建，请切换到该 worktree 目录：
 
 ## 汇报格式（极简——控制者不读长报告）
 
+汇报只承载两行：
+
 1. **完成信号**：`<promise>COMPLETE</promise>`
 2. **人读状态**（标签后一行）：
    - `DONE` — 无问题直接完成，或已 refine 全部改进点
    - `DONE_WITH_CONCERNS` — 已改但有疑虑（附一句说明）
    - `NEEDS_CONTEXT` / `BLOCKED` — 附一句说明缺什么
-3. DONE 时不加任何正文；改进点细节写进 `refine:` commit message，不写进汇报
+
+汇报到此为止。改进点细节写进 `refine:` commit message——控制者需要事实时自查 git。
 ```

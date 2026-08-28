@@ -2,14 +2,7 @@
 
 两种载体（subagent / herdr）使用同一模板，仅「工作目录」段不同；其余步骤（直接进入 TDD 不等待确认 → 全量测试 → commit → 输出 COMPLETE）完全一致。
 
-> **分派方式（模板自加载）**：控制者分派 prompt 只需两行——
->
-> ```
-> Read <skill路径>/reference/implementer-prompt.md 获取完整指令并执行。
-> 参数：ISSUE_NUMBER={N}, BRANCH=afk/issue-{N}, TARGET_BRANCH={develop|main}, WORKTREE={worktree 绝对路径}
-> ```
->
-> agent 自读本模板，将下文 `{{...}}` / `${...}` 占位符替换为参数值。herdr 模式省略 `WORKTREE`（agent 自行创建）。重试分派时在末尾加一句"同分支继续，复用已 commit 进度"，不重注入任何材料。
+> **你是被分派的 Implementer agent**：本文件即你的完整指令。下文 `{{...}}` / `${...}` 占位符替换为分派 prompt 传入的参数值；herdr 模式无 `WORKTREE` 参数，「工作目录」段用 herdr 版本。
 
 ---
 
@@ -86,7 +79,7 @@
 - commit 描述写清楚"做了什么 + 为什么"，便于 Reviewer 在你之后接力（Reviewer 会继续在同一 worktree 同一 branch 叠加 commit）
 
 **汇报前自检清单（一项不满足不得输出 COMPLETE）：**
-- [ ] 全量测试通过（零回归；输出留在终端即可，**不贴进汇报**）
+- [ ] 全量测试通过（零回归；输出留在终端即可）
 - [ ] 代码已 commit（中文描述，**语义原子粒度**——大改动已拆分）
 - [ ] 未 merge、未 push、未创建 PR、未关闭 issue（关闭只发生在 Merger），已输出 `<promise>COMPLETE</promise>`
 
@@ -96,11 +89,12 @@
 
 ## 汇报格式（极简——控制者不读长报告）
 
-1. **完成信号**：`<promise>COMPLETE</promise>`
-2. **人读状态**（标签后一行）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
-3. **仅** DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED 时附一句说明（控制者处置异常要用）；DONE 时不加任何正文
+汇报只承载两行：
 
-不贴测试输出、不列文件清单、不写实现摘要——commit message 即档案，控制者需要事实时自查 git。
+1. **完成信号**：`<promise>COMPLETE</promise>`
+2. **人读状态**（标签后一行）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED；DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED 附一句说明（控制者处置异常要用）
+
+汇报到此为止。测试输出留终端，实现细节写进 commit message——控制者需要事实时自查 git。
 
 **状态说明**：
 - DONE — 全部完成：全量测试通过 + 已 commit（中文）+ 未 merge/未关 issue

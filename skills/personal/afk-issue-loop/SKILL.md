@@ -40,7 +40,7 @@ herdr 模式下 pane 创建、指令下发、等待、轮询等操作见 [refere
 | **Reviewer** | Implementer 完全结束后（含退出/超时/抛错后求值）**同 worktree 同 branch** 触发，读 `git diff ${TARGET_BRANCH}..HEAD`，**直接改代码 → 跑测试 → `refine:` commit**（不反馈、不复查）；分支无 commit 则跳过 | 完成或跳过 |
 | **Merger** | `${TARGET_BRANCH}` 上逐个 `git merge <branch> --no-edit`，冲突读两侧解决；每分支合完跑全量测试；末尾 1 条 summarizing commit；统一关 issue（含父 PRD） | merge commit + summarizing commit + 关闭的 issue |
 
-**控制者职责**（不写实现代码）：发起启动各角色子代理（按载体，**模板自加载 + 寻址注入**：prompt 只传模板路径与参数、材料由 agent 自取，见 [REFERENCE.md](REFERENCE.md#主窗口预算)）→ 把 Planner 的 `<plan>` DAG 落盘目标项目 `docs/afk-plan.json` 并维护每节点 `status` → **按拓扑序每轮切片本轮 unblocked** → 分派 Implementer / Reviewer（同 worktree 同 branch）后**立即停手等系统完成通知，禁止轮询** → 分派 Merger → 验证（issue 关闭 / worktree 清理）→ 异常处置（DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED，沿用 REFERENCE.md 状态处理表）。
+**控制者职责**（不写实现代码）：发起启动各角色子代理（按载体，**模板自加载 + 寻址注入**：prompt 只传模板路径与参数、材料由 agent 自取，见 [REFERENCE.md](REFERENCE.md#主窗口预算)）→ 把 Planner 的 `<plan>` DAG 落盘目标项目 `docs/afk-plan.json` 并维护每节点 `status` → **按拓扑序每轮切片本轮 unblocked** → 分派 Implementer / Reviewer（同 worktree 同 branch）后进入**通知驱动等待**（禁轮询，机制见 [REFERENCE.md](REFERENCE.md#超时协议)）→ 分派 Merger → 验证（issue 关闭 / worktree 清理）→ 异常处置（DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED，沿用 REFERENCE.md 状态处理表）。
 
 **编排循环**（Planner 只在开头跑一次）：
 
@@ -107,17 +107,7 @@ Read ~/.claude/skills/afk-issue-loop/reference/planner-prompt.md 获取完整指
 
 （skill 若安装在其他路径则用实际路径；herdr 模式 prompt 相同。）
 
-Planner 自行扫描 issue、构建完整 DAG（含全部 open issue 的 `blocked_by`），把结果**写入目标项目 `docs/afk-plan.json`**（无 `docs/` 则新建），并输出 `<plan>` JSON：
-
-```
-<plan>
-{"issues": [
-  {"number": 1, "title": "...", "branch": "afk/issue-1", "blocked_by": []},
-  {"number": 2, "title": "...", "branch": "afk/issue-2", "blocked_by": [1]},
-  {"number": 3, "title": "...", "branch": "afk/issue-3", "blocked_by": [1]}
-]}
-</plan>
-```
+Planner 自行扫描 issue、构建完整 DAG（含全部 open issue 的 `blocked_by`），把结果**写入目标项目 `docs/afk-plan.json`**（无 `docs/` 则新建），并输出 `<plan>` JSON——schema：`{"issues":[{"number","title","branch","blocked_by":[number,...]}]}`（完整示例在 [reference/planner-prompt.md](reference/planner-prompt.md)，控制者验收只需字段名）。
 
 **控制者验收**：Read `docs/afk-plan.json`，校验每项 `number/title/branch/blocked_by`（`blocked_by` 是数组，可空），识别可选 `kind` 字段（`kind=gate` = 判定类 ticket，处置见 [REFERENCE.md](REFERENCE.md#依赖解析)）；给每节点补 `status: "pending"`，逐轮用 Edit 维护（`dispatched` / `done` / `failed`）。**plan 落盘即状态落盘**——compact / `--resume` 后重读文件即可无状态重建，不依赖会话记忆。
 
@@ -143,7 +133,7 @@ Read ~/.claude/skills/afk-issue-loop/reference/implementer-prompt.md 获取完�
 - 红线摘要（模板内详述）：TDD → 全量测试 → commit（**中文描述、语义原子**）→ `<promise>COMPLETE</promise>`；**不关 issue**；不等待 seam 确认
 - **重试分派**：prompt 同上，末尾只加一句"同分支继续，复用已 commit 进度"，不重注入任何材料
 
-**3. 超时与失败求值**：分派后**立即停手等系统完成通知**（后台 Agent 完成会自动 re-invoke 控制者）——**禁止 `TaskOutput` 非阻塞轮询**。超时只挂一个一次性后台计时器（`sleep <分钟> && echo "impl-{N} timeout"`，`run_in_background: true`；分钟数分级见 [REFERENCE.md](REFERENCE.md#超时协议)）：计时器先于完成通知响起时才查一次。Implementer **完全结束**（正常完成 / 超时 / 抛错）后，查分支 commit：
+**3. 超时与失败求值**：分派后进入**通知驱动等待**——禁轮询，一次性超时计时器的机制见 [REFERENCE.md](REFERENCE.md#超时协议)。Implementer **完全结束**（正常完成 / 超时 / 抛错）后，查分支 commit：
 - >0 → 触发同 worktree 同 branch 的 Reviewer
 - ==0 或失败 → **失败处理**：同 worktree 同 branch 无限重试，不传染下游。理论上某 issue 可能永久卡重试——用户预期正常情况不会发生；极端场景在收尾时自查
 

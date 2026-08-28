@@ -1,13 +1,6 @@
 # Merger 分派模板
 
-> **分派方式（模板自加载）**：控制者分派 prompt 只需两行——
->
-> ```
-> Read <skill路径>/reference/merger-prompt.md 获取完整指令并执行。
-> 参数：TARGET_BRANCH={develop|main}, REPO={主仓库绝对路径}, BRANCHES={待合并分支列表，逗号分隔}
-> ```
->
-> agent 自读本模板，将下文 `{{...}}` / `${...}` 占位符替换为参数值。
+> **你是被分派的 Merger agent**：本文件即你的完整指令。下文 `{{...}}` / `${...}` 占位符替换为分派 prompt 传入的参数值（`TARGET_BRANCH` / `REPO` / `BRANCHES`）。
 
 ---
 
@@ -40,7 +33,7 @@
 1. **获取 issue 信息**：`gh issue view <N> --json title,labels` 取标题与 label（用于汇报与 issue 关闭时的 comment）
 2. **拓扑合并**：`git merge <branch> --no-edit`（每分支产生 1 个 merge commit，message 用 git 默认 `Merge branch 'afk/issue-N'`）
 3. **解决冲突**（如有）：读两侧代码，选正确结果后 `git add`。**禁 `-X theirs/ours`**
-4. **跑全量测试**：合并后立即跑全量测试（如 `npm run test` / `uv run pytest`，视项目而定），确保零回归（输出留终端即可，不贴进汇报）
+4. **跑全量测试**：合并后立即跑全量测试（如 `npm run test` / `uv run pytest`，视项目而定），确保零回归（输出留终端即可）
 5. **失败自修**（仅限合并操作本身引入的语法/类型错误）：若失败原因是合并冲突未消解干净或符号冲突，做最小补丁 commit 修好后重跑测试。**不允许改业务逻辑**——若冲突需要业务侧判断（例如 API 类型根本对不上），停止推进、报控制者、不要继续往下合
 6. **删除已合并分支并清理 worktree**：`wt remove afk/issue-{N} -D --foreground`（移除 worktree 并强制删除分支；拓扑合并后分支对 git 视为已合并，`-D` 是为了跳过"未合并"保护）
 
@@ -67,9 +60,8 @@
 ## 汇报格式（极简——控制者不读长报告）
 
 1. **完成信号**：`<promise>COMPLETE</promise>`
-2. **人读状态**（标签后一行）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
-3. **仅** DONE_WITH_CONCERNS / BLOCKED 时附一句说明；DONE 时不加任何正文
-4. **例外必须列出**：若有未合并、保持 open、需 owner triage 的 issue（如判定类 ticket 失败的下游），无论何种状态都逐条列出 issue 号——控制者收尾报告要用
+2. **人读状态**（标签后一行）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED；CONCERNS / BLOCKED 附一句说明
+3. **例外必须列出**：若有未合并、保持 open、需 owner triage 的 issue（如判定类 ticket 失败的下游），无论何种状态都逐条列出 issue 号——控制者收尾报告要用
 
-合并细节（哪些分支、merge commit、summarizing commit message）留在 git 历史，不写进汇报。
+汇报到此为止。合并细节（分支、merge commit、summarizing commit message）留在 git 历史——控制者需要事实时自查 git。
 ```

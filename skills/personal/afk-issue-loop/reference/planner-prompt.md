@@ -2,14 +2,7 @@
 
 Planner 无 per-issue 占位符（自行扫描 issue）。`${TARGET_BRANCH}` 仅作分支名上下文参考，Planner **不建 worktree、不写代码、不分轮**——一次输出**完整 DAG**，控制者按拓扑序切片每轮 unblocked。
 
-> **分派方式（模板自加载）**：控制者分派 prompt 只需两行——
->
-> ```
-> Read <skill路径>/reference/planner-prompt.md 获取完整指令并执行。
-> 参数：TARGET_BRANCH={develop|main}
-> ```
->
-> Planner 自读本模板执行；无需注入 issue 内容，Planner 自行 `gh issue list` 扫描。
+> **你是被分派的 Planner agent**：本文件即你的完整指令。下文 `${TARGET_BRANCH}` 替换为分派 prompt 传入的参数值。
 
 ---
 

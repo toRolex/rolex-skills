@@ -61,8 +61,8 @@ blocked（本轮等待）：
 
 1. **模板自加载**：分派 prompt 只传模板文件路径 + 参数（`ISSUE_NUMBER` / `BRANCH` / `TARGET_BRANCH` / `WORKTREE`），不复制模板全文；角色 agent 自行 Read 模板
 2. **寻址注入**：prompt 只给命令与路径（`gh issue view N`、`Read CONTEXT.md`），材料由 agent 自取；控制者不代读、不粘贴全文
-3. **极简汇报**：角色 agent 汇报只含 `<promise>COMPLETE</promise>` + 状态行 + （仅 CONCERNS/BLOCKED 时）一句疑虑；不贴测试输出、不列 commit 与文件清单——控制者需要事实时自己跑 git 命令
-4. **禁轮询**：分派后台 Agent 后立即停手等系统完成通知；禁止 `TaskOutput` 非阻塞轮询
+3. **极简汇报**：角色 agent 汇报 = `<promise>COMPLETE</promise>` + 状态行，CONCERNS/BLOCKED 附一句疑虑；测试输出、commit 与文件清单留在终端与 git 历史——控制者需要事实时自己跑 git 命令
+4. **禁轮询**：通知驱动等待——分派后台 Agent 后停手等系统完成通知，机制见[超时协议](#超时协议)
 
 ## 模型
 
@@ -79,7 +79,7 @@ blocked（本轮等待）：
 
 **控制者角色**
 - 控制者只做编排——分派、验收 `<plan>` 落盘、按 DAG 拓扑序切片每轮 unblocked、验证、异常处置，**不写实现代码**；发现产出 bug 时分派修复 agent，主会话不直接改代码
-- **禁轮询**：分派后台 Agent 后立即停手等系统完成通知；禁止 `TaskOutput` 非阻塞轮询（轮询条目永久占用主窗口）；超时只挂一次性后台计时器，响了才查一次
+- **禁轮询**：通知驱动等待——分派后台 Agent 后停手等系统完成通知，机制见[超时协议](#超时协议)
 - agent 直接进入 TDD，不做 seam 等待确认；无 Seam 预确认环节
 - Reviewer 直接在 Implementer 的 worktree / branch 上改代码 + 跑测试 + commit（**不反馈、不复查**），对齐 sandcastle 一次性自改；Implementer 与 Reviewer 同 worktree 同 branch 线性叠加 commit
 - **绝不关闭或改 label 任何本流程未实现合入的 issue**（含判定失败的下游与父 PRD）——存废由 owner 决定；判定类 ticket 自身的关闭例外见[依赖解析](#依赖解析)
