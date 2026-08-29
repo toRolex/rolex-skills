@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>afk-issue-loop 对齐 sandcastle — Implementation Plan</title>
+<style>
+  :root {
+    --bg: #fafaf8; --ink: #1a1a18; --muted: #6b6b66; --line: #e4e2dc;
+    --accent: #b3541e; --accent-soft: #fdf3ec; --ok: #2e6b4f; --ok-soft: #eef6f1;
+    --warn: #8a6d1a; --warn-soft: #fbf5e3; --mono: "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.75 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 32px 96px; }
+  h1 { font-size: 26px; letter-spacing: -0.02em; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 40px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em;
+       color: var(--muted); margin: 48px 0 16px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px;
+          padding: 22px 26px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 4px; font-size: 17px; }
+  .card h3 .num { color: var(--accent); font-family: var(--mono); font-size: 13px;
+                  margin-right: 8px; }
+  .tag { display: inline-block; font-size: 11px; font-family: var(--mono);
+         padding: 2px 8px; border-radius: 99px; margin-left: 8px; vertical-align: 2px; }
+  .tag.rec { background: var(--ok-soft); color: var(--ok); }
+  .tag.open { background: var(--warn-soft); color: var(--warn); }
+  .why { color: var(--muted); font-size: 14px; margin: 10px 0 0; }
+  .alt { font-size: 14px; margin-top: 12px; padding: 10px 14px;
+         background: var(--accent-soft); border-radius: 8px; }
+  .alt b { color: var(--accent); }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: #f1efe9;
+                padding: 1px 6px; border-radius: 4px; }
+  pre { background: #23231f; color: #e8e6df; padding: 16px 18px; border-radius: 8px;
+        overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.65; }
+  pre .c { color: #8a8778; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  ul { padding-left: 20px; margin: 8px 0; }
+  li { margin: 4px 0; }
+  .mech { color: var(--muted); font-size: 14px; }
+  .flow { font-family: var(--mono); font-size: 13px; background: #f6f4ee;
+          border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
+          white-space: pre; overflow-x: auto; line-height: 1.7; }
+  .del { color: #a33; }
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line);
+           color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>afk-issue-loop 对齐 sandcastle — Implementation Plan</h1>
+<div class="sub">rolex-skills · 2026-08-29 · grilling 会话结论的落地计划 · 置顶决策待你逐条拍板</div>
+
+<h2>① 待你拍板的决策（按你调整概率排序）</h2>
+
+<div class="card">
+  <h3><span class="num">D1</span>失败策略：0 自动重试，失败即落盘交人 <span class="tag rec">已确认</span></h3>
+  <p>agent 失败（抛错 / watchdog 判死 / 空产出）→ 标 <code>failed</code>、写恢复手册、<b>不停调度</b>其余 unblocked issue，收尾把 <code>docs/afk-failures/</code> 清单交给你逐条处置。不再有「原地重试」。</p>
+  <p class="why"><b>理由</b>：严格对齐 sandcastle——它对 agent 失败就是 fail-fast 零重试（maxRetries=2 只管 structured output 校验，不管 agent 失败）；AFK 时自动重试救不了能力不够的 issue，瞬时故障由恢复手册覆盖；且符合你定的「sandcastle 没有就不要」原则。</p>
+  <div class="alt"><b>备选 b</b>：保 1-2 次自动重试（attempts&lt;2 时自动走恢复路径 A），偏离 sandcastle 但抗网络抖动 / rate limit。</div>
+</div>
+
+<div class="card">
+  <h3><span class="num">D2</span>恢复机制：单路径「重跑 + 复用现场」+ 恢复手册 <span class="tag rec">已确认（B，经源码修正）</span></h3>
+  <p>只保留一条恢复路径——对齐 sandcastle 对一般 agent 失败的<b>真实实践</b>（dogfood：失败后外层循环重跑，确定性 branch 名复用 worktree 捡回 commits，ADR 0003）：</p>
+  <table>
+    <tr><th>sandcastle</th><th>本 skill 同效物</th></tr>
+    <tr><td>重跑同 branch + worktree 复用（ADR 0003）</td><td><b>恢复 = 同分支同 worktree 重新分派</b>，prompt 附「Read 恢复手册了解前次失败」——进度从 git 历史自动捡回</td></tr>
+    <tr><td>确定性 branch 名 <code>sandcastle/issue-{id}</code>（重跑落回同一 worktree 的前提）</td><td>已有：<code>afk/issue-{N}</code></td></tr>
+    <tr><td>复用红线：clean→ff / dirty→带警告复用 / 永不 <code>reset --hard</code></td><td>已有红线强化成文：失败不清 worktree、不 reset、未提交改动保留</td></tr>
+    <tr><td><code>preservedWorktreePath</code> + RecoveryMessage</td><td><code>docs/afk-failures/issue-{N}.md</code> 恢复手册（格式见下）</td></tr>
+  </table>
+  <pre># docs/afk-failures/issue-{N}.md
+branch:   afk/issue-{N}          <span class="c"># 确定性分支，重派落回同一 worktree</span>
+worktree: &lt;绝对路径&gt;
+commits:  &lt;git log --oneline 快照&gt;
+error:    AgentIdleTimeoutError  <span class="c"># 借 sandcastle 错误词汇</span>
+失败摘要: &lt;错误原文末尾摘录&gt;
+
+## 恢复（= 重跑同 branch + worktree 复用）
+重新分派，prompt 末尾附：
+Read docs/afk-failures/issue-{N}.md 了解前次失败，同分支继续，复用已 commit 进度。</pre>
+  <p class="why"><b>为什么不是 resume</b>（源码修正，推翻此前"A 更接近原版"的说法）：sandcastle 的 <code>resume()</code> 全仓库仅两个真实用例——structured output 校验重试（#825）和 produce→extract 两段式；<b>失败恢复零用例</b>。它对一般 agent 失败的官方姿势就是"不续 session，靠确定性分支名重跑捡回现场"。且重跑式<b>跨会话天然有效</b>（compact/新会话后照样用），无 agentId 同会话限制——AFK 场景的关键属性。</p>
+</div>
+
+<div class="card">
+  <h3><span class="num">D3</span>超时协议：watchdog 取代复杂度分级 <span class="tag rec">已确认</span></h3>
+  <p>每次分派挂一个后台 watchdog 脚本（<code>run_in_background</code>）：盯 worktree 文件 mtime + git reflog，<b>600s 无活性才退出</b>（退出即系统通知唤醒控制者）→ <code>TaskStop</code> agent、按 <code>AgentIdleTimeoutError</code> 走失败流程。运行期间零输出、零上下文占用。agent 正常完成时控制者收系统通知后杀掉 watchdog。</p>
+  <p class="why"><b>理由</b>：判据从「超了 X 分钟」（wall-clock 拍脑袋，误杀长测试）变成「600s 无任何进展」（对齐 sandcastle 的 idle 语义）；阈值 600s 直接抄 <code>DEFAULT_IDLE_TIMEOUT_SECONDS</code>。删掉 2-20 分钟复杂度分级表。subagent / herdr 两载体统一（盯文件系统，不盯 agent 类型），<b>轮询全删</b>。</p>
+  <p class="why"><b>职责边界</b>：watchdog 只防一种情况——<b>挂死</b>。agent 正常结束或报错由系统完成通知接管，watchdog 不介入（控制者收通知后杀 watchdog）。</p>
+  <p class="why"><b>显式排除 completion grace</b>（sandcastle ADR 0019 的 60s 宽限）：它的场景是「signal 已发出但进程挂起不退」；你的完成终点是系统通知（进程已退），不存在这个中间态，故不移植。</p>
+  <div class="alt"><b>已知差距</b>：信号源是文件活性而非 stdout 行流（Agent 工具不暴露流）——agent 长时间纯思考不落盘会误判，600s 阈值下实际概率低。</div>
+</div>
+
+<div class="card">
+  <h3><span class="num">D4</span>herdr 简化 + 轮询全删 <span class="tag rec">已确认</span></h3>
+  <p>保留 <code>[mode=subagent|herdr]</code> 参数。SKILL.md 的 herdr 段压缩为：「用 /herdr 开新窗口跑同一套角色 prompt；herdr CLI 操作与报错细节见 herdr skill」。<span class="del">删 <code>reference/herdr-notes.md</code> 整个文件</span>（轮询协议随之消失），REFERENCE.md / EXAMPLES.md 里所有轮询表述删除。</p>
+</div>
+
+<div class="card">
+  <h3><span class="num">D5</span>脚本边界：只做 3 个 <span class="tag rec">已确认</span></h3>
+  <p>「sandcastle 没有就不要」筛后剩 3 个，<code>scripts/</code> 下 bash+jq：</p>
+  <table>
+    <tr><th>脚本</th><th>契约</th><th>sandcastle 原型</th></tr>
+    <tr><td><code>validate-plan.sh &lt;plan.json&gt;</code></td><td>schema 校验 + branch 名格式 + blocked_by 引用存在 + <b>无环检测</b>；exit 0/1 + 错误行</td><td>Output.object + zod</td></tr>
+    <tr><td><code>watchdog.sh &lt;worktree&gt; [600]</code></td><td>静默循环，idle 超时才退出（exit 1 + 一行死因）</td><td>Orchestrator idle timeout</td></tr>
+    <tr><td><code>dispatched-count.sh &lt;plan.json&gt;</code></td><td>输出 <code>dispatched</code> 节点数，控制者比对 ≤4</td><td>MAX_PARALLEL=4</td></tr>
+  </table>
+  <p class="why"><b>砍掉的 4 个</b>：拓扑切片、status 状态机、收尾验证、分派锁——sandcastle 无对应物，控制者继续 LLM 推理 + 手动 Edit。</p>
+</div>
+
+<div class="card">
+  <h3><span class="num">D6</span>afk-plan.json schema：<s>变更</s> <b>撤销，一个字段都不加</b> <span class="tag rec">已确认</span></h3>
+  <p>D2 改为重跑式恢复后，<code>agent_id</code> 失去存在理由（恢复不依赖它，watchdog 的 TaskStop 目标是分派时会话内持有的 task 引用，无需落盘）；<code>worktree</code> 路径由确定性 branch 名可推导。0 自动重试后 <code>attempts</code> 也不需要。</p>
+  <pre>{"number", "title", "branch", "blocked_by": [...],
+ "status": "pending|dispatched|done|failed"}   <span class="c"># 维持现状，自造词汇（sandcastle 无对应）</span></pre>
+  <p class="why">符合「sandcastle 没有就不要」——它的 plan 也不持久化任何恢复辅助字段，恢复信息全在 branch 名与 worktree 里。</p>
+</div>
+
+<h2>② 机械性改动（信任区，按序执行）</h2>
+
+<div class="card">
+  <h3>Step 1 · CONTEXT.md 词汇表先行</h3>
+  <ul>
+    <li><span class="del">删「原地重试」</span>（概念消亡）</li>
+    <li>新增 <b>watchdog</b>、<b>恢复手册</b>（docs/afk-failures/）、<b>恢复</b>（同分支重派 + worktree 复用）、<b>failed 终态</b> 四个词条</li>
+    <li>status 四值词条标注「自造词汇，sandcastle 无对应物」</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>Step 2 · REFERENCE.md 定契约</h3>
+  <ul>
+    <li>「超时协议」整节重写 → watchdog 契约（信号源、600s、挂/杀时机、两载体统一）</li>
+    <li>「失败重试行为」+「agent 中断恢复」合并重写 → <b>「恢复机制」</b>节（D2 全流程：判定 → 保全 → 落盘 → 同分支重派恢复）</li>
+    <li>「主窗口预算」第 4 条删 herdr 例外；新增 scripts 契约段（3 个脚本的调用点）</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>Step 3 · SKILL.md 跟随</h3>
+  <ul>
+    <li>阶段 2「超时与失败求值」→ watchdog + 失败分支（落盘 + failed + 不停调度）</li>
+    <li>herdr 段压缩为 3 行；Reference 列表删 herdr-notes.md、加 scripts/ 条目</li>
+    <li>收尾流程加「afk-failures 清单交用户处置」</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>Step 4 · EXAMPLES.md 重写轮询示例</h3>
+  <ul>
+    <li>:203 对照表改为「两载体统一 watchdog」；超时示例改 watchdog 挂/杀流程；补一个失败 → 恢复手册 → 同分支重派恢复的完整示例</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>Step 5 · 文件增删 + commit</h3>
+  <ul>
+    <li><span class="del">删 <code>reference/herdr-notes.md</code></span>；新增 <code>scripts/{validate-plan,watchdog,dispatched-count}.sh</code>（照 Step 2 契约实现）</li>
+    <li>四个角色 prompt 模板不动（恢复机制是控制者侧职责）</li>
+    <li>一次 commit：<code>refactor: afk-issue-loop 对齐 sandcastle——watchdog 超时/零重试恢复手册/去轮询/herdr 简化</code></li>
+  </ul>
+</div>
+
+<footer>
+审阅方式：D1-D6 全部已确认（D2 经 sub-agent 源码调研修正为「重跑 + 复用现场」单路径，D6 随之撤销 schema 变更）。<br>
+如无异议，按 Step 1→5 动手。
+</footer>
+
+</div>
+</body>
+</html>

@@ -62,7 +62,7 @@ blocked（本轮等待）：
 1. **模板自加载**：分派 prompt 只传模板文件路径 + 参数（`ISSUE_NUMBER` / `BRANCH` / `TARGET_BRANCH` / `WORKTREE`），不复制模板全文；角色 agent 自行 Read 模板
 2. **寻址注入**：prompt 只给命令与路径（`gh issue view N`、`Read CONTEXT.md`），材料由 agent 自取；控制者不代读、不粘贴全文
 3. **极简汇报**：角色 agent 汇报 = `<promise>COMPLETE</promise>` + 状态行，CONCERNS/BLOCKED 附一句疑虑；测试输出、commit 与文件清单留在终端与 git 历史——控制者需要事实时自己跑 git 命令
-4. **禁轮询**：通知驱动等待——分派后台 Agent 后停手等系统完成通知，机制见[超时协议](#超时协议)
+4. **禁轮询**：通知驱动等待——分派后挂 watchdog（见[超时协议](#超时协议)）即停手，等系统完成通知或 watchdog 死因，两载体（subagent / herdr）统一，skill 里不存在任何轮询
 
 ## 模型
 
@@ -79,7 +79,7 @@ blocked（本轮等待）：
 
 **控制者角色**
 - 控制者只做编排——分派、验收 `<plan>` 落盘、按 DAG 拓扑序切片每轮 unblocked、验证、异常处置，**不写实现代码**；发现产出 bug 时分派修复 agent，主会话不直接改代码
-- **禁轮询**：通知驱动等待——分派后台 Agent 后停手等系统完成通知，机制见[超时协议](#超时协议)
+- **禁轮询**：通知驱动等待——分派后挂 watchdog 即停手（机制见[超时协议](#超时协议)），herdr 模式也不例外
 - agent 直接进入 TDD，不做 seam 等待确认；无 Seam 预确认环节
 - Reviewer 直接在 Implementer 的 worktree / branch 上改代码 + 跑测试 + commit（**不反馈、不复查**），对齐 sandcastle 一次性自改；Implementer 与 Reviewer 同 worktree 同 branch 线性叠加 commit
 - **绝不关闭或改 label 任何本流程未实现合入的 issue**（含判定失败的下游与父 PRD）——存废由 owner 决定；判定类 ticket 自身的关闭例外见[依赖解析](#依赖解析)
@@ -104,48 +104,65 @@ blocked（本轮等待）：
 | `DONE_WITH_CONCERNS` | 阅读疑虑，正确性相关→分派修复 agent（不手动修）；能力相关→下轮换强模型 / 拆分 / 上报 |
 | `NEEDS_CONTEXT` | 保留 worktree，提供缺失信息后重新分派（同分支，进度保留） |
 | `BLOCKED` | 保留 worktree，评估原因后：补上下文 / 换强模型 / 拆分 issue / 上报。**绝不忽视** |
-| 超时（无状态） | 见[超时协议](#超时协议) |
+| 失败 / 超时判死 | 见[恢复机制](#恢复机制)——落盘恢复手册 + 标 `failed`，**零自动重试** |
 
 Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3；拓扑 merge 不再验证 `git cat-file -p HEAD | grep "^parent"` 的 1-parent 约束（拓扑 merge 自然产生多 parent merge commit）。
 
-## 失败重试行为
-
-- 失败 issue **不传染下游**：DAG 上其它节点按原 `blocked_by` 推进，不因某 issue 失败而永久 blocked
-- 失败 issue **原地重试**（leading word `_原地重试_`）：失败后控制者用同一 `afk/issue-{N}` 分支与同一 worktree 再次分派（Implementer / Reviewer），commit 历史保留前次痕迹（不清理 worktree、不 reset）
-- 理论上某 issue 可能永久卡在重试循环——用户预期正常情况不会发生；极端场景（API key 失效、模型服务降级）由用户在收尾时通过 worktree 残留自查
-
 ## 超时协议
 
-**时间分级**（两载体统一，按复杂度预判）：
+**watchdog（两载体统一，唯一超时机制）**：每次分派挂一个后台 watchdog 脚本盯 worktree 文件系统活性，600s 无活性才判死；取代一次性计时器与复杂度分级表（已删）。
 
-| 复杂度 | 时限 |
-|--------|------|
-| 简单（单文件、机械操作） | 2-3 分钟 |
-| 中等（1-3 文件） | 5-10 分钟 |
-| 复杂（跨模块、>3 文件） | 10-20 分钟 |
+契约（`scripts/watchdog.sh <worktree> [idle秒=600]`）：
 
-**subagent 模式**：
-1. 分派时记录 deadline，挂**一次性**后台计时器：`Bash: sleep <分钟> && echo "<agent名> timeout"`（`run_in_background: true`）
-2. 分派后**立即停手**，等系统完成通知（后台 Agent 完成会自动 re-invoke 控制者）——**禁止 `TaskOutput` 轮询**
-3. 完成通知先到 → 正常求值；计时器先响 → 此时才查一次分支 commit：
-   - **有** → 按部分完成处理，进 Reviewer 判断
-   - **无** → `TaskStop` 终止 agent，标记超时，同 worktree 同 branch 重派
+- **信号源**：worktree 内文件 mtime + `.git` reflog 时间，取最新。已知差距——盯文件活性而非 stdout 行流（Agent 工具不暴露子代理流式输出），agent 长时间纯思考不落盘会误判，600s 阈值下概率低
+- **阈值**：600s（抄 sandcastle `DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60`）
+- **生命周期**：分派时以 `run_in_background: true` 挂起，静默循环零输出；idle 超时 → exit 1 + 一行死因（哪个 worktree、idle 多久），后台任务退出即系统通知唤醒控制者
+- **控制者配合**：分派后**立即停手**；agent 正常完成（系统完成通知先到）→ 杀掉对应 watchdog，不误报；watchdog 死因先到 → 判 `AgentIdleTimeoutError`，`TaskStop` 终止 agent 后进[恢复机制](#恢复机制)
+- **职责边界**：watchdog 只防挂死；正常结束 / 报错由系统通知接管。herdr 模式同一套 watchdog（pane 无系统完成通知，但 watchdog 退出通知一样到控制者；完成信号由 herdr agent 汇报承载，详见 herdr skill）
+- **显式排除 completion grace**：sandcastle ADR 0019 的 60s grace 场景是「signal 已发出但进程挂起不退」，本架构的完成终点是进程已退的系统通知，中间态不存在
 
-**herdr 模式**：沿用现有轮询协议（`herdr agent list` 查 `agent_status`），见[reference/herdr-notes.md](reference/herdr-notes.md)。agent 完成回到 idle 但不会通知控制者，必须主动轮询。
+**失败判定三触发点**：agent 抛错（`AgentError`）/ watchdog 判死（`AgentIdleTimeoutError`）/ 正常结束但分支 commit == 0（空产出，按 `AgentError` 处理）。错误词汇借 sandcastle 的错误类型名。
 
-**Implementer / Reviewer 失败重试**：见[失败重试行为](#失败重试行为)——同 worktree 同 branch 继续重试，无次数上限。
+## 恢复机制
+
+**零自动重试**（对齐 sandcastle fail-fast，修订 ADR 0001「原地重试」条款，见 ADR 0002）：失败即标 `failed`，**不自动重派、不无限重试**——AFK 场景下原地无限重试意味着用户回来时面对烧了数小时 token 的死循环。
+
+- **现场保全**：worktree 不删、branch 不动、永不 `reset --hard`——含未提交改动全部原样保留，随时可人工接手
+- **落盘恢复手册** `docs/afk-failures/issue-{N}.md`：
+
+  ```
+  branch:   afk/issue-{N}
+  worktree: <绝对路径>
+  commits:  <git log --oneline 快照>
+  error:    AgentIdleTimeoutError | AgentError
+  失败摘要: <错误原文末尾摘录>
+
+  ## 恢复
+  重新分派，prompt 末尾附：
+  Read docs/afk-failures/issue-{N}.md 了解前次失败，同分支继续，复用已 commit 进度。
+  ```
+
+- **不停调度**：失败 issue 标 `failed` 后继续调度其余 unblocked issue——单点失败不阻塞整轮，**不传染下游**（DAG 上其它节点按原 `blocked_by` 推进）
+- **恢复（单路径）**：同分支同 worktree 重新分派，prompt 末尾附「Read docs/afk-failures/issue-{N}.md 了解前次失败，同分支继续，复用已 commit 进度」。确定性分支名 `afk/issue-{N}` + worktree 复用让已 commit 进度自动捡回（对齐 sandcastle dogfood 的真实失败恢复姿势；`resume()` 全仓库仅用于 structured output 重试与 produce→extract 两段式，失败恢复零用例）。重派 agent 能读到前次失败手册，不以同样方式再死一次
+- **处置权在人**：收尾把 `afk-failures/` 完整清单交用户逐条决定恢复或放弃（见[收尾流程](#收尾流程)）
+- 会话 compact / `--resume` 后：Read `docs/afk-plan.json` 重建 DAG 与各节点 `status`；分支名确定性 + `gh issue view <N> --json state` 可交叉复核真实进度，不依赖会话记忆
+
+## scripts 契约
+
+`skills/personal/afk-issue-loop/scripts/` 下 3 个 bash 脚本（plan 相关两个用 jq；`scripts/tests.sh` 为纯 bash 断言测试）：
+
+| 脚本 | 用法 | 契约 |
+|------|------|------|
+| `validate-plan.sh` | `validate-plan.sh <plan.json>` | 校验 Planner 落盘的 DAG：schema（`number`/`title`/`branch`/`blocked_by`）、branch 匹配 `afk/issue-\d+`、`blocked_by` 引用存在、无环；exit 0 合法 / exit 1 + 错误行指明问题（有环时报出成环节点）。plan 验收不再靠 LLM 肉眼（compact 后尤其不可靠） |
+| `watchdog.sh` | `watchdog.sh <worktree> [idle秒=600]` | 静默循环零输出；idle 超时 exit 1 + 一行死因。契约全文见[超时协议](#超时协议) |
+| `dispatched-count.sh` | `dispatched-count.sh <plan.json>` | 输出 `status=="dispatched"` 节点数，控制者比对 ≤4 并行信号量 |
+
+遵循「sandcastle 没有就不要」——拓扑切片、status 状态机、收尾验证、分派锁均不做（分派锁对齐的 ADR 0007 在 sandcastle main 分支未实现）。
 
 ## 并行冲突处理
 
 - 并发纪律（跨 issue ≤4 流水线 / 同 issue 内严格串行）见[红线](#红线)「分派前」
 - 空间冲突的 issue 由 Planner 判为 blocked 避免并发；已并行的重叠分支由 Merger 统一合并时解决（冲突处理规则见 [reference/merger-prompt.md](reference/merger-prompt.md)）
-
-## agent 中断恢复
-
-- Agent 终止后 `name` 不可达，用 **agentId** resume（Agent 工具分派后记录的原始 agentId）
-- 恢复前先查分支 commit 判断进度：有 commit → 从断点继续（同分支重派 Implementer 或直接进 Reviewer）；无 commit → 重派
-- 中断不丢已提交进度——确定性分支名 `afk/issue-{N}` 保证 resume 落到同一分支
-- 会话 compact / `--resume` 后：Read `docs/afk-plan.json` 重建 DAG 与各节点 `status`；分支名确定性 + `gh issue view <N> --json state` 可交叉复核真实进度，不依赖会话记忆
 
 ## CONTEXT.md 缺失策略
 
@@ -154,4 +171,4 @@ Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3�
 
 ## 收尾流程
 
-所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 merge commit 与 summarizing commit），并列出因判定类 ticket 失败而保持 open、需 owner triage 的下游 ticket；删除目标项目 `docs/afk-plan.json`（运行时临时文件，不 commit；`docs/` 若因此为空可一并删）；然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。
+所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 merge commit 与 summarizing commit），并列出因判定类 ticket 失败而保持 open、需 owner triage 的下游 ticket；**把 `docs/afk-failures/` 完整清单交用户逐条处置**（每条按手册恢复重派，或人工接手 / 放弃后清理 worktree），用户处置完毕前不删 `afk-failures/`；删除目标项目 `docs/afk-plan.json`（运行时临时文件，不 commit；`docs/` 若因此为空可一并删）；然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。

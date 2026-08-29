@@ -26,8 +26,19 @@ afk-issue-loop 的四种分派单元：Planner（一次，出 DAG）、Implement
 Planner 开头一次性输出的完整 issue 依赖图（含 `blocked_by`），控制者按拓扑序逐轮切 unblocked 集合，耗尽即停。
 _Avoid_: 分轮 plan
 
-**原地重试**:
-失败 issue 在同一 worktree 同一 branch 上无限重试，commit 历史保留，不传染下游。
+**watchdog**:
+每次分派挂起的后台脚本（`scripts/watchdog.sh`），盯 worktree 文件系统活性（文件 mtime + git reflog），600s 无活性才退出并输出一行死因，退出即系统通知唤醒控制者判 `AgentIdleTimeoutError`。运行期间零输出、零上下文占用；两载体（subagent / herdr）统一。
+_Avoid_: 一次性计时器、复杂度分级时限、轮询
+
+**恢复手册**:
+失败 issue 落盘的现场档案 `docs/afk-failures/issue-{N}.md`：branch / worktree / commits 快照 / 错误类型 / 失败摘要 / 可复制的重派 prompt。现场保全（worktree 不删、branch 不动、永不 `reset --hard`）。
+
+**恢复**:
+失败 issue 的唯一恢复路径：同分支同 worktree 重新分派，prompt 末尾附「Read docs/afk-failures/issue-{N}.md 了解前次失败，同分支继续，复用已 commit 进度」。**零自动重试**——失败即标 `failed`，处置权在人，不停调度其余 unblocked issue。
+_Avoid_: 原地重试、自动重试
+
+**status**:
+plan 节点四值 `pending` / `dispatched` / `done` / `failed`（自造词汇，sandcastle 无对应物）。`failed` 是终态——不自动重试，收尾把 `afk-failures/` 清单交用户逐条处置（恢复或放弃）。
 
 **主窗口预算**:
 控制者的上下文窗口是稀缺资源这一设计约束：材料与汇报默认不进主窗口，能下沉到角色 agent 的一律下沉。

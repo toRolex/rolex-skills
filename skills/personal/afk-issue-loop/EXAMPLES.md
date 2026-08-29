@@ -58,7 +58,7 @@ Planner 自行扫描 issue、构建 DAG，把结果写入目标项目 `docs/afk-
 DONE
 ```
 
-控制者验收：Read `docs/afk-plan.json` → 校验每项 `number/title/branch/blocked_by` → 给每节点补 `status: "pending"`（逐轮用 Edit 维护）。**状态在文件里，不在会话记忆里**——compact / `--resume` 后重读即可重建。
+控制者验收：跑 `bash ~/.claude/skills/afk-issue-loop/scripts/validate-plan.sh docs/afk-plan.json` → exit 0 通过后给每节点补 `status: "pending"`（逐轮用 Edit 维护）。**状态在文件里，不在会话记忆里**——compact / `--resume` 后重读即可重建。
 
 > Planner 只在开头跑一次。之后每轮由控制者按 DAG 拓扑序切本轮 unblocked：本轮全部 issue 完成（Implementer + Reviewer）后，从"已完成节点"出发算下一轮——`blocked_by` 已全部完成的节点即为下一轮 unblocked。本示例为串行依赖链，每轮单条。
 
@@ -81,7 +81,11 @@ Read ~/.claude/skills/afk-issue-loop/reference/implementer-prompt.md 获取完�
 
 （herdr 模式省略 `WORKTREE`，agent 按模板自行 `wt switch -c afk/issue-42 -b develop`。issue 全文、CONTEXT.md、ADR、编码规范全由 agent 自取，控制者不代读。）
 
-分派后控制者**立即停手等系统完成通知**（禁轮询），只挂一个一次性超时计时器。
+分派后控制者挂 watchdog 即**立即停手等通知**（禁轮询）：
+
+```bash
+bash ~/.claude/skills/afk-issue-loop/scripts/watchdog.sh /path/to/worktree 600   # run_in_background: true，运行期间零输出
+```
 
 prompt 红线片段（摘自 implementer-prompt.md）：
 
@@ -102,7 +106,7 @@ Implementer 输出（**极简汇报**——无摘要、无测试输出、无文�
 DONE
 ```
 
-控制者需要事实时自查 git（几十字节，不占 agent 汇报）：
+系统完成通知到达 → 控制者杀掉 #42 的 watchdog（不误报），然后需要事实时自查 git（几十字节，不占 agent 汇报）：
 
 ```bash
 git log --oneline develop..afk/issue-42    # → 2 个 commit（args 解析 + main 调用，语义原子）
@@ -139,7 +143,7 @@ feat: 实现 --verbose 选项解析（Implementer, commit 1）
 ```
 
 > **跳过 Reviewer 的场景**：若 Implementer 完全结束后分支无任何 commit（`commits.length === 0`，如超时 / 失败），
-> 控制者跳过 Reviewer（无 diff 可审），**同 worktree 同 branch 无限重试**——不传染下游。
+> 控制者跳过 Reviewer（无 diff 可审），进**失败流程**——现场保全 + 落盘恢复手册 + 标 `failed`，零自动重试，不停调度其余 unblocked（完整示例见下文「失败与恢复」）。
 
 ### 阶段 3（第 1 轮）：Merger 拓扑合并 #42
 
@@ -194,13 +198,52 @@ wt switch -c afk/issue-43 -b ${TARGET_BRANCH}
 
 > **Planner 不再被重跑**——一次性 DAG 已经把所有依赖关系编码好了；本轮 unblocked 集合空即停（无需 `MAX_ITERATIONS` 上限，无需"每轮重 Plan"）。
 
+### 失败与恢复（watchdog 判死 → 恢复手册 → 同分支重派）
+
+假设第 2 轮 #43 的 Implementer 挂死（长时间无任何落盘）。全过程：
+
+**1. watchdog 退出通知到达**（分派时挂的后台脚本退出即唤醒控制者，一行死因）：
+
+```
+AgentIdleTimeoutError: worktree /path/to/wt-issue-43 idle 612s（>= 600s 阈值）
+```
+
+**2. 控制者判死 + 现场保全**：`TaskStop` 终止 agent；worktree 不删、branch 不动、永不 `reset --hard`。
+
+**3. 落盘恢复手册** `docs/afk-failures/issue-43.md`：
+
+```
+branch:   afk/issue-43
+worktree: /path/to/wt-issue-43
+commits:  a1b2c3d feat: logger 接入 verbose 开关（前次进度，自动保留）
+error:    AgentIdleTimeoutError
+失败摘要: watchdog 判死——worktree 612s 无文件活性与 reflog 变动
+
+## 恢复
+重新分派，prompt 末尾附：
+Read docs/afk-failures/issue-43.md 了解前次失败，同分支继续，复用已 commit 进度。
+```
+
+**4. 标 `failed` + 不停调度**：`docs/afk-plan.json` 中 #43 节点 `status: "failed"`；其余 unblocked issue 照常分派（不传染下游）。
+
+**5. 收尾交用户处置**：全部完成后列出 `afk-failures/` 清单。用户决定恢复 #43 → 控制者**同分支同 worktree 重新分派**，prompt 只有两行 + 手册指引（不重注入任何材料）：
+
+```
+Read ~/.claude/skills/afk-issue-loop/reference/implementer-prompt.md 获取完整指令并执行。
+参数：ISSUE_NUMBER=43, BRANCH=afk/issue-43, TARGET_BRANCH=develop, WORKTREE=/path/to/wt-issue-43
+Read docs/afk-failures/issue-43.md 了解前次失败，同分支继续，复用已 commit 进度。
+```
+
+新 agent 读到前次失败手册（不以同样方式再死一次），且确定性分支名 + worktree 复用让已 commit 的 `a1b2c3d` 进度自动捡回。
+
 ### 载体差异：subagent vs herdr
 
 | 环节 | subagent（默认） | herdr |
 |------|------|------|
 | 角色运行 | 当前会话 `Agent` 工具 | 独立 pane（新 claude 实例） |
 | worktree 创建 | 控制者预创建 `wt switch -c ...` | agent 自行创建（同一命令） |
-| 完成通知 | 系统完成通知自动 re-invoke（**禁轮询**，只挂一次性超时计时器） | 无系统通知，需主动轮询 `herdr agent list` |
+| 完成通知 | 系统完成通知自动 re-invoke（**禁轮询**） | agent 汇报承载完成信号（CLI 细节见 herdr skill） |
+| 超时判死 | **两载体统一 watchdog**：分派挂 `watchdog.sh` 即停手，600s 无活性才退出 + 一行死因；完成通知先到则杀掉 watchdog | 同左（同一脚本、同一阈值、同一失败流程，**无轮询**） |
 | 适用场景 | ≤5 个 issue、想实时看进度 | 大量 issue、并行跑满、省主会话上下文 |
 | 反馈闭环 | 不存在（Reviewer 直接改不反馈） | 不存在（herdr 不再需要跨会话 messaging） |
 

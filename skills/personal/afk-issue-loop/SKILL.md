@@ -29,7 +29,7 @@ Matt Pocock 的 Ralph loop 的轻量替代，控制者扮演 `run.ts` 编排器�
 
 **载体与角色正交**：四种角色在任何载体下都用同一套 prompt 语义（DAG、`<promise>COMPLETE</promise>`、确定性分支名、拓扑 merge 都不变），区别只在「谁来跑」。
 
-herdr 模式下 pane 创建、指令下发、等待、轮询等操作见 [reference/herdr-notes.md](reference/herdr-notes.md)；布局规则遵循 `/herdr-instances`（主编排 pane 不可上下分割，左右/上下分割各自不超过 3）。
+herdr 模式：用 `/herdr` 开新窗口跑同一套角色 prompt（模板自加载 + 寻址注入不变，省略 `WORKTREE` 参数，agent 自行 `wt switch -c`）；herdr CLI 操作与报错细节见 herdr skill，布局规则遵循 `/herdr-instances`（主编排 pane 不可上下分割，左右/上下分割各自不超过 3）。超时与失败语义两载体统一——同一套 watchdog（见 [REFERENCE.md](REFERENCE.md#超时协议)），skill 里不存在任何轮询。
 
 ## 角色架构
 
@@ -57,7 +57,7 @@ herdr 模式下 pane 创建、指令下发、等待、轮询等操作见 [refere
     ▼
   Implementer（每 issue 一个,afk/issue-N,跨 issue ≤4 并行）
     │  <promise>COMPLETE
-    │  失败 → 同 worktree 同 branch 重试(无限)
+    │  失败 → 落盘恢复手册 + 标 failed(零自动重试),不停调度其余 unblocked
     ▼
   Reviewer（同 worktree 同 branch,严格串行;分支无 commit 则跳过）
     │  <promise>COMPLETE
@@ -71,7 +71,7 @@ herdr 模式下 pane 创建、指令下发、等待、轮询等操作见 [refere
 ```
 
 - **并行度**：跨 issue ≤4（信号量）；同 issue 内 Implementer→Reviewer 严格串行
-- **失败处理**：失败 issue 同 worktree 同 branch 无限重试；**不传染下游**（DAG 上其它节点按原 `blocked_by` 推进）
+- **失败处理**：失败即标 `failed`、落盘恢复手册（`docs/afk-failures/issue-{N}.md`）、现场保全（worktree 不删、branch 不动），**零自动重试**；不停调度其余 unblocked issue，收尾把 `afk-failures/` 清单交用户逐条处置（恢复路径见 [REFERENCE.md](REFERENCE.md#恢复机制)）
 - **完成判定**：真正的完成（关 issue）只在 Merger。Implementer / Reviewer 都不关 issue
 - **无硬轮次上限**：Planner 一次性，DAG 拓扑耗尽即停；用户输入的 issue 范围 = 全部工作面
 
@@ -109,13 +109,13 @@ Read ~/.claude/skills/afk-issue-loop/reference/planner-prompt.md 获取完整指
 
 Planner 自行扫描 issue、构建完整 DAG（含全部 open issue 的 `blocked_by`），把结果**写入目标项目 `docs/afk-plan.json`**（无 `docs/` 则新建），并输出 `<plan>` JSON——schema：`{"issues":[{"number","title","branch","blocked_by":[number,...]}]}`（完整示例在 [reference/planner-prompt.md](reference/planner-prompt.md)，控制者验收只需字段名）。
 
-**控制者验收**：Read `docs/afk-plan.json`，校验每项 `number/title/branch/blocked_by`（`blocked_by` 是数组，可空），识别可选 `kind` 字段（`kind=gate` = 判定类 ticket，处置见 [REFERENCE.md](REFERENCE.md#依赖解析)）；给每节点补 `status: "pending"`，逐轮用 Edit 维护（`dispatched` / `done` / `failed`）。**plan 落盘即状态落盘**——compact / `--resume` 后重读文件即可无状态重建，不依赖会话记忆。
+**控制者验收**：跑 `bash ~/.claude/skills/afk-issue-loop/scripts/validate-plan.sh docs/afk-plan.json`（schema + 分支名格式 + `blocked_by` 引用存在 + 无环检测，exit 1 时错误行指明问题、有环时报成环节点——plan 验收不靠 LLM 肉眼）；通过后识别可选 `kind` 字段（`kind=gate` = 判定类 ticket，处置见 [REFERENCE.md](REFERENCE.md#依赖解析)）；给每节点补 `status: "pending"`，逐轮用 Edit 维护（`dispatched` / `done` / `failed`）。**plan 落盘即状态落盘**——compact / `--resume` 后重读文件即可无状态重建，不依赖会话记忆。
 
 **全 blocked 判断逻辑**：本轮 unblocked 集合空 → 控制者停循环（无需调用 Planner 重判；DAG 拓扑耗尽即终止）。
 
 ### 阶段 2：Implementer + Reviewer（每 issue：worktree → 实现 → 自审）
 
-控制者按 DAG 拓扑序切片**本轮 unblocked**（节点 `blocked_by` 全部已完成或空），跨 issue ≤4 并行。**流水线**：某 issue 的 Implementer 一完成（分支 commit >0）即触发其 Reviewer——不等待本轮其他 issue。信号量 ≤4 按 Implementer + Reviewer 合计占坑。
+控制者按 DAG 拓扑序切片**本轮 unblocked**（节点 `blocked_by` 全部已完成或空），跨 issue ≤4 并行——分派前用 `bash ~/.claude/skills/afk-issue-loop/scripts/dispatched-count.sh docs/afk-plan.json` 查当前 dispatched 节点数比对信号量，不靠心里记。**流水线**：某 issue 的 Implementer 一完成（分支 commit >0）即触发其 Reviewer——不等待本轮其他 issue。信号量 ≤4 按 Implementer + Reviewer 合计占坑。
 
 **1. 创建 worktree**（确定性分支 `afk/issue-{N}`）：
 - subagent：控制者预创建 `wt switch -c afk/issue-{N} -b ${TARGET_BRANCH}`
@@ -131,11 +131,14 @@ Read ~/.claude/skills/afk-issue-loop/reference/implementer-prompt.md 获取完�
 - issue 全文 + comments、父 PRD、`CONTEXT.md` / ADR / 编码规范——**均由 agent 按模板指引自取**（`gh issue view` / Read），控制者不代读、不粘贴全文
 - herdr 模式无预置 worktree：省略 `WORKTREE` 参数，agent 按模板自行 `wt switch -c`
 - 红线摘要（模板内详述）：TDD → 全量测试 → commit（**中文描述、语义原子**）→ `<promise>COMPLETE</promise>`；**不关 issue**；不等待 seam 确认
-- **重试分派**：prompt 同上，末尾只加一句"同分支继续，复用已 commit 进度"，不重注入任何材料
 
-**3. 超时与失败求值**：分派后进入**通知驱动等待**——禁轮询，一次性超时计时器的机制见 [REFERENCE.md](REFERENCE.md#超时协议)。Implementer **完全结束**（正常完成 / 超时 / 抛错）后，查分支 commit：
-- >0 → 触发同 worktree 同 branch 的 Reviewer
-- ==0 或失败 → **失败处理**：同 worktree 同 branch 无限重试，不传染下游。理论上某 issue 可能永久卡重试——用户预期正常情况不会发生；极端场景在收尾时自查
+**3. 超时与失败求值**：分派时以 `run_in_background: true` 挂 watchdog（`bash ~/.claude/skills/afk-issue-loop/scripts/watchdog.sh {worktree 绝对路径} 600`，herdr 模式 agent 自行创建 worktree 后控制者用确定性路径挂同一个脚本），然后**立即停手等通知**（禁轮询，契约见 [REFERENCE.md](REFERENCE.md#超时协议)）：
+
+- **系统完成通知先到** → 杀掉该 watchdog（不误报），查分支 commit：>0 → 触发同 worktree 同 branch 的 Reviewer；==0 → 空产出按 `AgentError` 进失败流程
+- **watchdog 退出通知先到**（一行死因：哪个 worktree、idle 多久）→ 判 `AgentIdleTimeoutError`，`TaskStop` 终止 agent，进失败流程
+- **agent 抛错** → `AgentError`，进失败流程
+
+**失败流程（零自动重试）**：现场保全（worktree 不删、branch 不动、永不 `reset --hard`）→ 落盘恢复手册 `docs/afk-failures/issue-{N}.md`（branch / worktree / commits 快照 / 错误类型 / 失败摘要 / 可复制的重派 prompt，格式见 [REFERENCE.md](REFERENCE.md#恢复机制)）→ 节点标 `failed` → **不停调度其余 unblocked issue**，收尾把清单交用户逐条处置
 
 **4. 同 worktree 同 branch 触发 Reviewer**（沿用 Implementer 的 worktree，`model: "sonnet"`），prompt 同样模板自加载（模板 `reference/reviewer-prompt.md`，参数与 Implementer 相同）：
 - issue 内容与领域上下文同样由 agent 自取
@@ -166,14 +169,15 @@ Read ~/.claude/skills/afk-issue-loop/reference/implementer-prompt.md 获取完�
 - Merger 完成后回到阶段 2，按 DAG 拓扑序切下一轮 unblocked（直到 unblocked 集合空）
 - **无硬轮次上限**：DAG 拓扑耗尽即停
 - 若本轮有判定类 ticket 失败产生的未处置下游（保持 open），与完成统计一并列出，请用户/owner 逐条 triage 存废
+- **收尾把 `docs/afk-failures/` 完整清单交用户逐条处置**：每条按恢复手册恢复重派（同分支同 worktree，prompt 附手册路径），或人工接手 / 放弃后清理 worktree——处置权在人，用户处置完毕前不删 `afk-failures/`
 - 收尾时删除目标项目 `docs/afk-plan.json`（运行时临时文件，不 commit；`docs/` 若因此为空可一并删）
 - 全部完成 → 提示用户 code review / QA
 
 ## Reference
 
-- [REFERENCE.md](REFERENCE.md) — 依赖解析、协议机制、主窗口预算、模型、红线、状态处理、超时协议、并行冲突、agent 中断恢复、失败重试行为、CONTEXT.md 缺失策略、收尾流程
-- [reference/herdr-notes.md](reference/herdr-notes.md) — herdr 模式操作细节（仅 mode=herdr）
-- [EXAMPLES.md](EXAMPLES.md) — 完整一轮示例；不确定某阶段的具体命令 / 信号格式时先读它
+- [REFERENCE.md](REFERENCE.md) — 依赖解析、协议机制、主窗口预算、模型、红线、状态处理、超时协议（watchdog）、恢复机制、scripts 契约、并行冲突、CONTEXT.md 缺失策略、收尾流程
+- [EXAMPLES.md](EXAMPLES.md) — 完整一轮示例（含失败 → 恢复手册 → 同分支重派）；不确定某阶段的具体命令 / 信号格式时先读它
+- [scripts/](scripts/) — `validate-plan.sh`（plan 校验）/ `watchdog.sh`（超时盯梢）/ `dispatched-count.sh`（并行计数），契约见 REFERENCE.md scripts 契约段
 - [reference/planner-prompt.md](reference/planner-prompt.md) — Planner 分派模板（输出 DAG）
 - [reference/implementer-prompt.md](reference/implementer-prompt.md) — Implementer 分派模板（含语义原子 commit 约束）
 - [reference/reviewer-prompt.md](reference/reviewer-prompt.md) — Reviewer 分派模板（直接自改 + `refine:` commit）
