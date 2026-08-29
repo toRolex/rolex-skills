@@ -156,7 +156,7 @@ flowchart LR
 | `/git-flow-conventions` ★ | 分支命名、commit 格式、发版规范参考 |
 | `/publish-release` ★ | 从 develop 一键发版 |
 | `/qa-plan` ★ | 从 commit 生成 Step-by-Step 测试计划 |
-| `/afk-issue-loop` ★ | 批量处理 ready-for-agent 的 Issue |
+| **[/afk-issue-loop](skills/personal/afk-issue-loop/SKILL.md)** ★ | 处理指定 Ticket；未指定时批量执行 open `ready-for-agent` Tickets |
 | **技能守卫** |  |  |
 | `hooks/` | grilling/wayfinder 阶段自动阻止写代码的 Claude hooks |
 

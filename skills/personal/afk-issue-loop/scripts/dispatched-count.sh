@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # dispatched-count.sh <plan.json>
-# 输出 status=="dispatched" 的节点数，控制者比对 ≤4 并行信号量。
-set -u
+# 输出 active Ticket 槽位数：status 为 dispatched 或 recovering。
+set -uo pipefail
 
 plan="${1:-}"
 if [ -z "$plan" ]; then
@@ -12,4 +12,15 @@ if [ ! -f "$plan" ]; then
   echo "dispatched-count: 文件不存在: $plan" >&2
   exit 1
 fi
-jq '[.issues[] | select(.status == "dispatched")] | length' "$plan"
+if ! jq -e '
+    (.issues | type == "array")
+    and (.issues | all(
+      (.status == "pending" or .status == "dispatched" or .status == "recovering" or .status == "done")
+      and (.stage == "implement" or .stage == "review" or .stage == "merge")
+    ))
+  ' "$plan" >/dev/null 2>&1; then
+  echo "dispatched-count: plan 的 issues/status/stage 非法" >&2
+  exit 1
+fi
+
+jq '[.issues[] | select(.status == "dispatched" or .status == "recovering")] | length' "$plan"

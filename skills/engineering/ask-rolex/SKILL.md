@@ -87,7 +87,7 @@ disable-model-invocation: true
 - **`/teach`**：跨多个 session 学习一个概念，把当前目录当作一个有状态的工作区。
 - **`/writing-for-agents`** 是编写 agent 消费的文档时的参考：skills、AGENTS.md、被指向的文档。
 - **`/writing-great-skills`**：编写和编辑 skill 的参考指南。
-- **`/afk-issue-loop`**：批量 AFK 处理 GitHub issues。遍历 `ready-for-agent` 标签的 issue，逐个分发给独立 agent。
+- **`/afk-issue-loop [issue numbers]`**：处理指定 Tickets；省略 numbers 时扫描 open `ready-for-agent`。按 GitHub 原生依赖递归编排并自动恢复。
 - **`/qa-plan`**：从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue。
 - **`/clean-branches`**：清理本地和远程已合并的 Git 分支。
 - **`/git-flow-conventions`**：Git Flow 分支管理与提交规范指南。

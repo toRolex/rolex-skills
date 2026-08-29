@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # watchdog.sh <worktree> [idle秒=600]
-# 盯 worktree 文件系统活性（文件 mtime + git reflog 时间，取最新），静默循环零输出；
-# idle 超过阈值才 exit 1 + 一行死因。职责边界：只防挂死——正常结束/报错由系统通知接管，
-# 控制者在 agent 正常完成时杀掉本脚本。
-set -u
+# 盯 worktree 文件系统活性（文件 mtime + Git reflog 时间，取最新）；idle 超时输出死因。
+set -uo pipefail
 
 worktree="${1:-}"
 idle="${2:-600}"
@@ -15,23 +13,44 @@ if [ ! -d "$worktree" ]; then
   echo "watchdog: worktree 不存在: $worktree" >&2
   exit 1
 fi
+case "$idle" in
+  ''|*[!0-9]*)
+    echo "watchdog: idle 秒数必须是正整数: $idle" >&2
+    exit 1
+    ;;
+esac
+if [ "$idle" -le 0 ]; then
+  echo "watchdog: idle 秒数必须是正整数: $idle" >&2
+  exit 1
+fi
+if ! git -C "$worktree" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "WatchdogObservationError: 不是 Git worktree: $worktree" >&2
+  exit 2
+fi
 
 start=$(date +%s)
 while :; do
   now=$(date +%s)
-  # 最新文件 mtime（排除 .git 目录；worktree 的 .git 是指针文件，reflog 走 git 命令取）
-  newest=$(find "$worktree" -type f -not -path '*/.git/*' -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1)
-  # HEAD reflog 最后活动时间（worktree 的 reflog 在主仓库 .git/worktrees/<name>/ 下，git -C 自动解析）
-  reflog=$(git -C "$worktree" log -g -1 --format=%ct 2>/dev/null || true)
-  last=$start  # 空目录兜底：从脚本启动时刻起算，避免分派瞬间误判
+  if ! newest=$(find "$worktree" -type f -not -path '*/.git/*' -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1); then
+    echo "WatchdogObservationError: 无法读取 worktree 文件活性: $worktree" >&2
+    exit 2
+  fi
+  if ! reflog=$(git -C "$worktree" log -g -1 --format=%ct 2>/dev/null); then
+    echo "WatchdogObservationError: 无法读取 Git reflog: $worktree" >&2
+    exit 2
+  fi
+  last=$start
   for t in $newest $reflog; do
-    if [ -n "$t" ] && [ "$t" -gt "$last" ]; then
+    case "$t" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    if [ "$t" -gt "$last" ]; then
       last=$t
     fi
   done
   age=$((now - last))
   if [ "$age" -ge "$idle" ]; then
-    echo "AgentIdleTimeoutError: worktree $worktree idle ${age}s（>= ${idle}s 阈值）"
+    echo "AgentIdleTimeoutError: worktree ${worktree} idle ${age}s（>= ${idle}s 阈值）"
     exit 1
   fi
   sleep 10
