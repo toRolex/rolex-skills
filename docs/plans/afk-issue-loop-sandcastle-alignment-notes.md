@@ -1,5 +1,7 @@
 # afk-issue-loop 对齐 sandcastle —— implementation notes
 
+> 历史记录：本文描述 issue #5 的 watchdog / 零自动重试方案。恢复与状态部分已被 [`docs/adr/0003-afk-issue-loop-native-dag-recovery.md`](../adr/0003-afk-issue-loop-native-dag-recovery.md) supersede；现行协议见 `skills/personal/afk-issue-loop/SKILL.md` 与 `REFERENCE.md`。
+
 Issue: https://github.com/toRolex/rolex-skills/issues/5
 Plan: `docs/plans/afk-issue-loop-sandcastle-alignment.html`
 ADR: 修订 ADR 0001 两条款，新增 ADR 0002 记录。

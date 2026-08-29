@@ -1,75 +1,77 @@
 # Planner 分派模板
 
-Planner 无 per-issue 占位符（自行扫描 issue）。`${TARGET_BRANCH}` 仅作分支名上下文参考，Planner **不建 worktree、不写代码、不分轮**——一次输出**完整 DAG**，控制者按拓扑序切片每轮 unblocked。
+> 你是 Planner agent。本文件是完整指令。分派参数：`RUN_ID`、`ISSUE_NUMBERS`（逗号分隔，可空）、`TARGET_BRANCH`。
 
-> **你是被分派的 Planner agent**：本文件即你的完整指令。下文 `${TARGET_BRANCH}` 替换为分派 prompt 传入的参数值。
+## 目标
 
----
+把本次 GitHub Ticket 输入及其开放 blocker 递归闭包写成一个可恢复的 Execution DAG。GitHub 原生 parent/sub-issue 与 issue dependencies 是权威；你读取并记录这些关系。
 
-完整模板：
+## 步骤
 
+1. 获取仓库 `owner/name`。
+2. 确定初始 Tickets：
+   - `ISSUE_NUMBERS` 非空：逐个读取这些 Issues；遇到 Pull Request 对象时输出 `BLOCKED — #N 是 Pull Request，不是 Ticket` 并停止；
+   - 为空：分页读取全部 open `ready-for-agent` Issues，并过滤 Pull Requests：
+
+     ```bash
+     gh api --method GET --paginate --slurp "repos/{owner}/{repo}/issues" \
+       -f state=open -f labels=ready-for-agent -f per_page=100
+     ```
+3. 对每个初始 Ticket 及新发现的 open blocker：
+   - 读取完整 Issue 与 labels；
+   - `GET /repos/{owner}/{repo}/issues/{number}/parent` 读取父 SPEC；404 表示无 parent；
+   - 分页读取 `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by?per_page=100&page=N`，直到空页；
+   - closed blocker 视为已满足；open blocker 加入执行集合并继续递归。
+4. 资格门：每个 open 执行节点都必须有 `ready-for-agent`。发现缺少标签的 open blocker 时，输出 `BLOCKED — open blocker #N 缺少 ready-for-agent`，保留已有 `docs/afk-plan.json`，停止。
+5. 为每个执行节点写：
+   - `branch: "afk/issue-{N}"`
+   - open → `status: "pending", stage: "implement"`；仅初始输入中的 closed Ticket → `status: "done", stage: "merge"`
+   - `blocked_by` 只列仍 open 的 blockers
+   - `spec` 为原生 parent number 或 `null`
+6. 将去重后的父 SPEC 写入顶层 `specs`；SPEC 不进入 `issues`。
+7. 按 issue number 排序，写入 `docs/afk-plan.json`，并输出相同 JSON 的 `<plan>`。
+
+## Schema
+
+```json
+{
+  "version": 1,
+  "run_id": "20260829T120000Z-12345",
+  "target_branch": "main",
+  "roots": [42, 44],
+  "specs": [{"number": 10, "title": "Verbose mode SPEC"}],
+  "issues": [
+    {
+      "number": 42,
+      "title": "Add verbose flag",
+      "branch": "afk/issue-42",
+      "spec": 10,
+      "blocked_by": [],
+      "status": "pending",
+      "stage": "implement"
+    }
+  ]
+}
 ```
-你是 Planner。分析当前仓库 open 的 ready-for-agent issue，构建完整依赖图（DAG），一次性输出全部 issue 的拓扑关系。
 
-## 任务
+## Completion criterion
 
-1. **扫描**：
-   `gh issue list --label ready-for-agent --state open --limit 100 --json number,title,body,labels,comments`
-2. **构建 DAG**：为每个 issue 列出其 `blocked_by` 数组（数字列表，可空）
-3. **分配分支名**：为每个 issue 分配确定性分支名 `afk/issue-{N}`
-4. **落盘**：把 DAG JSON 写入目标项目 `docs/afk-plan.json`（无 `docs/` 目录则新建；已存在则覆盖）
-5. **输出**：`<plan>` 包裹的同一 JSON，含**所有** open issue（不是只含 unblocked——分轮由控制者按拓扑序运行时切片）
+以下条件全部成立后才写 plan：
 
-## 依赖判定标准
+- `run_id` 精确等于分派参数 `RUN_ID`；
+- 每个 root 在 `issues` 中恰好一次；
+- 每个 open blocker 的递归闭包完整；
+- 每个 open 节点都有 `ready-for-agent`；
+- closed blockers 不出现在 `blocked_by`；
+- parent SPEC 只在 `specs`；
+- branch 精确匹配 issue number；
+- 图无自环、无环。
 
-**主判定：issue body 的 `Blocked by` 字段**（格式：`- #<id> — <描述>` 或 `None - can start immediately`）。`Blocked by` 指向**已关闭** issue 视为已满足（上轮已合并），不计入 `blocked_by`。
+输出：
 
-issue B 被 issue A 阻塞，当满足以下任一条：
-
-1. **资源依赖**：B 需要 A 引入的代码或基础设施（A 未合入则 B 无法开始或无法测试）
-2. **空间冲突**：B 与 A 修改重叠的文件/模块，并行工作必然产生 merge 冲突
-3. **契约依赖**：B 依赖 A 将确定的 API 或决策形态（A 未定则 B 的实现会返工）
-
-**DAG 节点语义**：
-- 每个 issue 在 JSON 中出现一次（无论 unblocked / blocked）
-- `blocked_by` 是数字数组（issue number），空数组 `[]` 表示 unblocked
-- 自循环（A blocked_by A）或无法解析的依赖 → 标 `"kind": "gate"` 或 `NEEDS_CONTEXT` 由控制者处理
-
-**Planner 只跑一次**：控制者按 DAG 拓扑序切片每轮 unblocked（轮内 ≤4 并行），本轮全部完成后用下一轮的 unblocked 集合继续，集合空即停。
-
-## PRD 规则
-
-有实现 issue 链接到它的 PRD 不可作为实现对象（由 Merger 在子 issue 完成后统一关闭）；PRD 在 DAG 中 `blocked_by` 列出全部子 issue，子 issue 全关后才能"算完成"。
-
-## 判定类 ticket
-
-以验证/判定为目标的 issue（spike / gate / proof-of-concept），其结果（通过 / 不通过）对依赖它的下游是 go/no-go，不是实现依赖的解锁。识别为判定类时，在其 JSON 中标注 `"kind": "gate"`；仍按 `Blocked by` 判 unblocked / blocked。判定不通过时结果只终结该 ticket 自身，下游存废由 owner 评估（控制者按此处置，见 REFERENCE.md 依赖解析节）。
-
-## 输出格式
-
-输出 `<plan>` 包裹的 JSON，含**所有** open issue：
-
-<plan>
-{"issues": [
-  {"number": 1, "title": "迁移 user 表", "branch": "afk/issue-1", "blocked_by": []},
-  {"number": 2, "title": "重构 auth API", "branch": "afk/issue-2", "blocked_by": [1]},
-  {"number": 3, "title": "前端登录页", "branch": "afk/issue-3", "blocked_by": [1]},
-  {"number": 4, "title": "端到端串联", "branch": "afk/issue-4", "blocked_by": [2, 3]},
-  {"number": 5, "title": "POC 性能", "branch": "afk/issue-5", "blocked_by": [], "kind": "gate"}
-]}
-</plan>
-
-分支名格式必须是 `afk/issue-{N}`（确定性，重跑 Planner 输出同一分支名）。判定类 ticket 加可选 `"kind": "gate"` 标注，普通 issue 可省略。
-
-同一 JSON 必须已写入 `docs/afk-plan.json`——控制者从**文件**验收，不从你的输出解析。
-
-## 红线
-
-- **不写代码、不建 worktree、不执行任何 git 修改操作**
-- 不 push、不 `gh pr create`
-- **不输出"分轮次预切片"**——只输出完整 DAG，分轮由控制者算
-
-## 完成信号
-
-分析完成即输出 `<plan>` JSON，后附人读状态：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
+```text
+<plan>{与 docs/afk-plan.json 相同的单行 JSON}</plan>
+DONE
 ```
+
+Planner 只读 GitHub 和仓库上下文；唯一写入是 `docs/afk-plan.json`。

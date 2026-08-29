@@ -69,7 +69,7 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 | `clean-branches` | 自动 | 清理已合并的本地和远程分支，也清理残留 worktree |
 | `git-flow-conventions` | 自动 | Git Flow 分支命名、commit 格式、PR 流程、发版规范 |
 | `publish-release` | `/publish-release` 或自动 | 从 develop 发版：bump 版本、更新 changelog、打 tag、合并到 main |
-| `afk-issue-loop` | `/afk-issue-loop` | 遍历 `ready-for-agent` 的 issue，逐个分发给独立 agent 处理 |
+| `afk-issue-loop` | `/afk-issue-loop [issue numbers]` | 处理指定 Tickets；未指定时扫描 open `ready-for-agent`，按原生依赖自动实现、审查与合并 |
 | `qa-plan` | `/qa-plan` | 从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue |
 
 #### Shared Vocabulary（共享词汇层）

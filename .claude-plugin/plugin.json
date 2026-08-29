@@ -5,5 +5,10 @@
   "author": {
     "name": "Rolex"
   },
-  "homepage": "https://github.com/toRolex/rolex-skills"
+  "homepage": "https://github.com/toRolex/rolex-skills",
+  "skills": [
+    "./skills/engineering/",
+    "./skills/productivity/",
+    "./skills/personal/"
+  ]
 }

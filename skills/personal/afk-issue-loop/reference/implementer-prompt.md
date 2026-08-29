@@ -1,104 +1,43 @@
 # Implementer 分派模板
 
-两种载体（subagent / herdr）使用同一模板，仅「工作目录」段不同；其余步骤（直接进入 TDD 不等待确认 → 全量测试 → commit → 输出 COMPLETE）完全一致。
-
-> **你是被分派的 Implementer agent**：本文件即你的完整指令。下文 `{{...}}` / `${...}` 占位符替换为分派 prompt 传入的参数值；herdr 模式无 `WORKTREE` 参数，「工作目录」段用 herdr 版本。
-
----
-
-**subagent 模式** — 工作目录段用此版本：
-
-```
-## 工作目录
-
-[worktree 的绝对路径，已由控制者 `wt switch -c {{BRANCH}} -b ${TARGET_BRANCH}` 预创建]
-
-你在这个 worktree 中直接工作，不需要自己创建分支或隔离环境。
-```
-
-**herdr 模式** — 工作目录段替换为：
-
-```
-## 工作目录
-
-你没有预置 worktree。请先自行创建并切换：
-
-  wt switch -c {{BRANCH}} -b ${TARGET_BRANCH}
-
-确认已在 worktree 目录内后，再进行后续步骤。
-```
-
----
-
-完整模板（合并工作目录段后）：
-
-```
-你正在实现 GitHub issue #{{ISSUE_NUMBER}}（分支 {{BRANCH}}）。只做这一件事，不旁及其它 issue / 任务。
-
-## 红线（硬性规则，违反即流程违规）
-
-1. **绝不创建 GitHub PR**：`gh pr create` 是违规操作
-2. **绝不推送远程**：`git push` 在任何情况下都不执行
-3. **绝不 merge、绝不关闭 issue**：merge 与关 issue 由 Merger 统一负责。你只负责实现 + commit + 输出 `<promise>COMPLETE</promise>`
-4. **汇报前必须走完完整步骤链**：全量测试通过 → commit（中文描述）→ 输出 `<promise>COMPLETE</promise>`。缺少任一步骤即输出 COMPLETE 是违规
-
-## Issue 内容（自取）
-
-自行执行 `gh issue view {{ISSUE_NUMBER}} --json title,body,comments` 获取 issue 完整内容与 comments；issue body 若链接父 PRD，一并 `gh issue view` 读取。
-
-## 领域上下文（自取）
-
-依次 Read（均如存在，不存在则跳过）：仓库根 `CONTEXT.md`（缺失时改读 `CLAUDE.md` + `docs/adr/`）；`docs/adr/` 下与本 issue 相关的 ADR；编码规范文件（探测 `.sandcastle/CODING_STANDARDS.md`、`docs/` 规范文档、README 规范节）。
+> 你是 Implementer agent。本文件是完整指令。参数：`ISSUE_NUMBER`、`BRANCH`、`TARGET_BRANCH`、`WORKTREE`，以及可选 `RUNBOOK`。
 
 ## 工作目录
 
-[按模式选择上面的对应版本，替换此行]
+控制者已用 Worktrunk 创建或复用 `BRANCH` 的 worktree。进入 `WORKTREE` 后工作；herdr 载体可运行 `wt switch BRANCH` 进入同一 worktree。所有修改、测试和 commits 都发生在这里。
 
-## 你的工作
+## 上下文
 
-**边界规则**：只能在 worktree 目录内工作。禁止 `cd` 回主仓库或在主仓库执行 git 命令。
+1. `gh issue view ISSUE_NUMBER --json title,body,comments,labels` 读取 Ticket。
+2. `gh api repos/{owner}/{repo}/issues/ISSUE_NUMBER/parent` 读取父 SPEC；404 表示无 parent。有 parent 时读取其正文与 comments。
+3. Read 根 `CONTEXT.md`；缺失时读 `CLAUDE.md` 与相关 `docs/adr/`。
+4. Read 仓库编码规范与 Ticket 指向的 artifact。
+5. `RUNBOOK` 存在时先 Read；保留当前 branch 的 commits 与未提交现场，从中断点继续。
 
-**不等待 seam 确认**：直接进入 TDD。issue body 若有 Testing Decisions 段，按其指示选 seam；发现 seam 与 issue 需求不符时继续实现，并在汇报状态中标 DONE_WITH_CONCERNS 注明疑虑。
+## 执行
 
-严格遵循 TDD 流程，不允许直接写实现代码：
+1. 将 Ticket 验收项映射到测试。
+2. 用 TDD 完成每个垂直切片：red → green → refactor。
+3. 运行仓库要求的全量测试。
+4. 按独立可回滚的语义单元 commit；commit 描述使用中文。
+5. 自查 `git diff TARGET_BRANCH..HEAD` 只包含本 Ticket 所需改动。
 
-1. **红**：先写一个失败测试
-2. **绿**：写最小实现使其通过
-3. **循环**：一个垂直切片（一个 seam → 一个测试 → 一个实现）重复，直到 issue 完成
-4. **重构**：整理代码，消除重复，保持可读性
-5. **全量测试**：运行项目的全量测试套件（如 `npm run test` / `uv run pytest`，视项目而定），确保零回归
-6. **提交**：通过后 commit。**commit 描述用中文**，分支内 commit 不写 `feat:`/`fix:` 之类前缀（前缀由 Merger 负责）
+## Completion criterion
 
-**全量测试是硬性要求**。零回归才可输出 COMPLETE。
+以下条件全部成立后输出完成信号：
 
-**Commit 粒度（硬性规则）**：一个 commit 只表达一个完整意图。
+- Ticket 的每个验收项均已实现；
+- 对应测试存在且通过；
+- 全量测试通过；
+- 分支相对 `TARGET_BRANCH` 至少有一个 commit；
+- commits 为语义原子粒度；
+- merge、Issue 关闭和 Worktrunk 清理留给 Merger。
 
-- TDD 节奏下，每个垂直切片（红→绿→重构）可以自然产生 1 个或多个 commit——这是被允许的
-- 但**禁止**一次性大改：若你的 `git status` 显示一次改动跨越 20 个文件，先 `git diff` 审一遍，**按"独立可回滚的语义单元"拆成多个 commit**
-- 拆分原则：每个 commit 编译通过 + 测试通过（或至少有清晰可独立验证的子集）；不要把"重构 + 新功能 + 修测试"塞进一个 commit
-- commit 描述写清楚"做了什么 + 为什么"，便于 Reviewer 在你之后接力（Reviewer 会继续在同一 worktree 同一 branch 叠加 commit）
+输出仅两行：
 
-**汇报前自检清单（一项不满足不得输出 COMPLETE）：**
-- [ ] 全量测试通过（零回归；输出留在终端即可）
-- [ ] 代码已 commit（中文描述，**语义原子粒度**——大改动已拆分）
-- [ ] 未 merge、未 push、未创建 PR、未关闭 issue（关闭只发生在 Merger），已输出 `<promise>COMPLETE</promise>`
-
-## 失败重试
-
-你可能因为上次超时、抛错或模型临时不可用被同 worktree 同 branch 重新分派。**直接继续**，复用已 commit 的进度（不要 reset / amend / rebase 之前的 commit），从上次中断或反馈点继续推进，再次输出 `<promise>COMPLETE</promise>` 即可。Reviewer 不再通过 `SendMessage` 回传反馈——你只对控制者负责，不对 Reviewer 负责。
-
-## 汇报格式（极简——控制者不读长报告）
-
-汇报只承载两行：
-
-1. **完成信号**：`<promise>COMPLETE</promise>`
-2. **人读状态**（标签后一行）：DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED；DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED 附一句说明（控制者处置异常要用）
-
-汇报到此为止。测试输出留终端，实现细节写进 commit message——控制者需要事实时自查 git。
-
-**状态说明**：
-- DONE — 全部完成：全量测试通过 + 已 commit（中文）+ 未 merge/未关 issue
-- DONE_WITH_CONCERNS — 完成了但全量测试有非你的改动引起的失败（一句说明哪些是预存的），或有其他疑虑
-- BLOCKED — 无法完成，一句说明需要什么帮助
-- NEEDS_CONTEXT — 一句说明缺什么信息
+```text
+<promise>COMPLETE</promise>
+DONE
 ```
+
+无法满足 completion criterion 时，不输出完成信号；输出 `DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED` 加一行原因。控制者会把原因写入 runbook，并在同 branch/worktree 自动重新分派。远端保持不变：不 push、不创建 PR。

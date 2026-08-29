@@ -1,174 +1,210 @@
 # AFK Issue Loop — Reference
 
-> `${TARGET_BRANCH}` 由 SKILL.md 阶段 0 的分支模型检测决定（`develop` 或 `main`），是 worktree 创建与 Merger 拓扑 merge 的目标分支。
+本文件是关系、状态、槽位、恢复和合并契约的 single source of truth。顺序步骤留在 [SKILL.md](SKILL.md)；角色独有规则留在 `reference/*-prompt.md`。
 
-## 依赖解析
+## Execution DAG
 
-**主判定：issue body 的 `Blocked by` 字段**（格式：`- #<id> — <描述>` 或 `None - can start immediately`）。
+### 输入闭包
 
-**三条补充**（`Blocked by` 未列出但满足以下任一条也算被阻塞）——issue B 被 issue A 阻塞，当：
+- **初始 Tickets**：用户显式传入的 issue numbers；未传入时为全部 open `ready-for-agent` Issues。
+- **原生权威**：每个 Ticket 的依赖来自 GitHub `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by`。
+- **递归闭包**：每个 open blocker 进入 `issues`，继续读取它的 open blockers，直到闭包稳定。
+- **资格门**：每个 open 执行节点都带 `ready-for-agent`。发现缺少标签的 open blocker时，Planner 输出 `BLOCKED` 并保持既有 plan 不变。
+- **已完成依赖**：closed blocker 视为已满足，不进入 `issues` 或 `blocked_by`；仅当 closed Ticket 本身属于初始输入时，以 `done` 节点保留以支持续跑。
+- **SPEC 上下文**：GitHub parent 是 SPEC。SPEC 写入顶层 `specs`，供角色读取；SPEC 不建 branch、不占槽、不进入 `issues`。
 
-1. **资源依赖**：B 需要 A 引入的代码或基础设施（A 未合入则 B 无法开始或无法测试）
-2. **空间冲突**：B 与 A 修改重叠的文件/模块，并行工作必然产生 merge 冲突
-3. **契约依赖**：B 依赖 A 将确定的 API 或决策形态（A 未定则 B 的实现会返工）
+GitHub 原生 API 路径：
 
-**解析规则**：
-1. 从每个 issue body 提取 `Blocked by` 列表
-2. `None` 或只依赖已关闭 issue 的 → **unblocked**，可立即分派
-3. 有未关闭依赖 issue 的 → **blocked**，本轮不派
-4. Planner 只在开头跑一次，输出**完整依赖图（DAG）**；每轮由控制者按拓扑序切片本轮 unblocked（unblocked 集合空即停）
-
-**PRD 规则**：有实现 issue 链接的 PRD 不可作为实现对象（由 Merger 在子 issue 完成后统一关闭）。
-
-**判定类 ticket（spike / gate / proof-of-concept）**：以验证/判定为目标，其结果（通过 / 不通过）对依赖它的下游是 go/no-go，不是实现依赖的解锁。
-
-- 结果只终结该 ticket 自身：判定不通过 → **控制者直接** `gh issue close <N> --comment <结论>`（不经 Merger——判定终结是「关 issue 只在 Merger」的例外）
-- **不级联关闭下游**：判定不通过不必然否掉所有下游（如不依赖其结果、可独立验证的 server 侧工作），下游存废由 owner 评估
-- 因判定取消的下游保持 open、不改状态、不标 wontfix，收尾列入「待 owner triage」清单报告（见[收尾流程](#收尾流程)）
-
-展示分组：
-
-```
-unblocked（可并行，≤4）：
-  #90 M2M迁移 → afk/issue-90
-  #82 ShortLink 模型 → afk/issue-82
-
-blocked（本轮等待）：
-  #91 报名合并支付 ← 等待 #90
-  #92 支付页 ← 等待 #90
-  #93 前端串联 ← 等待 #91, #92
+```text
+GET /repos/{owner}/{repo}/issues/{number}/parent
+GET /repos/{owner}/{repo}/issues/{number}/sub_issues?per_page=100&page=N
+GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by?per_page=100&page=N
 ```
 
-## 协议机制
+数组端点使用 `gh api --paginate --slurp` 读取全部页；默认扫描同样分页读取 Issues API，并过滤含 `pull_request` 字段的对象。GitHub 命令接线的仓库级约定见 `docs/agents/issue-tracker.md`。
 
-四角色之间的机器可读信号，控制者据此编排：
+### Plan schema
 
-| 信号 | 生产者 | 格式 / 含义 |
-|------|--------|-------------|
-| `<plan>` | Planner（**仅开头一次**） | `<plan>{"issues":[{"number","title","branch","blocked_by":[number,...]}]}</plan>`，完整 DAG；同时落盘目标项目 `docs/afk-plan.json`，控制者按拓扑序切片每轮 unblocked |
-| `<promise>COMPLETE</promise>` | Implementer / Reviewer / Merger | 权威完成信号 |
+```json
+{
+  "version": 1,
+  "run_id": "20260829T120000Z-12345",
+  "target_branch": "main",
+  "roots": [42, 44],
+  "specs": [
+    {"number": 10, "title": "Verbose mode SPEC"}
+  ],
+  "issues": [
+    {
+      "number": 42,
+      "title": "Add verbose flag",
+      "branch": "afk/issue-42",
+      "spec": 10,
+      "blocked_by": [],
+      "status": "pending",
+      "stage": "implement"
+    }
+  ]
+}
+```
 
-- **确定性分支名**：`afk/issue-{N}`。重跑 Planner 输出同一分支名（虽只跑一次，确定性仍是契约）
-- **`<promise>COMPLETE</promise>` 是权威完成信号**：Implementer 发出 = 分支可审查；Reviewer 发出 = 审查完成或跳过；Merger 发出 = 全部合并 + issue 已关。`DONE` 等自然语言只是人读摘要（见[状态处理](#状态处理)）
-- **真正完成判定（关 issue）只在 Merger**（判定类 ticket 的关闭例外见[依赖解析](#依赖解析)）；Implementer / Reviewer 都不关 issue
-- **Reviewer 一次性自改**：在 Implementer 的 worktree / branch 上直接改代码 + commit，不反馈、不复查；Implementer 与 Reviewer 在同一分支线性叠加 commit，Implementer 的 commit 在前、Reviewer 的 `refine:` commit 在后
+不变量：
 
-控制者验收 `<plan>`：Read `docs/afk-plan.json`（Planner 已写入），校验每项 `number/title/branch`；DAG 模式下同时校验 `blocked_by`（数组，可空）。验收后给每节点补 `status` 字段并逐轮用 Edit 维护（`pending` / `dispatched` / `done` / `failed`）。
+- `version == 1`；`run_id` 是本次 AFK 运行的唯一字符串标识；`target_branch` 为 `main` 或 `develop`。
+- `roots` 去重；每个 root 在 `issues` 中恰好出现一次。
+- `issues[].number` 唯一；`branch` 精确等于 `afk/issue-{number}`。
+- `spec` 为 parent issue number 或 `null`；`specs[].number` 唯一，且不与执行节点重叠。
+- `blocked_by` 在 Planner 初始生成时只列当时 open 的 blockers；运行中保留这些边，blocker 节点可转为 `done`，控制者据此解锁下游。
+- status 属于 `pending | dispatched | recovering | done`。
+- stage 属于 `implement | review | merge`。
+
+`validate-plan.sh` 先做离线 schema/拓扑校验；`--live` 再对 GitHub 逐节点验证 state、label、parent 与 open blockers 闭包。Plan 只有 exit 0 才可执行。
+
+## 状态与槽位
+
+Plan 节点状态与角色汇报状态是两套不同概念：
+
+- **Plan status**：`pending | dispatched | recovering | done`
+- **角色状态**：`DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED`
+
+状态转换：
+
+| 事件 | 转换 | 控制者动作 |
+|---|---|---|
+| frontier 分派 Implementer | `pending → dispatched`，`stage=implement` | 创建/复用 worktree，挂 watchdog |
+| Implementer 完成 | 保持 `dispatched`，`stage=review` | 同现场分派 Reviewer |
+| Reviewer 完成 | 保持 `dispatched`，`stage=merge` | 等本批 barrier |
+| 任一角色失败 | `dispatched → recovering` | 更新 runbook，立即重派同角色 |
+| 恢复角色已分派 | `recovering → dispatched` | 保持原 stage |
+| Merger 验证通过 | `dispatched → done`，`stage=merge` | 下游在下一批解锁 |
+
+**槽位**按 Ticket 管线计数：`dispatched + recovering`。Implementer、Reviewer、等待 barrier 与恢复循环都占同一个 Ticket 槽；最大值为 4。Merger 处理当前批次，不另占 Ticket 槽。
+
+**Barrier**：本批开始后不追加新 Ticket。全部批次节点到达 `stage=merge` 才调用一次 Merger；Merger 验证后再计算下一批 frontier。这与 sandcastle `Promise.allSettled → Merger` 的批次边界一致。
+
+## 协议信号
+
+- Planner：`<plan>{...}</plan>`，内容与落盘 JSON 相同。
+- Implementer / Reviewer / Merger：`<promise>COMPLETE</promise>`。
+- 完成信号必须与角色门槛同时成立；控制者以 branch、tests/commits、GitHub state 与 Worktrunk 状态交叉验证。
+- `DONE_WITH_CONCERNS`、`NEEDS_CONTEXT`、`BLOCKED` 对 Implementer、Reviewer、Merger进入自动恢复；Planner 的 `BLOCKED` 是输入资格门，立即终止本次运行。
+
+## 自动恢复
+
+### Ticket 角色恢复
+
+恢复是 Implementer / Reviewer 失败时的自动续跑循环：**同 branch、同 Worktrunk worktree、同 stage、同槽位**。
+
+### 触发
+
+- agent 抛错：`AgentError`
+- watchdog 判死：`AgentIdleTimeoutError`
+- 缺少 `<promise>COMPLETE</promise>`
+- Implementer 正常退出但分支相对 `${TARGET_BRANCH}` 无 commit
+- 角色报告 `DONE_WITH_CONCERNS`、`NEEDS_CONTEXT` 或 `BLOCKED`
+
+### Runbook
+
+首次失败创建、后续失败追加 `docs/afk-failures/issue-{N}.md`：
+
+```markdown
+branch: afk/issue-{N}
+worktree: <绝对路径>
+stage: implement | review | merge
+attempts: <累计失败次数>
+
+## 最近失败
+error: AgentIdleTimeoutError | AgentError | IncompleteResult
+summary: <错误或疑虑>
+commits: <git log --oneline TARGET_BRANCH..BRANCH>
+
+## 恢复
+Read docs/afk-failures/issue-{N}.md；在同一 branch/worktree 从当前现场继续，保留已有 commits 与未提交改动。
+```
+
+恢复步骤：
+
+1. 杀掉对应 watchdog；需要时停止失活 agent。
+2. Read 或创建 runbook，递增 `attempts`，记录当前 stage、错误和 commit 快照。
+3. 节点置为 `recovering`。
+4. 使用 `wt switch afk/issue-{N} --no-cd --format=json` 找回 worktree。
+5. 原角色 prompt 后附 runbook 指针，立即重派；节点置回 `dispatched`。
+6. 挂新 watchdog，等待通知。
+
+恢复无次数上限。该 Ticket 的下游在它 `done` 前保持 blocked；其他已分派 Ticket 独立推进。成功并由 Merger验证后删除对应 runbook。
+
+### Merger 批次恢复
+
+Merger 在主仓库 `REPO/TARGET_BRANCH` 恢复，不执行 Ticket 角色的 `wt switch` 步骤：
+
+1. 保留 merge index、工作树改动和已完成 commits，更新批次 runbook。
+2. 在主仓库立即重派 Merger。
+3. 对仍存在的 branch 检查 ancestor；已删除 branch 由目标分支历史与同一 `run_id` 的 summary 证明已完成。
+4. summary 已存在时先关闭本批任何仍 OPEN 的 Ticket，再进入清理；清理循环根据 `wt list` 跳过已移除项。
+
+Merger 恢复同样无次数上限，但不占用或重建 Ticket worktree。
+
+## Watchdog
+
+`watchdog.sh <worktree> [idle-seconds=600]` 是两种载体统一的 hang detector：
+
+- 取 worktree 文件 mtime 与 Git reflog 的最新时间；600 秒无变化时输出一行 `AgentIdleTimeoutError` 并 exit 1。
+- 分派时后台启动；agent 完成通知先到时终止对应 watchdog。
+- watchdog 只判断无活动；角色结果由完成信号和控制者验收判断。
+- 每次自动恢复启动新的 watchdog。
+
+等待由通知驱动。控制者分派并挂 watchdog 后停手，等 agent 或 watchdog 通知。
+
+## Worktrunk
+
+Worktree 生命周期只通过 Worktrunk：
+
+- 新 branch：`wt switch -c <branch> -b <base> --no-cd --format=json`
+- 已有 branch/worktree：`wt switch <branch> --no-cd --format=json`
+- 查询：`wt list --format=json`
+- 合并后清理：`wt remove <branch> -D --foreground`
+
+`--create` 仅用于新 branch；恢复路径使用不带 `--create` 的 `wt switch`。Git 负责 branch ref 检查、commit、diff 与 `git merge --no-edit`。
+
+## Merger
+
+Merger 在主仓库已检出的 `${TARGET_BRANCH}` 上幂等处理当前批次：
+
+1. 按 issue number 稳定排序。分支尚未成为目标分支 ancestor 时执行 `git merge <branch> --no-edit`；已合入则继续验证。
+2. 每个分支集成后解决冲突并跑全量测试；Ticket 仍 OPEN 时关闭。
+3. 全批完成后用稳定 message 检查并固定执行一次空 summary commit：
+
+   ```bash
+   SUMMARY="chore: 汇总 AFK ${RUN_ID} 批次 #42, #43"
+   git log --format=%s --fixed-strings --grep="$SUMMARY" | grep -Fxq "$SUMMARY" || \
+     git commit --allow-empty -m "$SUMMARY"
+   ```
+
+4. summary commit 存在且全批测试通过后，用 Worktrunk 清理所有批次 branches。
+
+分支清理位于批次末尾，因此 merge/test/summary 中途恢复仍有 branch 可用于 ancestor 验证；清理阶段重派则根据 `wt list --format=json` 跳过已清理项。
+
+SPEC 关闭在控制者收尾阶段进行：分页读取每个 SPEC 的全部原生 sub-issues，全部 CLOSED 后关闭 SPEC。
+
+远端保持不变：流程不 push、不创建 PR、不自动同步 `origin/${TARGET_BRANCH}`。冲突根据两侧意图解决，不使用偏向单侧的 strategy option。
 
 ## 主窗口预算
 
-控制者的上下文窗口是稀缺资源。四条硬规则：
+- **模板自加载**：分派 prompt 只传模板路径与参数。
+- **寻址注入**：角色自行读取 Ticket、SPEC、CONTEXT、ADR 与规范。
+- **极简汇报**：角色只回完成信号、状态及一行疑虑；事实留在环境中供控制者自查。
+- **通知驱动**：等待依靠 agent/watchdog 通知。
+- **Plan 落盘**：compact 或 `--resume` 后 Read `docs/afk-plan.json` 重建状态。
 
-1. **模板自加载**：分派 prompt 只传模板文件路径 + 参数（`ISSUE_NUMBER` / `BRANCH` / `TARGET_BRANCH` / `WORKTREE`），不复制模板全文；角色 agent 自行 Read 模板
-2. **寻址注入**：prompt 只给命令与路径（`gh issue view N`、`Read CONTEXT.md`），材料由 agent 自取；控制者不代读、不粘贴全文
-3. **极简汇报**：角色 agent 汇报 = `<promise>COMPLETE</promise>` + 状态行，CONCERNS/BLOCKED 附一句疑虑；测试输出、commit 与文件清单留在终端与 git 历史——控制者需要事实时自己跑 git 命令
-4. **禁轮询**：通知驱动等待——分派后挂 watchdog（见[超时协议](#超时协议)）即停手，等系统完成通知或 watchdog 死因，两载体（subagent / herdr）统一，skill 里不存在任何轮询
+## CONTEXT.md
 
-## 模型
+角色优先读取根 `CONTEXT.md`；缺失时读取 `CLAUDE.md` 与相关 `docs/adr/`。控制者只传路径，不复制内容。
 
-四角色统一显式 `sonnet`（分派时 `model: "sonnet"`）。不按复杂度选档、不继承主会话模型（主会话模型可任意切换，继承会让 subagent 行为不可预期）。
+## Scripts
 
-## 红线
-
-控制者的行为规则（角色 agent 的红线见 `reference/` 下各分派模板）：
-
-**分派前**
-- 只有 unblocked 的 issue 才分派；跨 issue 并行 ≤4（信号量，Implementer 与 Reviewer 合计占坑）；同 issue 内 Implementer→Reviewer 严格串行；跨 issue 流水线——某 issue 的 Implementer 完成即触发其 Reviewer，不等本轮其他 issue
-- **主窗口预算**：模板自加载 + 寻址注入（见[主窗口预算](#主窗口预算)），控制者不代读 issue / CONTEXT.md / 规范文件，不复制模板全文
-- 分支名必须用 Planner 输出的确定性 `afk/issue-{N}`，不另造名称
-
-**控制者角色**
-- 控制者只做编排——分派、验收 `<plan>` 落盘、按 DAG 拓扑序切片每轮 unblocked、验证、异常处置，**不写实现代码**；发现产出 bug 时分派修复 agent，主会话不直接改代码
-- **禁轮询**：通知驱动等待——分派后挂 watchdog 即停手（机制见[超时协议](#超时协议)），herdr 模式也不例外
-- agent 直接进入 TDD，不做 seam 等待确认；无 Seam 预确认环节
-- Reviewer 一次性自改：在 Implementer 的 worktree / branch 上直接改代码 + 跑测试 + commit，同 worktree 同 branch 线性叠加 commit
-- **绝不关闭或改 label 任何本流程未实现合入的 issue**（含判定失败的下游与父 PRD）——存废由 owner 决定；判定类 ticket 自身的关闭例外见[依赖解析](#依赖解析)
-
-**本地拓扑 merge（不推送、不建 PR）**
-- 唯一权威 merge 方式：主仓库（已检出 `${TARGET_BRANCH}`）内 `git merge <branch> --no-edit`；**不在 worktree 内执行**（git 禁止同一分支在两个 worktree 同时检出）；`wt` 的 merge 子命令不再作为权威
-- `git push origin ${TARGET_BRANCH}` 在任何情况下都不执行；`gh pr create`、Web UI 合并或任何远程 merge 都是违规
-- 本地 `${TARGET_BRANCH}` 与 `origin/${TARGET_BRANCH}` 分歧时保留分歧，不 merge origin、不解决冲突——分歧是预期状态，由项目维护者决定何时同步
-- merge 冲突解决、删分支与 worktree 清理等 Merger 执行细则见 [reference/merger-prompt.md](reference/merger-prompt.md)；验证清单见 SKILL.md 阶段 3
-
-**worktree 与 Agent 环境**
-- 统一用 `wt switch -c afk/issue-{N} -b ${TARGET_BRANCH}` 创建 worktree（不用 `git worktree add`）
-- 分派 Agent 时不带 `isolation` 参数——worktree 已由 `wt switch -c` 创建
-
-## 状态处理
-
-`<promise>COMPLETE</promise>` 与 `DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED` 的关系（权威信号 vs 自然语言摘要）见[协议机制](#协议机制)。
-
-| 状态 | 控制者动作 |
-|------|-----------|
-| `DONE` + `<promise>COMPLETE</promise>` | 触发下一阶段（Implementer→Reviewer；Reviewer→Merger；Merger→下一轮控制者切片） |
-| `DONE_WITH_CONCERNS` | 阅读疑虑，正确性相关→分派修复 agent（不手动修）；能力相关→下轮换强模型 / 拆分 / 上报 |
-| `NEEDS_CONTEXT` | 保留 worktree，提供缺失信息后重新分派（同分支，进度保留） |
-| `BLOCKED` | 保留 worktree，评估原因后：补上下文 / 换强模型 / 拆分 issue / 上报。**绝不忽视** |
-| 失败 / 超时判死 | 见[恢复机制](#恢复机制)——落盘 runbook + 标 `failed`，**零自动重试** |
-
-Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3。
-
-## 超时协议
-
-**watchdog（两载体统一，唯一超时机制）**：每次分派挂一个后台 watchdog 脚本盯 worktree 文件系统活性，600s 无活性才判死；取代一次性计时器与复杂度分级表（已删）。
-
-契约（`scripts/watchdog.sh <worktree> [idle秒=600]`）：
-
-- **信号源**：worktree 内文件 mtime + `.git` reflog 时间，取最新。已知差距——盯文件活性而非 stdout 行流（Agent 工具不暴露子代理流式输出），agent 长时间纯思考不落盘会误判，600s 阈值下概率低
-- **阈值**：600s（抄 sandcastle `DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60`）
-- **生命周期**：分派时以 `run_in_background: true` 挂起，静默循环零输出；idle 超时 → exit 1 + 一行死因（哪个 worktree、idle 多久），后台任务退出即系统通知唤醒控制者
-- **控制者配合**：分派后**立即停手**；agent 正常完成（系统完成通知先到）→ 杀掉对应 watchdog；watchdog 死因先到 → 判 `AgentIdleTimeoutError`，`TaskStop` 终止 agent 后进[恢复机制](#恢复机制)
-- **职责边界**：watchdog 只防挂死；正常结束 / 报错由系统通知接管。herdr 模式同一套 watchdog（pane 无系统完成通知，但 watchdog 退出通知一样到控制者；完成信号由 herdr agent 汇报承载，详见 herdr skill）
-- **显式排除 completion grace**：sandcastle ADR 0019 的 60s grace 场景是「signal 已发出但进程挂起不退」，本架构的完成终点是进程已退的系统通知，中间态不存在
-
-**失败判定三触发点**：agent 抛错（`AgentError`）/ watchdog 判死（`AgentIdleTimeoutError`）/ 正常结束但分支 commit == 0（空产出，按 `AgentError` 处理）。错误词汇借 sandcastle 的错误类型名。
-
-## 恢复机制
-
-**零自动重试**（对齐 sandcastle fail-fast，修订 ADR 0001「原地重试」条款，见 ADR 0002）：失败即标 `failed`，**不自动重派、不无限重试**——AFK 场景下原地无限重试意味着用户回来时面对烧了数小时 token 的死循环。
-
-- **现场保全**：worktree 不删、branch 不动、永不 `reset --hard`——含未提交改动全部原样保留，随时可人工接手
-- **落盘 runbook** `docs/afk-failures/issue-{N}.md`：
-
-  ```
-  branch:   afk/issue-{N}
-  worktree: <绝对路径>
-  commits:  <git log --oneline 快照>
-  error:    AgentIdleTimeoutError | AgentError
-  失败摘要: <错误原文末尾摘录>
-
-  ## 恢复
-  重新分派，prompt 末尾附：
-  Read docs/afk-failures/issue-{N}.md 了解前次失败，同分支继续，复用已 commit 进度。
-  ```
-
-- **不传染下游**：失败 issue 标 `failed` 后其余 unblocked issue 照常调度，DAG 上其它节点按原 `blocked_by` 推进——单点失败不阻塞整轮
-- **恢复（单路径）**：同分支同 worktree 重新分派，prompt 末尾附 runbook「## 恢复」段的指引句。确定性分支名 `afk/issue-{N}` + worktree 复用让已 commit 进度自动捡回；重派 agent 读到前次 runbook，不以同样方式再死一次（被否方案与理由见 ADR 0002）
-- **处置权在人**：收尾把 `afk-failures/` 完整清单交用户逐条决定恢复或放弃（见[收尾流程](#收尾流程)）
-- 会话 compact / `--resume` 后：Read `docs/afk-plan.json` 重建 DAG 与各节点 `status`；分支名确定性 + `gh issue view <N> --json state` 可交叉复核真实进度，不依赖会话记忆
-
-## scripts 契约
-
-`skills/personal/afk-issue-loop/scripts/` 下 3 个 bash 脚本（plan 相关两个用 jq；`scripts/tests.sh` 为纯 bash 断言测试）：
-
-| 脚本 | 用法 | 契约 |
-|------|------|------|
-| `validate-plan.sh` | `validate-plan.sh <plan.json>` | 校验 Planner 落盘的 DAG：schema（`number`/`title`/`branch`/`blocked_by`）、branch 匹配 `afk/issue-\d+`、`blocked_by` 引用存在、无环；exit 0 合法 / exit 1 + 错误行指明问题（有环时报出成环节点）。plan 验收不再靠 LLM 肉眼（compact 后尤其不可靠） |
-| `watchdog.sh` | `watchdog.sh <worktree> [idle秒=600]` | 静默循环零输出；idle 超时 exit 1 + 一行死因。契约全文见[超时协议](#超时协议) |
-| `dispatched-count.sh` | `dispatched-count.sh <plan.json>` | 输出 `status=="dispatched"` 节点数，控制者比对 ≤4 并行信号量 |
-
-遵循「sandcastle 没有就不要」——拓扑切片、status 状态机、收尾验证、分派锁均不做（分派锁对齐的 ADR 0007 在 sandcastle main 分支未实现）。
-
-## 并行冲突处理
-
-- 并发纪律（跨 issue ≤4 流水线 / 同 issue 内严格串行）见[红线](#红线)「分派前」
-- 空间冲突的 issue 由 Planner 判为 blocked 避免并发；已并行的重叠分支由 Merger 统一合并时解决（冲突处理规则见 [reference/merger-prompt.md](reference/merger-prompt.md)）
-
-## CONTEXT.md 缺失策略
-
-- 控制者基于 `CLAUDE.md` + `docs/adr/` 创建 `CONTEXT.md`
-- 或跳过创建：模板已指引 agent 在 `CONTEXT.md` 缺失时改读 `CLAUDE.md` + `docs/adr/`（寻址注入，agent 自取，控制者不拼接内容）
-
-## 收尾流程
-
-所有 issue 实现完成后，报告统计（实现了几个 issue、生成几个 merge commit 与 summarizing commit），并列出因判定类 ticket 失败而保持 open、需 owner triage 的下游 ticket；**把 `docs/afk-failures/` 完整清单交用户逐条处置**（每条按手册恢复重派，或人工接手 / 放弃后清理 worktree），用户处置完毕前不删 `afk-failures/`；删除目标项目 `docs/afk-plan.json`（运行时临时文件，不 commit；`docs/` 若因此为空可一并删）；然后按 SKILL.md 末尾的提示语建议用户 code review 和 QA。如有新 issue，提示可再次运行 `/afk-issue-loop`。
+| 脚本 | Completion criterion |
+|---|---|
+| `validate-plan.sh [--expected-run-id ID] [--expected-roots N,N] [--live] <plan.json>` | schema、运行标识、显式 roots、唯一性、branch、状态、闭包与无环全部通过；live 模式同时匹配 GitHub 原生关系 |
+| `dispatched-count.sh <plan.json>` | 输出 `dispatched + recovering` 节点数 |
+| `watchdog.sh <worktree> [idle]` | 有活动时静默运行；超时输出死因并 exit 1 |
+| `tests.sh` | 所有脚本黑盒用例通过，最终 exit 0 |

@@ -1,186 +1,139 @@
 ---
 name: afk-issue-loop
-description: 遍历 GitHub 上 ready-for-agent 的 issue，自动分批实现并合并到目标分支，全部完成后提示手动 code review 或 QA。
+description: 处理指定 GitHub Ticket；未指定时批量处理 open `ready-for-agent` Tickets，按依赖实现、审查并合并。
 disable-model-invocation: true
-argument-hint: "[mode=subagent|herdr]"
+argument-hint: "[issue-number ...] [mode=subagent|herdr]"
 ---
 
-# AFK Issue Loop（sandcastle 式四角色编排，改造版）
+# AFK Issue Loop
 
-Matt Pocock 的 Ralph loop 的轻量替代，控制者扮演 `run.ts` 编排器，无需 Docker：
+以 sandcastle `parallel-planner-with-review` 为基准，用 Worktrunk 管理隔离 worktree：Planner 一次建图，Ticket 管线并行执行，Merger 按批次拓扑合并。控制者只编排，不写实现代码。
 
-- **Planner** 开头跑一次，扫 issue、构建完整依赖图（DAG），输出含 `blocked_by` 的节点列表
-- **Implementer** 每 issue 一个，在 `afk/issue-N` 分支 TDD 实现（**语义原子 commit**）
-- **Reviewer** 同 worktree 同 branch 在 Implementer 后接力，**直接改代码 + commit**（一次性自改）
-- **Merger** 主仓库统一 `git merge <branch> --no-edit` 拓扑合并，末尾写 1 条 summarizing commit 并关 issue
+## 角色
 
-**前置条件**：项目已跑过 `/setup-rolex-skills`，仓库有 `CONTEXT.md`（缺失时按 [REFERENCE.md](REFERENCE.md#contextmd-缺失策略) 处理）。herdr 模式额外需要 herdr CLI 已安装。
+| 角色 | 顺序 | 完成边界 |
+|---|---|---|
+| Planner | 开头一次 | `docs/afk-plan.json` 已通过结构与 GitHub live 校验 |
+| Implementer | 每 Ticket | 全量测试通过、语义原子 commits 已写入分支、输出 `<promise>COMPLETE</promise>` |
+| Reviewer | 同 Ticket、Implementer 后 | 一次性自改完成、全量测试通过、输出 `<promise>COMPLETE</promise>` |
+| Merger | 每批 barrier 后 | 各分支已拓扑合并、测试通过、summary commit 已写、Ticket 已关闭、worktree 已清理 |
 
-## 模式选择（载体）
+四角色统一使用 `model: "sonnet"`。角色 prompt 只传模板路径和参数；角色自行读取 Ticket、父 SPEC、领域文档与仓库规范。
 
-通过 `[mode=subagent|herdr]` 参数选择载体。无参数时默认 `subagent`。
+## 0. 建立运行参数
 
-| 载体 | 原理 | 适用场景 |
-|------|------|----------|
-| `subagent`（默认） | 当前会话中用 `Agent` 工具分派角色子代理 | 少量 issue（≤5）、需要实时看子代理进度 |
-| `herdr` | 独立 session pane（新 claude 实例）运行角色 | 大量 issue、想并行跑满、不占当前会话上下文 |
+1. 从参数提取 issue numbers 与 `mode`；`mode` 默认 `subagent`。
+2. 生成本次运行标识：`RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$`。恢复会话时从现有 plan 读取同一个 `run_id`。
+3. issue numbers 非空时作为初始 Tickets；为空时由 Planner 扫描全部 open `ready-for-agent` Tickets。
+4. 检测目标分支：本地或远程存在 `develop` 时使用 `develop`，否则使用 `main`。
+5. 检查 `gh`、`jq`、`wt` 可用，并按 [REFERENCE.md：CONTEXT.md](REFERENCE.md#contextmd) 处理领域上下文。
+6. `mode=herdr` 时调用 `Skill("herdr")` 获取操作契约；需要布局时再调用 `Skill("herdr-instances")`。两种载体使用同一角色 prompt 与 watchdog。
+7. 未显式指定 mode 且初始 Tickets 多于 5 个时，向用户确认载体。
 
-**阈值提示**：阶段 0 先跑 `gh issue list --label ready-for-agent --state open --json number --jq length` 计数；>5 且用户未显式指定载体时，先向用户确认仍用 subagent，否则建议 herdr。
+**完成标准**：`RUN_ID`、`ISSUE_NUMBERS`、`MODE`、`TARGET_BRANCH` 均已确定，所需 CLI 可用。
 
-**载体与角色正交**：四种角色在任何载体下都用同一套 prompt 语义（DAG、`<promise>COMPLETE</promise>`、确定性分支名、拓扑 merge 都不变），区别只在「谁来跑」。
+## 1. Planner 建立 Execution DAG
 
-herdr 模式：用 `/herdr` 开新窗口跑同一套角色 prompt（模板自加载 + 寻址注入不变，省略 `WORKTREE` 参数，agent 自行 `wt switch -c`）；herdr CLI 操作与报错细节见 herdr skill，布局规则遵循 `/herdr-instances`（主编排 pane 不可上下分割，左右/上下分割各自不超过 3）。超时与失败语义两载体统一——同一套 watchdog（见 [REFERENCE.md](REFERENCE.md#超时协议)），skill 里不存在任何轮询。
+按载体分派 Planner；prompt 只包含：
 
-## 角色架构
-
-| 角色 | 职责 | 产出信号 |
-|------|------|----------|
-| **Planner**（仅 1 次） | 扫 `gh issue list --label ready-for-agent --state open`，构建完整 DAG，为每个 issue 分配确定性分支名 `afk/issue-{N}` 并填 `blocked_by` | `<plan>` JSON（含全部 open issue 的依赖图） |
-| **Implementer** | 每 issue 一个，在 `afk/issue-N` 分支，**语义原子 commit**（大改动先拆 commit）→ 全量测试 → commit（中文描述） | `<promise>COMPLETE</promise>`；**不关 issue** |
-| **Reviewer** | Implementer 完全结束后（含退出/超时/抛错后求值）**同 worktree 同 branch** 触发，读 `git diff ${TARGET_BRANCH}..HEAD`，**直接改代码 → 跑测试 → `refine:` commit**（一次性自改）；分支无 commit 则跳过 | 完成或跳过 |
-| **Merger** | `${TARGET_BRANCH}` 上逐个 `git merge <branch> --no-edit`，冲突读两侧解决；每分支合完跑全量测试；末尾 1 条 summarizing commit；统一关 issue（含父 PRD） | merge commit + summarizing commit + 关闭的 issue |
-
-**控制者职责**（不写实现代码）：发起启动各角色子代理（按载体，**模板自加载 + 寻址注入**：prompt 只传模板路径与参数、材料由 agent 自取，见 [REFERENCE.md](REFERENCE.md#主窗口预算)）→ 把 Planner 的 `<plan>` DAG 落盘目标项目 `docs/afk-plan.json` 并维护每节点 `status` → **按拓扑序每轮切片本轮 unblocked** → 分派 Implementer / Reviewer（同 worktree 同 branch）后进入**通知驱动等待**（禁轮询，机制见 [REFERENCE.md](REFERENCE.md#超时协议)）→ 分派 Merger → 验证（issue 关闭 / worktree 清理）→ 异常处置（DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED，沿用 REFERENCE.md 状态处理表）。
-
-**编排循环**（Planner 只在开头跑一次）：
-
-```
-开头 1 次：
-  Planner ──► <plan> JSON（完整 DAG,所有 open issue + blocked_by）
-    │  控制者验收 docs/afk-plan.json,补 status 字段
-    ▼
-循环（每轮控制者按拓扑序切本轮 unblocked）：
-  本轮 unblocked 集合 = 依赖图上 blocked_by 全部已完成(或空)的节点
-    │
-    │  unblocked 集合空 → 停
-    │
-    ▼
-  Implementer（每 issue 一个,afk/issue-N,跨 issue ≤4 并行）
-    │  <promise>COMPLETE
-    │  失败 → 落盘 runbook + 标 failed(零自动重试),不传染下游
-    ▼
-  Reviewer（同 worktree 同 branch,严格串行;分支无 commit 则跳过）
-    │  <promise>COMPLETE
-    ▼
-  本轮全 issue 完成后 → 回到 Merger
-    │
-    ▼
-  Merger（主仓库内,逐个 git merge --no-edit → 全量测试 → summarizing commit → 关 issue）
-    │
-    └──► 回到「按拓扑序切下一轮 unblocked」,直到 unblocked 集合空
+```text
+Read ~/.claude/skills/afk-issue-loop/reference/planner-prompt.md 获取完整指令并执行。
+参数：RUN_ID=${RUN_ID}, ISSUE_NUMBERS={逗号分隔，可空}, TARGET_BRANCH=${TARGET_BRANCH}
 ```
 
-- **并行度**：跨 issue ≤4（信号量）；同 issue 内 Implementer→Reviewer 严格串行
-- **失败处理**：失败即标 `failed`、落盘 runbook（`docs/afk-failures/issue-{N}.md`）、现场保全（worktree 不删、branch 不动），**零自动重试**；不传染下游，收尾把 `afk-failures/` 清单交用户逐条处置（恢复路径见 [REFERENCE.md](REFERENCE.md#恢复机制)）
-- **完成判定**：真正的完成（关 issue）只在 Merger。Implementer / Reviewer 都不关 issue
-- **无硬轮次上限**：Planner 一次性，DAG 拓扑耗尽即停；用户输入的 issue 范围 = 全部工作面
+Planner 从 GitHub 原生 parent/sub-issue 与 `blocked_by` 关系构图：
 
-## Workflows
+- open blocker 递归纳入；closed blocker 视为已满足；
+- 每个 open Ticket 必须带 `ready-for-agent`；
+- 父 SPEC 只进入 `specs` 上下文，不进入 `issues` 执行节点；
+- 显式输入中的 closed Ticket 以 `status: "done"` 记录，支持中断后续跑。
 
-### 阶段 0：分支模型检测（TARGET_BRANCH）
+Planner 输出 `BLOCKED` 时，控制者立即终止本次运行并报告缺少标签的 blocker；本次不读取或执行磁盘上的 plan。
 
-后续所有 `${TARGET_BRANCH}` 都指这个值：
+控制者验收：
 
 ```bash
-# 直接查 ref 而非解析 git branch -a 文本：当前检出的 develop 显示为 "* develop"、本地分支带缩进、远程分支带 remotes/ 前缀，grep 正则易误判
-if git rev-parse --verify --quiet refs/heads/develop >/dev/null 2>&1 || git rev-parse --verify --quiet refs/remotes/origin/develop >/dev/null 2>&1; then
-  TARGET_BRANCH=develop
+bash ~/.claude/skills/afk-issue-loop/scripts/validate-plan.sh \
+  --expected-run-id "${RUN_ID}" --expected-roots "${ISSUE_NUMBERS}" \
+  --live docs/afk-plan.json
+```
+
+Plan schema、原生关系与状态机见 [REFERENCE.md：Execution DAG](REFERENCE.md#execution-dag)。
+
+**完成标准**：校验 exit 0；`docs/afk-plan.json` 包含全部初始 Tickets 与开放 blocker 递归闭包，每个执行节点恰好一次。
+
+## 2. 执行 Ticket 批次
+
+重复以下控制循环：
+
+1. Read `docs/afk-plan.json`。
+2. 运行 `dispatched-count.sh docs/afk-plan.json`；`dispatched + recovering ≤ 4`。
+3. 若当前批次已有节点，等待这些节点全部到达 `stage: "merge"`；期间由通知驱动推进各 Ticket 的 Implementer → Reviewer 管线。
+4. 若当前批次为空，从 `pending` 中选择所有 `blocked_by` 均为 `done` 的 frontier，按 issue number 稳定排序，最多分派 4 个。
+5. frontier 为空时：
+   - 存在 `dispatched` / `recovering` → 等通知；
+   - 所有节点 `done` → 进入收尾；
+   - 仍有 `pending` → plan 状态违规，重新运行校验并报告。
+
+### 准备 Worktrunk worktree
+
+控制者始终负责创建或复用 worktree，并从 JSON 输出取得绝对路径：
+
+```bash
+if git show-ref --verify --quiet refs/heads/afk/issue-{N}; then
+  wt switch afk/issue-{N} --no-cd --format=json
 else
-  TARGET_BRANCH=main
+  wt switch -c afk/issue-{N} -b ${TARGET_BRANCH} --no-cd --format=json
 fi
-echo "TARGET_BRANCH=$TARGET_BRANCH"
 ```
 
-- 有 `develop` 分支（本地或远程）→ **Git flow**：`TARGET_BRANCH=develop`，worktree 从 develop 创建，merge 到 develop
-- 只有 `main` → **trunk-based**：`TARGET_BRANCH=main`，worktree 从 main 创建，merge 到 main。**绝不新建 `develop`**——项目维护者只用 main 时，新建 develop 会扰乱他们的分支管理
+Git 负责 commit 与 merge；Worktrunk 负责 worktree 创建、复用、查询与清理。
 
-检查 `CONTEXT.md` 是否存在；缺失时按 [REFERENCE.md](REFERENCE.md#contextmd-缺失策略) 处理。
+### 分派管线
 
-### 阶段 1：Planner 一次性分派与 DAG 落盘
+- 将节点置为 `status: "dispatched", stage: "implement"`，分派 [Implementer](reference/implementer-prompt.md)。
+- Implementer 完成且分支相对 `${TARGET_BRANCH}` 有 commit 后，将 `stage` 改为 `review`，在同 worktree 同 branch 分派 [Reviewer](reference/reviewer-prompt.md)。
+- Reviewer 完成后，将 `stage` 改为 `merge`；该 Ticket 继续占用本批次槽位，等待 barrier Merger。
+- 每次分派同时挂 [watchdog](REFERENCE.md#watchdog)，随后停手等通知。
 
-**Planner 只跑一次**（不再每轮重跑——按拓扑序切片由控制者算）。分派 Planner（按载体：subagent 用 Agent 工具 / herdr 开 pane），**模板自加载**——不复制模板全文，prompt 只有两行：
+### 自动恢复
 
-```
-Read ~/.claude/skills/afk-issue-loop/reference/planner-prompt.md 获取完整指令并执行。
-参数：TARGET_BRANCH=${TARGET_BRANCH}
-```
+角色抛错、watchdog 判死、缺少完成信号或 Implementer 空产出时，执行 [REFERENCE.md：自动恢复](REFERENCE.md#自动恢复)：
 
-（skill 若安装在其他路径则用实际路径；herdr 模式 prompt 相同。）
+1. 保留 branch、worktree、commits 与未提交改动；
+2. 节点置为 `recovering`，创建或追加 runbook；
+3. 立即在同 branch、同 worktree 重派失败的角色，再置为 `dispatched`；
+4. 恢复次数无上限；该 Ticket 始终占原槽，下游保持 blocked，其他已分派 Ticket 继续。
 
-Planner 自行扫描 issue、构建完整 DAG（含全部 open issue 的 `blocked_by`），把结果**写入目标项目 `docs/afk-plan.json`**（无 `docs/` 则新建），并输出 `<plan>` JSON——schema：`{"issues":[{"number","title","branch","blocked_by":[number,...]}]}`（完整示例在 [reference/planner-prompt.md](reference/planner-prompt.md)，控制者验收只需字段名）。
+**完成标准**：当前批次每个节点均为 `status: "dispatched", stage: "merge"`，且其 branch 已通过 Implementer 与 Reviewer 的完成门槛。
 
-**控制者验收**：跑 `bash ~/.claude/skills/afk-issue-loop/scripts/validate-plan.sh docs/afk-plan.json`（schema + 分支名格式 + `blocked_by` 引用存在 + 无环检测，exit 1 时错误行指明问题、有环时报成环节点——plan 验收不靠 LLM 肉眼）；通过后识别可选 `kind` 字段（`kind=gate` = 判定类 ticket，处置见 [REFERENCE.md](REFERENCE.md#依赖解析)）；给每节点补 `status: "pending"`，逐轮用 Edit 维护（`dispatched` / `done` / `failed`）。**plan 落盘即状态落盘**——compact / `--resume` 后重读文件即可无状态重建，不依赖会话记忆。
+## 3. Barrier Merger
 
-**全 blocked 判断逻辑**：本轮 unblocked 集合空 → 控制者停循环（无需调用 Planner 重判；DAG 拓扑耗尽即终止）。
+当前批次全部到达 `stage: "merge"` 后，在主仓库检出 `${TARGET_BRANCH}`，分派 [Merger](reference/merger-prompt.md)，传入 `RUN_ID`、批次分支、Ticket numbers、主仓库绝对路径与目标分支。
 
-### 阶段 2：Implementer + Reviewer（每 issue：worktree → 实现 → 自审）
+Merger 失败时，使用批次恢复路径：保留主仓库 merge 现场，在 `REPO/TARGET_BRANCH` 重新分派 Merger；不对批次 Ticket 执行 Worktrunk worktree 恢复。Merger 依据 branch ancestor、Ticket state、稳定 summary message 与 `wt list` 从中断点继续。
 
-控制者按 DAG 拓扑序切片**本轮 unblocked**（节点 `blocked_by` 全部已完成或空），跨 issue ≤4 并行——分派前用 `bash ~/.claude/skills/afk-issue-loop/scripts/dispatched-count.sh docs/afk-plan.json` 查当前 dispatched 节点数比对信号量，不靠心里记。**流水线**：某 issue 的 Implementer 一完成（分支 commit >0）即触发其 Reviewer——不等待本轮其他 issue。信号量 ≤4 按 Implementer + Reviewer 合计占坑。
+Merger 完成后，控制者逐项验证：
 
-**1. 创建 worktree**（确定性分支 `afk/issue-{N}`）：
-- subagent：控制者预创建 `wt switch -c afk/issue-{N} -b ${TARGET_BRANCH}`
-- herdr：agent 自行创建（同一命令）
+1. 每个 Ticket：`gh issue view <N> --json state --jq .state` 为 `CLOSED`；
+2. 每个 Ticket worktree 不再出现在 `wt list --format=json`；
+3. 每个节点置为 `status: "done", stage: "merge"`。
 
-**2. 分派 Implementer**（`model: "sonnet"`，四角色统一），prompt 模板自加载 + 寻址注入，只有两行：
+**完成标准**：本批次全部节点为 `done`；随后返回步骤 2 计算下一批 frontier。
 
-```
-Read ~/.claude/skills/afk-issue-loop/reference/implementer-prompt.md 获取完整指令并执行。
-参数：ISSUE_NUMBER={N}, BRANCH=afk/issue-{N}, TARGET_BRANCH=${TARGET_BRANCH}, WORKTREE={worktree 绝对路径}
-```
+## 4. 收尾
 
-- issue 全文 + comments、父 PRD、`CONTEXT.md` / ADR / 编码规范——**均由 agent 按模板指引自取**（`gh issue view` / Read），控制者不代读、不粘贴全文
-- herdr 模式无预置 worktree：省略 `WORKTREE` 参数，agent 按模板自行 `wt switch -c`
-- 红线摘要（模板内详述）：TDD → 全量测试 → commit（**中文描述、语义原子**）→ `<promise>COMPLETE</promise>`；**不关 issue**；不等待 seam 确认
+1. 对 plan 中每个 SPEC 查询全部原生 sub-issues；全部 CLOSED 且 SPEC 仍 OPEN 时关闭 SPEC。
+2. 验证全部执行节点 `done`、全部 Ticket CLOSED、全部 `afk/issue-{N}` worktree 已清理。
+3. 删除运行时文件 `docs/afk-plan.json`；删除已处理完的 `docs/afk-failures/` runbooks。
+4. 报告 Ticket 数、merge commits、summary commits 与关闭的 SPEC。
+5. 提示用户进行 code review 与 QA。
 
-**3. 超时与失败求值**：分派时以 `run_in_background: true` 挂 watchdog（`bash ~/.claude/skills/afk-issue-loop/scripts/watchdog.sh {worktree 绝对路径} 600`，herdr 模式 agent 自行创建 worktree 后控制者用确定性路径挂同一个脚本），然后**立即停手等通知**（禁轮询，契约见 [REFERENCE.md](REFERENCE.md#超时协议)）：
+**完成标准**：每个 Ticket 已合并并关闭；满足关闭条件的 SPEC 已关闭；无 AFK worktree 或运行时文件残留。
 
-- **系统完成通知先到** → 杀掉该 watchdog，查分支 commit：>0 → 触发同 worktree 同 branch 的 Reviewer；==0 → 空产出按 `AgentError` 进失败流程
-- **watchdog 退出通知先到**（一行死因：哪个 worktree、idle 多久）→ 判 `AgentIdleTimeoutError`，`TaskStop` 终止 agent，进失败流程
-- **agent 抛错** → `AgentError`，进失败流程
+## 按需 Reference
 
-**失败流程（零自动重试）**：现场保全（worktree 不删、branch 不动、永不 `reset --hard`）→ 落盘 runbook `docs/afk-failures/issue-{N}.md`（branch / worktree / commits 快照 / 错误类型 / 失败摘要 / 可复制的重派 prompt，格式见 [REFERENCE.md](REFERENCE.md#恢复机制)）→ 节点标 `failed` → **不传染下游**，收尾把清单交用户逐条处置
-
-**4. 同 worktree 同 branch 触发 Reviewer**（沿用 Implementer 的 worktree，`model: "sonnet"`），prompt 同样模板自加载（模板 `reference/reviewer-prompt.md`，参数与 Implementer 相同）：
-- issue 内容与领域上下文同样由 agent 自取
-- 读 `git diff ${TARGET_BRANCH}..HEAD`；分支无 commit 则跳过
-- **直接改代码 → 跑测试 → `refine:` commit**（一次性自改）
-- Implementer 与 Reviewer 在同一分支线性叠加 commit：Implementer 的 commit 在前、Reviewer 的 `refine:` commit 在后
-- 不关 issue
-
-**5. 处理状态**：`DONE_WITH_CONCERNS` / `NEEDS_CONTEXT` / `BLOCKED` 异常按 [REFERENCE.md](REFERENCE.md#状态处理) 处置。
-
-### 阶段 3：Merger（统一拓扑 merge + 关 issue）
-
-本轮 Implementer / Reviewer 全部结束后，分派 Merger（`model: "sonnet"`，模板自加载 `reference/merger-prompt.md`，参数 `BRANCHES` + 主仓库绝对路径）：
-
-- 分派前在主仓库执行 `git checkout ${TARGET_BRANCH}`，确认处于目标分支；merge 只在主仓库执行，**不在 worktree 内执行**（git 禁止同一分支在两个 worktree 同时检出）
-- 不 push、不建 PR；与 `origin/${TARGET_BRANCH}` 分歧时保留分歧（政策全文见 [REFERENCE.md](REFERENCE.md#红线)）
-- 逐分支 `git merge <branch> --no-edit`（**拓扑合并**——本流程唯一合并方式，保留分支拓扑历史）。每分支产生 1 个 merge commit，message 用 git 默认 `Merge branch 'afk/issue-N'`
-- 完成信号：`<promise>COMPLETE</promise>`
-
-**Merger 完成后验证两件事**：
-1. `gh issue view <N> --json state` → CLOSED（父 PRD 在子 issue 全部关闭后一并关闭）；判定类 ticket 不通过时由控制者直接关闭（带结论 comment），下游保持 open——处置见 [REFERENCE.md](REFERENCE.md#依赖解析)
-2. `wt list` 中不再出现 `afk/issue-{N}` 的 worktree
-
-### 循环：回到控制者切片
-
-- Merger 完成后回到阶段 2，按 DAG 拓扑序切下一轮 unblocked（直到 unblocked 集合空）
-- **无硬轮次上限**：DAG 拓扑耗尽即停
-- 若本轮有判定类 ticket 失败产生的未处置下游（保持 open），与完成统计一并列出，请用户/owner 逐条 triage 存废
-- **收尾把 `docs/afk-failures/` 完整清单交用户逐条处置**：每条按 runbook 恢复重派（同分支同 worktree，prompt 附 runbook 指引句），或人工接手 / 放弃后清理 worktree——处置权在人，用户处置完毕前不删 `afk-failures/`
-- 收尾时删除目标项目 `docs/afk-plan.json`（运行时临时文件，不 commit；`docs/` 若因此为空可一并删）
-- 全部完成 → 提示用户 code review / QA
-
-## Reference
-
-- [REFERENCE.md](REFERENCE.md) — 机制与红线细节索引
-- [EXAMPLES.md](EXAMPLES.md) — 完整一轮示例（含失败 → runbook → 同分支重派）；不确定某阶段的具体命令 / 信号格式时先读它
-- [scripts/](scripts/) — `validate-plan.sh`（plan 校验）/ `watchdog.sh`（超时盯梢）/ `dispatched-count.sh`（并行计数），契约见 REFERENCE.md scripts 契约段
-- [reference/planner-prompt.md](reference/planner-prompt.md) — Planner 分派模板（输出 DAG）
-- [reference/implementer-prompt.md](reference/implementer-prompt.md) — Implementer 分派模板（含语义原子 commit 约束）
-- [reference/reviewer-prompt.md](reference/reviewer-prompt.md) — Reviewer 分派模板（直接自改 + `refine:` commit）
-- [reference/merger-prompt.md](reference/merger-prompt.md) — Merger 分派模板（拓扑 merge + summarizing commit）
-
-全部 issue 完成后，提示用户：
-
-> 所有 issue 已实现并合并。建议先进行 **code review**（审查代码正确性、风格、安全性），再执行 **QA 测试**（端到端行为、回归验证）。经典流程：code review 通过 → 部署到测试环境 → QA 测试。
+- **关系、状态、恢复或 watchdog 分支**：[REFERENCE.md](REFERENCE.md)
+- **需要完整运行示例时**：[EXAMPLES.md](EXAMPLES.md)
+- **分派角色时**：[planner](reference/planner-prompt.md) / [implementer](reference/implementer-prompt.md) / [reviewer](reference/reviewer-prompt.md) / [merger](reference/merger-prompt.md)
+- **验收 plan、槽位或 watchdog 时**：[scripts/](scripts/)

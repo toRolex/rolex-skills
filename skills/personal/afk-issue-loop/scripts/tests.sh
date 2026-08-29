@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# afk-issue-loop scripts 黑盒测试：给定输入文件/目录，断言 exit code 与 stdout。
-# 用法：bash scripts/tests.sh（在 skill 目录内或任意目录均可）
-set -u
+# afk-issue-loop scripts 黑盒测试。
+set -uo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PASS=0
@@ -9,120 +8,289 @@ FAIL=0
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-ok()   { PASS=$((PASS+1)); echo "ok   - $1"; }
-bad()  { FAIL=$((FAIL+1)); echo "FAIL - $1"; }
+ok() { PASS=$((PASS + 1)); printf 'ok   - %s\n' "$1"; }
+bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s\n' "$1"; }
 
-# assert_exit <描述> <期望code> <实际code>
 assert_exit() {
-  if [ "$2" -eq "$3" ]; then ok "$1 (exit $3)"; else bad "$1 (期望 exit $2，实际 $3)"; fi
+  if [ "$2" -eq "$3" ]; then ok "$1 (exit $3)"; else bad "$1（期望 exit $2，实际 $3）"; fi
 }
 
-# assert_out_contains <描述> <实际输出> <期望子串>
-assert_out_contains() {
+assert_contains() {
   case "$2" in
     *"$3"*) ok "$1" ;;
-    *) bad "$1（期望包含 [$3]，实际输出：$2）" ;;
+    *) bad "$1（期望包含 [$3]，实际：$2）" ;;
   esac
 }
 
-# ---------- validate-plan.sh ----------
+write_valid_plan() {
+  cat > "$1" <<'JSON'
+{
+  "version": 1,
+  "run_id": "test-run-1",
+  "target_branch": "main",
+  "roots": [43, 44],
+  "specs": [{"number": 10, "title": "SPEC"}],
+  "issues": [
+    {"number": 43, "title": "root a", "branch": "afk/issue-43", "spec": 10, "blocked_by": [], "status": "dispatched", "stage": "review"},
+    {"number": 44, "title": "root b", "branch": "afk/issue-44", "spec": 10, "blocked_by": [43], "status": "recovering", "stage": "implement"}
+  ]
+}
+JSON
+}
 
-cat > "$TMP/valid.json" <<'EOF'
-{"issues": [
-  {"number": 42, "title": "a", "branch": "afk/issue-42", "blocked_by": []},
-  {"number": 43, "title": "b", "branch": "afk/issue-43", "blocked_by": [42]},
-  {"number": 44, "title": "c", "branch": "afk/issue-44", "blocked_by": [42, 43], "status": "pending"}
-]}
-EOF
+# validate-plan.sh
+write_valid_plan "$TMP/valid.json"
 bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/valid.json" >/dev/null 2>&1
 assert_exit "validate-plan: 合法 plan" 0 $?
 
-cat > "$TMP/missing-field.json" <<'EOF'
-{"issues": [{"number": 42, "branch": "afk/issue-42", "blocked_by": []}]}
-EOF
-out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/missing-field.json" 2>&1); code=$?
-assert_exit "validate-plan: 缺字段" 1 $code
-assert_out_contains "validate-plan: 缺字段错误行指明问题" "$out" "title"
+bash "$SCRIPTS_DIR/validate-plan.sh" --expected-run-id "test-run-1" "$TMP/valid.json" >/dev/null 2>&1
+assert_exit "validate-plan: run_id 精确匹配" 0 $?
 
-cat > "$TMP/bad-branch.json" <<'EOF'
-{"issues": [{"number": 42, "title": "a", "branch": "feature/42", "blocked_by": []}]}
-EOF
-out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/bad-branch.json" 2>&1); code=$?
-assert_exit "validate-plan: 分支名非法" 1 $code
-assert_out_contains "validate-plan: 分支名错误行指明问题" "$out" "afk/issue-42"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" --expected-run-id "old-run" "$TMP/valid.json" 2>&1); code=$?
+assert_exit "validate-plan: 拒绝旧 run_id" 1 "$code"
+assert_contains "validate-plan: 指出 run_id 不一致" "$out" "run_id 与本次运行不一致"
 
-cat > "$TMP/dangling-ref.json" <<'EOF'
-{"issues": [
-  {"number": 42, "title": "a", "branch": "afk/issue-42", "blocked_by": []},
-  {"number": 43, "title": "b", "branch": "afk/issue-43", "blocked_by": [99]}
-]}
-EOF
-out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/dangling-ref.json" 2>&1); code=$?
-assert_exit "validate-plan: blocked_by 引用不存在" 1 $code
-assert_out_contains "validate-plan: 引用错误行指明问题" "$out" "99"
+bash "$SCRIPTS_DIR/validate-plan.sh" --expected-roots "43,44" "$TMP/valid.json" >/dev/null 2>&1
+assert_exit "validate-plan: 显式 roots 精确匹配" 0 $?
 
-cat > "$TMP/cycle.json" <<'EOF'
-{"issues": [
-  {"number": 42, "title": "a", "branch": "afk/issue-42", "blocked_by": [43]},
-  {"number": 43, "title": "b", "branch": "afk/issue-43", "blocked_by": [42]},
-  {"number": 44, "title": "c", "branch": "afk/issue-44", "blocked_by": []}
-]}
-EOF
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" --expected-roots "43,45" "$TMP/valid.json" 2>&1); code=$?
+assert_exit "validate-plan: 拒绝遗漏显式 root" 1 "$code"
+assert_contains "validate-plan: 指出 roots 不一致" "$out" "roots 与显式输入不一致"
+
+jq '.issues[0].number = -1 | .issues[0].branch = "afk/issue--1" | .roots[0] = -1 | .issues[1].blocked_by = [-1]' "$TMP/valid.json" > "$TMP/negative.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/negative.json" 2>&1); code=$?
+assert_exit "validate-plan: 拒绝负 issue number" 1 "$code"
+assert_contains "validate-plan: 指出正整数" "$out" "正整数"
+
+jq '.issues[0].number = 1.5 | .issues[0].branch = "afk/issue-1.5" | .roots[0] = 1.5 | .issues[1].blocked_by = [1.5]' "$TMP/valid.json" > "$TMP/fraction.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/fraction.json" 2>&1); code=$?
+assert_exit "validate-plan: 拒绝小数 issue number" 1 "$code"
+assert_contains "validate-plan: 小数错误明确" "$out" "正整数"
+
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" --expected-roots "43,-1" "$TMP/valid.json" 2>&1); code=$?
+assert_exit "validate-plan: 拒绝非法 expected roots" 1 "$code"
+assert_contains "validate-plan: expected roots 错误明确" "$out" "正整数"
+
+jq 'del(.issues[1].title)' "$TMP/valid.json" > "$TMP/missing.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/missing.json" 2>&1); code=$?
+assert_exit "validate-plan: 缺字段" 1 "$code"
+assert_contains "validate-plan: 指出 title" "$out" "title"
+
+jq '.issues[0].branch = "afk/issue-99"' "$TMP/valid.json" > "$TMP/branch.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/branch.json" 2>&1); code=$?
+assert_exit "validate-plan: branch 与 number 不符" 1 "$code"
+assert_contains "validate-plan: 指出确定性 branch" "$out" "afk/issue-43"
+
+jq '.issues += [.issues[1]]' "$TMP/valid.json" > "$TMP/duplicate.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/duplicate.json" 2>&1); code=$?
+assert_exit "validate-plan: 重复 number" 1 "$code"
+assert_contains "validate-plan: 指出重复" "$out" "重复"
+
+jq '.issues[1].status = "failed"' "$TMP/valid.json" > "$TMP/status.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/status.json" 2>&1); code=$?
+assert_exit "validate-plan: 拒绝旧 failed 状态" 1 "$code"
+assert_contains "validate-plan: 指出 status" "$out" "status"
+
+jq '.issues[1].blocked_by = [99]' "$TMP/valid.json" > "$TMP/dangling.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/dangling.json" 2>&1); code=$?
+assert_exit "validate-plan: dangling blocker" 1 "$code"
+assert_contains "validate-plan: 指出 99" "$out" "99"
+
+jq '.issues[1].blocked_by = [44]' "$TMP/valid.json" > "$TMP/cycle.json"
 out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/cycle.json" 2>&1); code=$?
-assert_exit "validate-plan: 有环" 1 $code
-assert_out_contains "validate-plan: 环错误行指出成环节点" "$out" "42"
+assert_exit "validate-plan: 有环" 1 "$code"
+assert_contains "validate-plan: 指出环" "$out" "有环"
 
-bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/nonexistent.json" >/dev/null 2>&1
+jq '.issues += [{"number": 50, "title": "orphan", "branch": "afk/issue-50", "spec": 10, "blocked_by": [], "status": "pending", "stage": "implement"}]' "$TMP/valid.json" > "$TMP/orphan.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/orphan.json" 2>&1); code=$?
+assert_exit "validate-plan: 拒绝闭包外节点" 1 "$code"
+assert_contains "validate-plan: 指出依赖闭包" "$out" "依赖闭包"
+
+jq '.issues[1].spec = 43' "$TMP/valid.json" > "$TMP/spec.json"
+out=$(bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/spec.json" 2>&1); code=$?
+assert_exit "validate-plan: SPEC 必须存在于 specs" 1 "$code"
+assert_contains "validate-plan: 指出 spec" "$out" "spec"
+
+bash "$SCRIPTS_DIR/validate-plan.sh" "$TMP/absent.json" >/dev/null 2>&1
 assert_exit "validate-plan: 文件不存在" 1 $?
 
-# ---------- watchdog.sh ----------
+# --live 使用 gh stub 验证原生 parent / blockers 与 API 失败。
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [ "$1" = "repo" ]; then
+  printf '%s\n' 'owner/repo'
+  exit 0
+fi
+endpoint=""
+for arg in "$@"; do
+  case "$arg" in repos/*) endpoint="$arg" ;; esac
+done
+case "$endpoint" in
+  repos/owner/repo/issues)
+    printf '%s\n' '[[{"number":43},{"number":44},{"number":99,"pull_request":{}}]]'
+    ;;
+  repos/owner/repo/issues/43)
+    printf '%s\n' '{"number":43,"state":"open","labels":[{"name":"ready-for-agent"}]}'
+    ;;
+  repos/owner/repo/issues/44)
+    printf '%s\n' '{"number":44,"state":"open","labels":[{"name":"ready-for-agent"}]}'
+    ;;
+  repos/owner/repo/issues/43/parent|repos/owner/repo/issues/44/parent)
+    printf '%s\n' '{"number":10,"title":"SPEC"}'
+    ;;
+  *issues/43/dependencies/blocked_by*)
+    [ "${GH_FAIL_BLOCKERS:-0}" = "1" ] && exit 1
+    printf '%s\n' '[[]]'
+    ;;
+  *issues/44/dependencies/blocked_by*)
+    [ "${GH_FAIL_BLOCKERS:-0}" = "1" ] && exit 1
+    printf '%s\n' '[[{"number":43,"state":"open"}]]'
+    ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$TMP/bin/gh"
 
-# 活性新鲜 → 短阈值内不退出
+PATH="$TMP/bin:$PATH" bash "$SCRIPTS_DIR/validate-plan.sh" --expected-roots "43,44" --live "$TMP/valid.json" >/dev/null 2>&1
+assert_exit "validate-plan live: 原生关系匹配" 0 $?
+
+cat > "$TMP/bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [ "$1" = "repo" ]; then printf '%s\n' 'owner/repo'; exit 0; fi
+endpoint=""
+for arg in "$@"; do case "$arg" in repos/*) endpoint="$arg" ;; esac; done
+case "$endpoint" in
+  repos/owner/repo/issues/43) printf '%s\n' '{"number":43,"state":"open","labels":[],"pull_request":{}}' ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$TMP/bin/gh"
+out=$(PATH="$TMP/bin:$PATH" bash "$SCRIPTS_DIR/validate-plan.sh" --expected-roots "43,44" --live "$TMP/valid.json" 2>&1); code=$?
+assert_exit "validate-plan live: 拒绝 PR root" 1 "$code"
+assert_contains "validate-plan live: PR 错误明确" "$out" "Pull Request"
+
+# 恢复标准 gh stub。
+cat > "$TMP/bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [ "$1" = "repo" ]; then printf '%s\n' 'owner/repo'; exit 0; fi
+endpoint=""
+for arg in "$@"; do case "$arg" in repos/*) endpoint="$arg" ;; esac; done
+case "$endpoint" in
+  repos/owner/repo/issues) printf '%s\n' '[[{"number":43},{"number":44},{"number":99,"pull_request":{}}]]' ;;
+  repos/owner/repo/issues/43) printf '%s\n' '{"number":43,"state":"open","labels":[{"name":"ready-for-agent"}]}' ;;
+  repos/owner/repo/issues/44) printf '%s\n' '{"number":44,"state":"open","labels":[{"name":"ready-for-agent"}]}' ;;
+  repos/owner/repo/issues/43/parent|repos/owner/repo/issues/44/parent) printf '%s\n' '{"number":10}' ;;
+  *issues/43/dependencies/blocked_by*) [ "${GH_FAIL_BLOCKERS:-0}" = "1" ] && exit 1; printf '%s\n' '[[]]' ;;
+  *issues/44/dependencies/blocked_by*) [ "${GH_FAIL_BLOCKERS:-0}" = "1" ] && exit 1; printf '%s\n' '[[{"number":43,"state":"open"}]]' ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$TMP/bin/gh"
+
+jq '.issues[1].blocked_by = []' "$TMP/valid.json" > "$TMP/live-mismatch.json"
+out=$(PATH="$TMP/bin:$PATH" bash "$SCRIPTS_DIR/validate-plan.sh" --expected-roots "43,44" --live "$TMP/live-mismatch.json" 2>&1); code=$?
+assert_exit "validate-plan live: blocker 不匹配" 1 "$code"
+assert_contains "validate-plan live: mismatch 错误可读" "$out" "GitHub=[43]"
+
+out=$(PATH="$TMP/bin:$PATH" GH_FAIL_BLOCKERS=1 bash "$SCRIPTS_DIR/validate-plan.sh" --expected-roots "43,44" --live "$TMP/valid.json" 2>&1); code=$?
+assert_exit "validate-plan live: API 失败" 1 "$code"
+assert_contains "validate-plan live: API 失败明确" "$out" "无法读取 blocked_by"
+
+PATH="$TMP/bin:$PATH" bash "$SCRIPTS_DIR/validate-plan.sh" --live "$TMP/valid.json" >/dev/null 2>&1
+assert_exit "validate-plan live: 默认 roots 完整" 0 $?
+
+cat > "$TMP/bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [ "$1" = "repo" ]; then printf '%s\n' 'owner/repo'; exit 0; fi
+endpoint=""
+for arg in "$@"; do
+  case "$arg" in repos/*) endpoint="$arg" ;; esac
+done
+case "$endpoint" in
+  repos/owner/repo/issues) printf '%s\n' '[[{"number":43},{"number":44},{"number":45}]]' ;;
+  repos/owner/repo/issues/43) printf '%s\n' '{"number":43,"state":"open","labels":[{"name":"ready-for-agent"}]}' ;;
+  repos/owner/repo/issues/44) printf '%s\n' '{"number":44,"state":"open","labels":[{"name":"ready-for-agent"}]}' ;;
+  repos/owner/repo/issues/43/parent|repos/owner/repo/issues/44/parent) printf '%s\n' '{"number":10}' ;;
+  *issues/43/dependencies/blocked_by*) printf '%s\n' '[[]]' ;;
+  *issues/44/dependencies/blocked_by*) printf '%s\n' '[[{"number":43,"state":"open"}]]' ;;
+  *) exit 1 ;;
+esac
+GH
+chmod +x "$TMP/bin/gh"
+out=$(PATH="$TMP/bin:$PATH" bash "$SCRIPTS_DIR/validate-plan.sh" --live "$TMP/valid.json" 2>&1); code=$?
+assert_exit "validate-plan live: 默认 roots 遗漏" 1 "$code"
+assert_contains "validate-plan live: 指出默认 roots" "$out" "默认 roots 与 GitHub 不一致"
+
+# dispatched-count.sh
+out=$(bash "$SCRIPTS_DIR/dispatched-count.sh" "$TMP/valid.json" 2>&1); code=$?
+assert_exit "dispatched-count: 正常运行" 0 "$code"
+if [ "$out" = "2" ]; then ok "dispatched-count: dispatched + recovering = 2"; else bad "dispatched-count: 期望 2，实际 $out"; fi
+
+jq '.issues[0].status = "dispatchd"' "$TMP/valid.json" > "$TMP/bad-count-status.json"
+out=$(bash "$SCRIPTS_DIR/dispatched-count.sh" "$TMP/bad-count-status.json" 2>&1); code=$?
+assert_exit "dispatched-count: 拒绝非法 status" 1 "$code"
+assert_contains "dispatched-count: status 错误明确" "$out" "status/stage 非法"
+
+# watchdog.sh
 mkdir -p "$TMP/wt-fresh"
-echo x > "$TMP/wt-fresh/f.txt"
-bash "$SCRIPTS_DIR/watchdog.sh" "$TMP/wt-fresh" 2 > "$TMP/wd-fresh.out" 2>&1 &
+git -C "$TMP/wt-fresh" init -q
+git -C "$TMP/wt-fresh" config user.name test
+git -C "$TMP/wt-fresh" config user.email test@example.com
+printf x > "$TMP/wt-fresh/f.txt"
+git -C "$TMP/wt-fresh" add f.txt
+git -C "$TMP/wt-fresh" commit -q -m fresh
+bash "$SCRIPTS_DIR/watchdog.sh" "$TMP/wt-fresh" 2 > "$TMP/fresh.out" 2>&1 &
 wd_pid=$!
 sleep 3
 if kill -0 "$wd_pid" 2>/dev/null; then
-  ok "watchdog: 活性新鲜时不退出"
-  kill "$wd_pid" 2>/dev/null; wait "$wd_pid" 2>/dev/null
+  ok "watchdog: 新鲜 worktree 保持运行"
+  kill "$wd_pid" 2>/dev/null
+  wait "$wd_pid" 2>/dev/null
 else
-  bad "watchdog: 活性新鲜时不退出（已提前退出）"
+  bad "watchdog: 新鲜 worktree 提前退出"
 fi
-if [ -s "$TMP/wd-fresh.out" ]; then
-  bad "watchdog: 运行期间零输出（实际有输出：$(cat "$TMP/wd-fresh.out")）"
-else
-  ok "watchdog: 运行期间零输出"
-fi
+if [ -s "$TMP/fresh.out" ]; then bad "watchdog: 运行时应静默"; else ok "watchdog: 运行时静默"; fi
 
-# 全陈旧文件 → 超时 exit 1 + 一行死因
 mkdir -p "$TMP/wt-stale"
-echo x > "$TMP/wt-stale/f.txt"
+git -C "$TMP/wt-stale" init -q
+git -C "$TMP/wt-stale" config user.name test
+git -C "$TMP/wt-stale" config user.email test@example.com
+printf x > "$TMP/wt-stale/f.txt"
+git -C "$TMP/wt-stale" add f.txt
+git -C "$TMP/wt-stale" commit -q -m stale
+GIT_COMMITTER_DATE='2020-01-01T00:00:00Z' git -C "$TMP/wt-stale" commit --allow-empty -q -m old-reflog
 touch -t 202001010000 "$TMP/wt-stale/f.txt" "$TMP/wt-stale"
-out=$(bash "$SCRIPTS_DIR/watchdog.sh" "$TMP/wt-stale" 2 2>&1); code=$?
-assert_exit "watchdog: 全陈旧时超时退出" 1 $code
-assert_out_contains "watchdog: 死因含 worktree 路径" "$out" "$TMP/wt-stale"
-assert_out_contains "watchdog: 死因含错误类型" "$out" "AgentIdleTimeoutError"
+bash "$SCRIPTS_DIR/watchdog.sh" "$TMP/wt-stale" 2 > "$TMP/stale.out" 2>&1 &
+stale_pid=$!
+deadline=$(( $(date +%s) + 15 ))
+while kill -0 "$stale_pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do
+  sleep 1
+done
+if kill -0 "$stale_pid" 2>/dev/null; then
+  kill "$stale_pid" 2>/dev/null
+  wait "$stale_pid" 2>/dev/null
+  code=124
+else
+  wait "$stale_pid"; code=$?
+fi
+out=$(<"$TMP/stale.out")
+assert_exit "watchdog: 陈旧 worktree 超时" 1 "$code"
+assert_contains "watchdog: 输出错误类型" "$out" "AgentIdleTimeoutError"
+assert_contains "watchdog: 输出 worktree" "$out" "$TMP/wt-stale"
 
-# 缺少参数 → 用法报错
-bash "$SCRIPTS_DIR/watchdog.sh" >/dev/null 2>&1
-assert_exit "watchdog: 缺参数报错" 1 $?
+out=$(bash "$SCRIPTS_DIR/watchdog.sh" "$TMP/wt-stale" abc 2>&1); code=$?
+assert_exit "watchdog: 拒绝非数字 idle" 1 "$code"
+assert_contains "watchdog: 指出正整数" "$out" "正整数"
 
-# ---------- dispatched-count.sh ----------
+out=$(bash "$SCRIPTS_DIR/watchdog.sh" "$TMP/wt-stale" 0 2>&1); code=$?
+assert_exit "watchdog: 拒绝零 idle" 1 "$code"
+assert_contains "watchdog: 零值错误明确" "$out" "正整数"
 
-cat > "$TMP/count.json" <<'EOF'
-{"issues": [
-  {"number": 42, "status": "dispatched"},
-  {"number": 43, "status": "done"},
-  {"number": 44, "status": "dispatched"},
-  {"number": 45, "status": "pending"},
-  {"number": 46, "status": "failed"}
-]}
-EOF
-out=$(bash "$SCRIPTS_DIR/dispatched-count.sh" "$TMP/count.json" 2>&1); code=$?
-assert_exit "dispatched-count: 正常运行" 0 $code
-assert_out_contains "dispatched-count: 计数正确" "$out" "2"
+mkdir -p "$TMP/not-git"
+out=$(bash "$SCRIPTS_DIR/watchdog.sh" "$TMP/not-git" 2 2>&1); code=$?
+assert_exit "watchdog: 观测前验证 Git worktree" 2 "$code"
+assert_contains "watchdog: 观测错误独立" "$out" "WatchdogObservationError"
 
-echo
-echo "通过 ${PASS}，失败 ${FAIL}"
+printf '\n通过 %s，失败 %s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

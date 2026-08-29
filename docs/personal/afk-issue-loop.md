@@ -10,14 +10,14 @@ bash scripts/link-skills.sh
 
 ## 功能
 
-遍历 GitHub 上 `ready-for-agent` 标签的 issue，逐个分发给独立 agent 处理。每个 issue 在隔离的 git worktree 中执行，互不干扰。全部完成后提醒手动 code review 或 QA。
+处理用户指定的 GitHub Ticket numbers；未指定时扫描 open `ready-for-agent` Tickets。Planner 读取原生 parent/sub-issue 与 `blocked_by`，角色在 Worktrunk worktree 中实现和审查，Merger 拓扑合并并关闭 Tickets；失败会在原现场自动恢复。
 
 ## 何时使用
 
-手动敲 `/afk-issue-loop` 调用。
+手动敲 `/afk-issue-loop [issue numbers] [mode=subagent|herdr]` 调用。
 
-适合批量处理积压的 issue——开启后不用管，agent 逐个解决。
+适合无人值守处理一个 SPEC 拆出的 Tickets，或批量清空已 triage 的 `ready-for-agent` 积压。
 
 ## 在流程中的位置
 
-独立工具。处理 triage 后积压的 ready-for-agent issue。不确定时问 `/ask-rolex`。
+独立工具。通常接在 `/to-tickets` 或 triage 之后；不确定时问 `/ask-rolex`。
