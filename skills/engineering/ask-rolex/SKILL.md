@@ -14,12 +14,14 @@ disable-model-invocation: true
 
 大多数工作走的路线。你有一个想法，想把它做出来。
 
+0. **分支：任务在陌生地带吗？** 如果它落在 codebase 里你没碰过的区域，或者一个你不熟悉的领域（一种没接触过的技术、一类没做过的设计），先跑一次 **`/blind-spot-pass`**（user-invoked，手动触发）：让 agent 把你的 **unknown unknowns** 翻出来讲清楚，再带着它们进入步骤 1。熟悉的领域直接跳过——它的价值与你的盲区成正比。
+0.5. **分支：判断标准是看到才认得的吗？** 如果你不知道有哪些可能，或者标准说不出来但看到能认出（审美、口味、"就要这个感觉"），先 **`/brainstorm`** 发散：列举介入点，或产出多个截然不同的方向交给 prototype 供你反应。grilling 中途发现剩下的决策要看到实物才能定时，也会转手调用它。
 1. **`/grill-with-docs`** 通过 interview 打磨想法。只要你在**工作目录**里工作，就从这里开始：它是有状态的，会把学到的东西保留在 `CONTEXT.md` 和 ADR 中。（没有工作目录？改用 `/grill-me`，见 Standalone。两者运行同一个 `/grilling` 原语；`grill-with-docs` 是会留下书面痕迹的那个，所以只要有仓库可以留下痕迹，它就是两者中更好的那个。）
 2. **分支：你能在对话中解决每个问题吗？** 如果一个问题需要可运行的答案（状态、业务逻辑、一个你必须亲眼看到的 UI），就绕行一个 prototype，用 **`/handoff`** 双向桥接（prototype 住在自己的目录里，这正是 `/handoff` 的用途；见 Phase boundaries）：
    - **`/handoff`** 转出，然后针对那个文件开一个新的 session，
    - **`/prototype`** 用 throwaway 代码回答那个问题，
    - **`/handoff`** 把你学到的东西转回来，并从原始想法线程引用它。
-3. **分支：这是多 session 构建吗？**
+3. **分支：这是多 session 构建吗？** 想在动手前先审阅关键决策，就在 spec 之前跑一次 **`/to-plan`**：它把最可能变的决策（data model、type interface、UX flow）置顶供你反应，机械性重构沉底。
    - **是** → **`/to-spec`**（把线程变成一份 spec），然后 **`/to-tickets`** 把它拆成 tracer-bullet tickets，每个都声明自己的 **blocking edges**。在本地 tracker 上，就是 `.scratch/<feature>/issues/` 下每个 ticket 一个文件，按 blocker 优先手工推进；在真实的 tracker 上，这些 edges 变成原生的阻塞链接，所以任何 blocker 都已完成的 ticket 都可以被拿走：对每个 ticket 启动 **`/implement`**，**每两个之间 `/clear` context**。每个 ticket 都是自包含的，所以上一个 ticket 的 context 是可以随手丢弃的。
    - **否** → **`/implement`** 就在这里、在同一个 context window 里构建。
 
