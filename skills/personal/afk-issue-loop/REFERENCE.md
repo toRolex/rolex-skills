@@ -51,7 +51,7 @@ blocked（本轮等待）：
 - **确定性分支名**：`afk/issue-{N}`。重跑 Planner 输出同一分支名（虽只跑一次，确定性仍是契约）
 - **`<promise>COMPLETE</promise>` 是权威完成信号**：Implementer 发出 = 分支可审查；Reviewer 发出 = 审查完成或跳过；Merger 发出 = 全部合并 + issue 已关。`DONE` 等自然语言只是人读摘要（见[状态处理](#状态处理)）
 - **真正完成判定（关 issue）只在 Merger**（判定类 ticket 的关闭例外见[依赖解析](#依赖解析)）；Implementer / Reviewer 都不关 issue
-- **Reviewer 直接在 Implementer 的 worktree / branch 上改代码 + commit**，不反馈、不复查（对齐 sandcastle 一次性自改）；Implementer 与 Reviewer 在同一分支线性叠加 commit，Implementer 的 commit 在前、Reviewer 的 `refine:` commit 在后
+- **Reviewer 一次性自改**：在 Implementer 的 worktree / branch 上直接改代码 + commit，不反馈、不复查；Implementer 与 Reviewer 在同一分支线性叠加 commit，Implementer 的 commit 在前、Reviewer 的 `refine:` commit 在后
 
 控制者验收 `<plan>`：Read `docs/afk-plan.json`（Planner 已写入），校验每项 `number/title/branch`；DAG 模式下同时校验 `blocked_by`（数组，可空）。验收后给每节点补 `status` 字段并逐轮用 Edit 维护（`pending` / `dispatched` / `done` / `failed`）。
 
@@ -81,7 +81,7 @@ blocked（本轮等待）：
 - 控制者只做编排——分派、验收 `<plan>` 落盘、按 DAG 拓扑序切片每轮 unblocked、验证、异常处置，**不写实现代码**；发现产出 bug 时分派修复 agent，主会话不直接改代码
 - **禁轮询**：通知驱动等待——分派后挂 watchdog 即停手（机制见[超时协议](#超时协议)），herdr 模式也不例外
 - agent 直接进入 TDD，不做 seam 等待确认；无 Seam 预确认环节
-- Reviewer 直接在 Implementer 的 worktree / branch 上改代码 + 跑测试 + commit（**不反馈、不复查**），对齐 sandcastle 一次性自改；Implementer 与 Reviewer 同 worktree 同 branch 线性叠加 commit
+- Reviewer 一次性自改：在 Implementer 的 worktree / branch 上直接改代码 + 跑测试 + commit，同 worktree 同 branch 线性叠加 commit
 - **绝不关闭或改 label 任何本流程未实现合入的 issue**（含判定失败的下游与父 PRD）——存废由 owner 决定；判定类 ticket 自身的关闭例外见[依赖解析](#依赖解析)
 
 **本地拓扑 merge（不推送、不建 PR）**
@@ -104,9 +104,9 @@ blocked（本轮等待）：
 | `DONE_WITH_CONCERNS` | 阅读疑虑，正确性相关→分派修复 agent（不手动修）；能力相关→下轮换强模型 / 拆分 / 上报 |
 | `NEEDS_CONTEXT` | 保留 worktree，提供缺失信息后重新分派（同分支，进度保留） |
 | `BLOCKED` | 保留 worktree，评估原因后：补上下文 / 换强模型 / 拆分 issue / 上报。**绝不忽视** |
-| 失败 / 超时判死 | 见[恢复机制](#恢复机制)——落盘恢复手册 + 标 `failed`，**零自动重试** |
+| 失败 / 超时判死 | 见[恢复机制](#恢复机制)——落盘 runbook + 标 `failed`，**零自动重试** |
 
-Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3；拓扑 merge 不再验证 `git cat-file -p HEAD | grep "^parent"` 的 1-parent 约束（拓扑 merge 自然产生多 parent merge commit）。
+Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3。
 
 ## 超时协议
 
@@ -117,7 +117,7 @@ Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3�
 - **信号源**：worktree 内文件 mtime + `.git` reflog 时间，取最新。已知差距——盯文件活性而非 stdout 行流（Agent 工具不暴露子代理流式输出），agent 长时间纯思考不落盘会误判，600s 阈值下概率低
 - **阈值**：600s（抄 sandcastle `DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60`）
 - **生命周期**：分派时以 `run_in_background: true` 挂起，静默循环零输出；idle 超时 → exit 1 + 一行死因（哪个 worktree、idle 多久），后台任务退出即系统通知唤醒控制者
-- **控制者配合**：分派后**立即停手**；agent 正常完成（系统完成通知先到）→ 杀掉对应 watchdog，不误报；watchdog 死因先到 → 判 `AgentIdleTimeoutError`，`TaskStop` 终止 agent 后进[恢复机制](#恢复机制)
+- **控制者配合**：分派后**立即停手**；agent 正常完成（系统完成通知先到）→ 杀掉对应 watchdog；watchdog 死因先到 → 判 `AgentIdleTimeoutError`，`TaskStop` 终止 agent 后进[恢复机制](#恢复机制)
 - **职责边界**：watchdog 只防挂死；正常结束 / 报错由系统通知接管。herdr 模式同一套 watchdog（pane 无系统完成通知，但 watchdog 退出通知一样到控制者；完成信号由 herdr agent 汇报承载，详见 herdr skill）
 - **显式排除 completion grace**：sandcastle ADR 0019 的 60s grace 场景是「signal 已发出但进程挂起不退」，本架构的完成终点是进程已退的系统通知，中间态不存在
 
@@ -128,7 +128,7 @@ Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3�
 **零自动重试**（对齐 sandcastle fail-fast，修订 ADR 0001「原地重试」条款，见 ADR 0002）：失败即标 `failed`，**不自动重派、不无限重试**——AFK 场景下原地无限重试意味着用户回来时面对烧了数小时 token 的死循环。
 
 - **现场保全**：worktree 不删、branch 不动、永不 `reset --hard`——含未提交改动全部原样保留，随时可人工接手
-- **落盘恢复手册** `docs/afk-failures/issue-{N}.md`：
+- **落盘 runbook** `docs/afk-failures/issue-{N}.md`：
 
   ```
   branch:   afk/issue-{N}
@@ -142,8 +142,8 @@ Merger 后验证两件事（CLOSED / 无残留 worktree）见 SKILL.md 阶段 3�
   Read docs/afk-failures/issue-{N}.md 了解前次失败，同分支继续，复用已 commit 进度。
   ```
 
-- **不停调度**：失败 issue 标 `failed` 后继续调度其余 unblocked issue——单点失败不阻塞整轮，**不传染下游**（DAG 上其它节点按原 `blocked_by` 推进）
-- **恢复（单路径）**：同分支同 worktree 重新分派，prompt 末尾附「Read docs/afk-failures/issue-{N}.md 了解前次失败，同分支继续，复用已 commit 进度」。确定性分支名 `afk/issue-{N}` + worktree 复用让已 commit 进度自动捡回（对齐 sandcastle dogfood 的真实失败恢复姿势；`resume()` 全仓库仅用于 structured output 重试与 produce→extract 两段式，失败恢复零用例）。重派 agent 能读到前次失败手册，不以同样方式再死一次
+- **不传染下游**：失败 issue 标 `failed` 后其余 unblocked issue 照常调度，DAG 上其它节点按原 `blocked_by` 推进——单点失败不阻塞整轮
+- **恢复（单路径）**：同分支同 worktree 重新分派，prompt 末尾附 runbook「## 恢复」段的指引句。确定性分支名 `afk/issue-{N}` + worktree 复用让已 commit 进度自动捡回；重派 agent 读到前次 runbook，不以同样方式再死一次（被否方案与理由见 ADR 0002）
 - **处置权在人**：收尾把 `afk-failures/` 完整清单交用户逐条决定恢复或放弃（见[收尾流程](#收尾流程)）
 - 会话 compact / `--resume` 后：Read `docs/afk-plan.json` 重建 DAG 与各节点 `status`；分支名确定性 + `gh issue view <N> --json state` 可交叉复核真实进度，不依赖会话记忆
 

@@ -27,14 +27,14 @@ Planner 开头一次性输出的完整 issue 依赖图（含 `blocked_by`），�
 _Avoid_: 分轮 plan
 
 **watchdog**:
-每次分派挂起的后台脚本（`scripts/watchdog.sh`），盯 worktree 文件系统活性（文件 mtime + git reflog），600s 无活性才退出并输出一行死因，退出即系统通知唤醒控制者判 `AgentIdleTimeoutError`。运行期间零输出、零上下文占用；两载体（subagent / herdr）统一。
+每次分派挂起的后台脚本（`scripts/watchdog.sh`），盯 worktree 文件活性，无活性超时退出即系统通知唤醒控制者判 `AgentIdleTimeoutError`。契约见 afk-issue-loop REFERENCE.md 超时协议。
 _Avoid_: 一次性计时器、复杂度分级时限、轮询
 
-**恢复手册**:
-失败 issue 落盘的现场档案 `docs/afk-failures/issue-{N}.md`：branch / worktree / commits 快照 / 错误类型 / 失败摘要 / 可复制的重派 prompt。现场保全（worktree 不删、branch 不动、永不 `reset --hard`）。
+**runbook**:
+失败 issue 落盘的现场恢复档案 `docs/afk-failures/issue-{N}.md`：branch / worktree / commits 快照 / 错误类型 / 失败摘要 / 可复制的重派 prompt。现场保全（worktree 不删、branch 不动、永不 `reset --hard`）。
 
 **恢复**:
-失败 issue 的唯一恢复路径：同分支同 worktree 重新分派，prompt 末尾附「Read docs/afk-failures/issue-{N}.md 了解前次失败，同分支继续，复用已 commit 进度」。**零自动重试**——失败即标 `failed`，处置权在人，不停调度其余 unblocked issue。
+失败 issue 的唯一恢复路径：同分支同 worktree 重新分派，prompt 附 runbook 的重派指引句。**零自动重试**——失败即标 `failed`，处置权在人，不传染下游。
 _Avoid_: 原地重试、自动重试
 
 **status**:

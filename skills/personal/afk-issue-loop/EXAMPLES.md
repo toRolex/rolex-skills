@@ -106,7 +106,7 @@ Implementer 输出（**极简汇报**——无摘要、无测试输出、无文�
 DONE
 ```
 
-系统完成通知到达 → 控制者杀掉 #42 的 watchdog（不误报），然后需要事实时自查 git（几十字节，不占 agent 汇报）：
+系统完成通知到达 → 控制者杀掉 #42 的 watchdog，然后需要事实时自查 git（几十字节，不占 agent 汇报）：
 
 ```bash
 git log --oneline develop..afk/issue-42    # → 2 个 commit（args 解析 + main 调用，语义原子）
@@ -125,7 +125,7 @@ git log --oneline develop..afk/issue-42    # → 2 个 commit（args 解析 + ma
 发现改进点：直接改代码 → 跑测试 → refine: commit（不通过控制者、不通过 SendMessage）。
 ```
 
-Reviewer 输出（**自改、无反馈、无复查、极简汇报**——对齐 sandcastle 一次性自改）：
+Reviewer 输出（一次性自改 + 极简汇报）：
 
 ```
 <promise>COMPLETE</promise>
@@ -143,7 +143,7 @@ feat: 实现 --verbose 选项解析（Implementer, commit 1）
 ```
 
 > **跳过 Reviewer 的场景**：若 Implementer 完全结束后分支无任何 commit（`commits.length === 0`，如超时 / 失败），
-> 控制者跳过 Reviewer（无 diff 可审），进**失败流程**——现场保全 + 落盘恢复手册 + 标 `failed`，零自动重试，不停调度其余 unblocked（完整示例见下文「失败与恢复」）。
+> 控制者跳过 Reviewer（无 diff 可审），进**失败流程**——现场保全 + 落盘 runbook + 标 `failed`，零自动重试，不传染下游（完整示例见下文「失败与恢复」）。
 
 ### 阶段 3（第 1 轮）：Merger 拓扑合并 #42
 
@@ -164,13 +164,12 @@ Merger 输出（极简汇报；合并细节留在 git 历史）：
 DONE
 ```
 
-控制者验证两件事：
+控制者验证：
 
 ```bash
 gh issue view 42 --json state           # → CLOSED
 wt list | grep afk/issue-42             # → 无匹配（worktree 已清理）
 gh pr list | grep 42                    # → 无匹配（本地 merge，无 PR）
-# 不再验证 1-parent squash——拓扑 merge 自然多 parent
 ```
 
 ### 循环：回到控制者切片下一轮（依赖解锁）
@@ -198,7 +197,7 @@ wt switch -c afk/issue-43 -b ${TARGET_BRANCH}
 
 > **Planner 不再被重跑**——一次性 DAG 已经把所有依赖关系编码好了；本轮 unblocked 集合空即停（无需 `MAX_ITERATIONS` 上限，无需"每轮重 Plan"）。
 
-### 失败与恢复（watchdog 判死 → 恢复手册 → 同分支重派）
+### 失败与恢复（watchdog 判死 → runbook → 同分支重派）
 
 假设第 2 轮 #43 的 Implementer 挂死（长时间无任何落盘）。全过程：
 
@@ -210,7 +209,7 @@ AgentIdleTimeoutError: worktree /path/to/wt-issue-43 idle 612s（>= 600s 阈值�
 
 **2. 控制者判死 + 现场保全**：`TaskStop` 终止 agent；worktree 不删、branch 不动、永不 `reset --hard`。
 
-**3. 落盘恢复手册** `docs/afk-failures/issue-43.md`：
+**3. 落盘 runbook** `docs/afk-failures/issue-43.md`：
 
 ```
 branch:   afk/issue-43
@@ -224,17 +223,17 @@ error:    AgentIdleTimeoutError
 Read docs/afk-failures/issue-43.md 了解前次失败，同分支继续，复用已 commit 进度。
 ```
 
-**4. 标 `failed` + 不停调度**：`docs/afk-plan.json` 中 #43 节点 `status: "failed"`；其余 unblocked issue 照常分派（不传染下游）。
+**4. 标 `failed` + 不传染下游**：`docs/afk-plan.json` 中 #43 节点 `status: "failed"`；其余 unblocked issue 照常分派。
 
-**5. 收尾交用户处置**：全部完成后列出 `afk-failures/` 清单。用户决定恢复 #43 → 控制者**同分支同 worktree 重新分派**，prompt 只有两行 + 手册指引（不重注入任何材料）：
+**5. 收尾交用户处置**：全部完成后列出 `afk-failures/` 清单。用户决定恢复 #43 → 控制者**同分支同 worktree 重新分派**，prompt 只有两行 + runbook 指引句（不重注入任何材料）：
 
 ```
 Read ~/.claude/skills/afk-issue-loop/reference/implementer-prompt.md 获取完整指令并执行。
 参数：ISSUE_NUMBER=43, BRANCH=afk/issue-43, TARGET_BRANCH=develop, WORKTREE=/path/to/wt-issue-43
-Read docs/afk-failures/issue-43.md 了解前次失败，同分支继续，复用已 commit 进度。
+（第三行：runbook「## 恢复」段的指引句，照抄即可）
 ```
 
-新 agent 读到前次失败手册（不以同样方式再死一次），且确定性分支名 + worktree 复用让已 commit 的 `a1b2c3d` 进度自动捡回。
+新 agent 读到前次 runbook（不以同样方式再死一次），且确定性分支名 + worktree 复用让已 commit 的 `a1b2c3d` 进度自动捡回。
 
 ### 载体差异：subagent vs herdr
 
@@ -255,5 +254,4 @@ Read docs/afk-failures/issue-43.md 了解前次失败，同分支继续，复用
 2. **无 PR / 无 push**：`gh pr list` 无匹配；本地 merge 不推送
 3. **issue 已关闭**：`gh issue view <id> --json state` → CLOSED；父 PRD 在子 issue 全部关闭后一并关闭
 4. **分支已删**：拓扑合并后 `wt remove afk/issue-{N} -D --foreground`
-5. **不再验证 1-parent squash**：拓扑 merge 自然多 parent
-6. **summarizing commit 已生成**：Merger 末尾 make a single commit summarizing the merge（message 自定）
+5. **summarizing commit 已生成**：Merger 末尾 make a single commit summarizing the merge（message 自定）

@@ -1,6 +1,6 @@
 # afk-issue-loop 失败与超时机制对齐 sandcastle
 
-ADR 0001 的两条款在 AFK 实测语义下被证伪，本 ADR 记录修订。修订内容：**「原地重试」改为零自动重试 + 恢复手册**（失败即标 `failed`、现场保全、落盘 `docs/afk-failures/issue-{N}.md`、不停调度其余 unblocked，收尾交用户逐条处置；恢复 = 同分支同 worktree 重新分派并附手册路径）；**「超时只挂一次性计时器」改为 watchdog**（每次分派挂后台脚本盯 worktree 文件活性——文件 mtime + git reflog，600s 无活性才退出并输出一行死因，取代按复杂度分级的 2-20 分钟一次性计时器）；**herdr 模式同步去轮询**（两载体统一 watchdog，`reference/herdr-notes.md` 删除，CLI 细节归 herdr skill）。ADR 0001 的其余部分（模板自加载 / 寻址注入 / 极简汇报 / 禁轮询 / plan 落盘 / 统一 sonnet）不变，且禁轮询因 herdr 去轮询而更彻底。
+ADR 0001 的两条款在 AFK 实测语义下被证伪，本 ADR 记录修订。修订内容：**「原地重试」改为零自动重试 + runbook**（失败即标 `failed`、现场保全、落盘 `docs/afk-failures/issue-{N}.md`、不传染下游，收尾交用户逐条处置；恢复 = 同分支同 worktree 重新分派并附 runbook 指引句）；**「超时只挂一次性计时器」改为 watchdog**（每次分派挂后台脚本盯 worktree 文件活性——文件 mtime + git reflog，600s 无活性才退出并输出一行死因，取代按复杂度分级的 2-20 分钟一次性计时器）；**herdr 模式同步去轮询**（两载体统一 watchdog，`reference/herdr-notes.md` 删除，CLI 细节归 herdr skill）。ADR 0001 的其余部分（模板自加载 / 寻址注入 / 极简汇报 / 禁轮询 / plan 落盘 / 统一 sonnet）不变，且禁轮询因 herdr 去轮询而更彻底。
 
 ## Considered Options
 
