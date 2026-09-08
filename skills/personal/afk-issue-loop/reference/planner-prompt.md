@@ -20,7 +20,7 @@
 3. 对每个初始 Ticket 及新发现的 open blocker：
    - 读取完整 Issue 与 labels；
    - `GET /repos/{owner}/{repo}/issues/{number}/parent` 读取父 SPEC；404 表示无 parent；
-   - 分页读取 `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by?per_page=100&page=N`，直到空页；
+   - 用 `gh api --paginate --slurp` 读取 `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by?per_page=100` 的全部页；
    - closed blocker 视为已满足；open blocker 加入执行集合并继续递归。
 4. 资格门：每个 open 执行节点都必须有 `ready-for-agent`。发现缺少标签的 open blocker 时，输出 `BLOCKED — open blocker #N 缺少 ready-for-agent`，保留已有 `docs/afk-plan.json`，停止。
 5. 为每个执行节点写：

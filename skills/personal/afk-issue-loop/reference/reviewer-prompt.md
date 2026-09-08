@@ -31,7 +31,7 @@ Reviewer 执行 sandcastle 式**一次性自改**：在 Implementer 的同一 Wo
 - 发现的正确性、测试、安全和维护性问题均已修复；
 - 全量测试通过；
 - Reviewer 修改已按独立意图 commit；
-- 分支已达到可合并状态。
+- 分支已达到可合并状态，worktree 满足 [clean 交接门](../REFERENCE.md#运行时文件与-clean-边界)。
 
 输出仅两行：
 
@@ -40,4 +40,4 @@ Reviewer 执行 sandcastle 式**一次性自改**：在 Implementer 的同一 Wo
 DONE
 ```
 
-无法满足 completion criterion 时，不输出完成信号；输出 `DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED` 加一行原因。控制者会写入 runbook，并在同 branch/worktree 自动重新分派 Reviewer。Reviewer 自己完成修正，不向 Implementer建立反馈循环。远端保持不变；merge 与 Issue 关闭留给 Merger。
+无法满足 completion criterion 时，输出 `DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED` 加一行原因，作为控制者的恢复输入。授权受阻时读取[权限门](../REFERENCE.md#权限门)；其余失败按[自动恢复](../REFERENCE.md#自动恢复)继续。Reviewer 自己完成修正；merge 与 Issue 关闭留给 Merger，远端保持不变。

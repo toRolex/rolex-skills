@@ -23,9 +23,9 @@ argument-hint: "[issue-number ...] [mode=subagent|herdr]"
 ## 0. 建立运行参数
 
 1. 从参数提取 issue numbers 与 `mode`；`mode` 默认 `subagent`。
-2. 生成本次运行标识：`RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$`。恢复会话时从现有 plan 读取同一个 `run_id`。
-3. issue numbers 非空时作为初始 Tickets；为空时由 Planner 扫描全部 open `ready-for-agent` Tickets。
-4. 检测目标分支：本地或远程存在 `develop` 时使用 `develop`，否则使用 `main`。
+2. 按 [运行时文件与 clean 边界](REFERENCE.md#运行时文件与-clean-边界) 检查主仓库与既有运行文件。新运行生成 `RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$`；恢复会话按 [现场所有权与分派记录](REFERENCE.md#现场所有权与分派记录) 重建当前批次，沿用 `run_id`、mode 和目标分支，跳过 Planner。
+3. 仅新运行：issue numbers 非空时作为初始 Tickets；为空时由 Planner 扫描全部 open `ready-for-agent` Tickets。恢复时 roots 来自已有 plan。
+4. 仅新运行：本地或远程存在 `develop` 时使用 `develop`，否则使用 `main`。
 5. 检查 `gh`、`jq`、`wt` 可用，并按 [REFERENCE.md：CONTEXT.md](REFERENCE.md#contextmd) 处理领域上下文。
 6. `mode=herdr` 时调用 `Skill("herdr")` 获取操作契约；需要布局时再调用 `Skill("herdr-instances")`。两种载体使用同一角色 prompt 与 watchdog。
 7. 未显式指定 mode 且初始 Tickets 多于 5 个时，向用户确认载体。
@@ -64,7 +64,7 @@ Plan schema、原生关系与状态机见 [REFERENCE.md：Execution DAG](REFEREN
 
 ## 2. 执行 Ticket 批次
 
-重复以下控制循环：
+重复以下控制循环；建批、进入 barrier 等待、发生恢复/权限阻塞或用户询问时，按[进度快照](REFERENCE.md#进度快照)汇报：
 
 1. Read `docs/afk-plan.json`。
 2. 运行 `dispatched-count.sh docs/afk-plan.json`；`dispatched + recovering ≤ 4`。
@@ -94,16 +94,11 @@ Git 负责 commit 与 merge；Worktrunk 负责 worktree 创建、复用、查询
 - 将节点置为 `status: "dispatched", stage: "implement"`，分派 [Implementer](reference/implementer-prompt.md)。
 - Implementer 完成且分支相对 `${TARGET_BRANCH}` 有 commit 后，将 `stage` 改为 `review`，在同 worktree 同 branch 分派 [Reviewer](reference/reviewer-prompt.md)。
 - Reviewer 完成后，将 `stage` 改为 `merge`；该 Ticket 继续占用本批次槽位，等待 barrier Merger。
-- 每次分派同时挂 [watchdog](REFERENCE.md#watchdog)，随后停手等通知。
+- 每次分派按 [现场所有权与分派记录](REFERENCE.md#现场所有权与分派记录) 登记当前实例并挂 [watchdog](REFERENCE.md#watchdog)，随后停手等通知；阶段交接以旧写入者退出为前提。
 
 ### 自动恢复
 
-角色抛错、watchdog 判死、缺少完成信号或 Implementer 空产出时，执行 [REFERENCE.md：自动恢复](REFERENCE.md#自动恢复)：
-
-1. 保留 branch、worktree、commits 与未提交改动；
-2. 节点置为 `recovering`，创建或追加 runbook；
-3. 立即在同 branch、同 worktree 重派失败的角色，再置为 `dispatched`；
-4. 恢复次数无上限；该 Ticket 始终占原槽，下游保持 blocked，其他已分派 Ticket 继续。
+授权受阻时先走[权限门](REFERENCE.md#权限门)。角色抛错、watchdog 超时核实后确认停滞、缺少完成信号或 Implementer 空产出时，按[自动恢复](REFERENCE.md#自动恢复)选择原角色的恢复路径；Ticket 保持原槽位与依赖阻塞，批内其他管线继续。
 
 **完成标准**：当前批次每个节点均为 `status: "dispatched", stage: "merge"`，且其 branch 已通过 Implementer 与 Reviewer 的完成门槛。
 
@@ -111,7 +106,7 @@ Git 负责 commit 与 merge；Worktrunk 负责 worktree 创建、复用、查询
 
 当前批次全部到达 `stage: "merge"` 后，在主仓库检出 `${TARGET_BRANCH}`，分派 [Merger](reference/merger-prompt.md)，传入 `RUN_ID`、批次分支、Ticket numbers、主仓库绝对路径与目标分支。
 
-Merger 失败时，使用批次恢复路径：保留主仓库 merge 现场，在 `REPO/TARGET_BRANCH` 重新分派 Merger；不对批次 Ticket 执行 Worktrunk worktree 恢复。Merger 依据 branch ancestor、Ticket state、稳定 summary message 与 `wt list` 从中断点继续。
+Merger 失败时按 [Merger 批次恢复](REFERENCE.md#merger-批次恢复)继续；控制者保持编排职责。
 
 Merger 完成后，控制者逐项验证：
 
@@ -125,7 +120,7 @@ Merger 完成后，控制者逐项验证：
 
 1. 对 plan 中每个 SPEC 查询全部原生 sub-issues；全部 CLOSED 且 SPEC 仍 OPEN 时关闭 SPEC。
 2. 验证全部执行节点 `done`、全部 Ticket CLOSED、全部 `afk/issue-{N}` worktree 已清理。
-3. 删除运行时文件 `docs/afk-plan.json`；删除已处理完的 `docs/afk-failures/` runbooks。
+3. 按 [运行时文件与 clean 边界](REFERENCE.md#运行时文件与-clean-边界) 清理本次 plan、分派记录与已处理 runbooks。
 4. 报告 Ticket 数、merge commits、summary commits 与关闭的 SPEC。
 5. 提示用户进行 code review 与 QA。
 

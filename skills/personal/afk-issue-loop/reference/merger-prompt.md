@@ -29,7 +29,11 @@ git log --format=%s --fixed-strings --grep="$SUMMARY" | grep -Fxq "$SUMMARY" || 
   git commit --allow-empty -m "$SUMMARY"
 ```
 
-summary commit 存在且全批测试通过后，再逐个检查 `wt list --format=json` 并执行 `wt remove afk/issue-{N} -D --foreground`。这让批次中途恢复保留 branch 验证依据，也让部分清理后的恢复跳过已删除 worktree。
+### 批末清理
+
+summary commit 存在且全批测试通过后，读取 `wt list --format=json`，跳过已移除项。每次移除前，核实对应 Ticket worktree 满足 [clean 边界](../REFERENCE.md#运行时文件与-clean-边界)，再执行 `wt remove afk/issue-{N} -D --foreground`。核实失败时保留现场并输出 `BLOCKED` 加具体路径和原因，交给控制者恢复；授权受阻走[权限门](../REFERENCE.md#权限门)。
+
+分支保留到本批 merge/test/summary 完成，供中途恢复验证 ancestor；清理途中恢复仍逐项执行清理前验收。
 
 SPEC 由控制者在全部原生 sub-issues CLOSED 后统一关闭；Merger 只关闭本批实际合并的 Tickets。
 
@@ -42,7 +46,7 @@ SPEC 由控制者在全部原生 sub-issues CLOSED 后统一关闭；Merger 只�
 - 一条稳定 message 的 summary commit 位于本批 merge commits 之后；
 - 每个本批 Ticket 为 CLOSED；
 - `wt list --format=json` 不再包含本批 branches；
-- 主仓库不存在未解决 merge 或未提交改动。
+- 主仓库满足 [运行时文件与 clean 边界](../REFERENCE.md#运行时文件与-clean-边界)，不存在未解决 merge 或未提交交付物。
 
 输出仅两行：
 
@@ -51,4 +55,4 @@ SPEC 由控制者在全部原生 sub-issues CLOSED 后统一关闭；Merger 只�
 DONE
 ```
 
-无法满足 completion criterion 时，不输出完成信号；输出 `DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED` 加一行原因。控制者会保留主仓库现场、写入 runbook，并自动重新分派 Merger。远端保持不变：不 push、不创建 PR；合并只使用拓扑 merge，不使用 squash 或偏向单侧的 strategy option。
+无法满足 completion criterion 时，输出 `DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED` 加一行原因，作为控制者的恢复输入。授权受阻时读取[权限门](../REFERENCE.md#权限门)；其余失败按 [Merger 批次恢复](../REFERENCE.md#merger-批次恢复)继续。远端保持不变：不 push、不创建 PR；合并只使用拓扑 merge，不使用 squash 或偏向单侧的 strategy option。

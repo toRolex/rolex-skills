@@ -30,7 +30,7 @@
 - 对应测试存在且通过；
 - 全量测试通过；
 - 分支相对 `TARGET_BRANCH` 至少有一个 commit；
-- commits 为语义原子粒度；
+- commits 为语义原子粒度，worktree 满足 [clean 交接门](../REFERENCE.md#运行时文件与-clean-边界)；
 - merge、Issue 关闭和 Worktrunk 清理留给 Merger。
 
 输出仅两行：
@@ -40,4 +40,4 @@
 DONE
 ```
 
-无法满足 completion criterion 时，不输出完成信号；输出 `DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED` 加一行原因。控制者会把原因写入 runbook，并在同 branch/worktree 自动重新分派。远端保持不变：不 push、不创建 PR。
+无法满足 completion criterion 时，输出 `DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED` 加一行原因，作为控制者的恢复输入。授权受阻时读取[权限门](../REFERENCE.md#权限门)；其余失败按[自动恢复](../REFERENCE.md#自动恢复)继续。远端保持不变：不 push、不创建 PR。

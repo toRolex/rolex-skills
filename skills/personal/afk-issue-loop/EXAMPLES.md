@@ -58,7 +58,7 @@ wt remove afk/issue-43 -D --foreground
 
 ## 自动恢复
 
-假设 `#44` Implementer 被 watchdog 判死：
+假设 `#44` Implementer 的 watchdog 超时，控制者核实停滞并确认旧实例及写入子进程已退出：
 
 1. 控制者保留 `afk/issue-44` worktree 现场，将节点改为 `recovering/implement`。
 2. 创建或追加：
@@ -76,7 +76,7 @@ commits: a1b2c3d 实现 debug 输出骨架
 ```
 
 3. `wt switch afk/issue-44 --no-cd --format=json` 找回原 worktree。
-4. 在 Implementer prompt 附 `RUNBOOK=docs/afk-failures/issue-44.md`，立即重派并将节点置回 `dispatched`。
+4. 在 Implementer prompt 附 `RUNBOOK=/path/to/repo/docs/afk-failures/issue-44.md`，按分派记录契约登记新 attempt 与任务标识，重派并将节点置回 `dispatched`。
 5. 同时运行的独立 Tickets 使用剩余槽继续；依赖 `#44` 的 Tickets 保持 blocked。
 6. 失败再次发生时追加 runbook 并继续同一循环，无次数上限。
 
@@ -90,7 +90,7 @@ commits: a1b2c3d 实现 debug 输出骨架
 gh issue close 10
 ```
 
-随后验证全部 plan 节点 done、AFK worktrees 已清理，删除 `docs/afk-plan.json`，提示 code review 与 QA。
+随后验证全部 plan 节点 done、AFK worktrees 已清理，按运行时文件清单清理本次记录，提示 code review 与 QA。
 
 ## 阻塞资格门
 
