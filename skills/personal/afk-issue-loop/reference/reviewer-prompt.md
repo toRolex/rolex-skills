@@ -6,10 +6,10 @@ Reviewer 执行 sandcastle 式**一次性自改**：在 Implementer 的同一 Wo
 
 ## 上下文
 
-1. 进入 `WORKTREE`；herdr 载体可运行 `wt switch BRANCH`。
+1. 先读取[现场绑定：角色检查](workspace-binding.md#角色绑定检查)，以 `EXPECTED_DIR=WORKTREE`、`EXPECTED_BRANCH=BRANCH` 验收现场。
 2. 读取 Ticket、其原生父 SPEC、`CONTEXT.md` / ADR 与仓库规范。
 3. `RUNBOOK` 存在时先 Read，从当前现场继续。
-4. 读取 `git diff TARGET_BRANCH..HEAD` 作为完整审查面。
+4. 读取控制者传入的固定 `IMPLEMENTATION_BASE_SHA` 到 HEAD 的完整 Ticket diff；固定当前 `REVIEW_BASE_SHA`，按[安全基线](../REFERENCE.md#状态与槽位)核对目标变化。完成后报告 reviewed SHA 与 review base SHA，由控制者登记；目标再次前进必须合并前复核，不能沿用旧绿灯。
 
 ## 审查
 

@@ -1,6 +1,8 @@
 # Planner 分派模板
 
-> 你是 Planner agent。本文件是完整指令。分派参数：`RUN_ID`、`ISSUE_NUMBERS`（逗号分隔，可空）、`TARGET_BRANCH`。
+> 你是 Planner agent。本文件是完整指令。分派参数：`RUN_ID`、`ISSUE_NUMBERS`（逗号分隔，可空）、`TARGET_BRANCH`、`REPO`（主仓库绝对路径），以及可选 `RUNBOOK`。
+
+先读取[现场绑定：角色检查](workspace-binding.md#角色绑定检查)，以 `EXPECTED_DIR=REPO`、`EXPECTED_BRANCH=TARGET_BRANCH` 验收现场。plan 落盘到 `REPO/docs/afk-plan.json`。恢复先读 RUNBOOK；仅 plan 尚未验收时续跑。BLOCKED 按[真实原因分流](../REFERENCE.md#blocked-分流)，只有输入资格错误终止；绑定修正后重派、权限等授权，其余可重试失败按[模型与证据](../REFERENCE.md#模型与证据)处理。
 
 ## 目标
 
@@ -25,8 +27,8 @@
 4. 资格门：每个 open 执行节点都必须有 `ready-for-agent`。发现缺少标签的 open blocker 时，输出 `BLOCKED — open blocker #N 缺少 ready-for-agent`，保留已有 `docs/afk-plan.json`，停止。
 5. 为每个执行节点写：
    - `branch: "afk/issue-{N}"`
-   - open → `status: "pending", stage: "implement"`；仅初始输入中的 closed Ticket → `status: "done", stage: "merge"`
-   - `blocked_by` 只列仍 open 的 blockers
+   - open → `status: "pending", stage: "implement"`；仅初始输入中的 closed Ticket → `status: "done", stage: "merge", done_source: "initial_closed"`，blocked_by=[]，只审计跳过，不声称已合并、不进入执行或清理范围
+   - open 节点的 `blocked_by` 只列仍 open 的 blockers；初始 CLOSED root 不递归其 blockers
    - `spec` 为原生 parent number 或 `null`
 6. 将去重后的父 SPEC 写入顶层 `specs`；SPEC 不进入 `issues`。
 7. 按 issue number 排序，写入 `docs/afk-plan.json`，并输出相同 JSON 的 `<plan>`。
@@ -38,7 +40,7 @@
   "version": 1,
   "run_id": "20260829T120000Z-12345",
   "target_branch": "main",
-  "roots": [42, 44],
+  "roots": [42],
   "specs": [{"number": 10, "title": "Verbose mode SPEC"}],
   "issues": [
     {

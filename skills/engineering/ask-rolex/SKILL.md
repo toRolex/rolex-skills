@@ -87,7 +87,7 @@ disable-model-invocation: true
 - **`/teach`**：跨多个 session 学习一个概念，把当前目录当作一个有状态的工作区。
 - **`/writing-for-agents`** 是编写 agent 消费的文档时的参考：skills、AGENTS.md、被指向的文档。
 - **`/writing-great-skills`**：编写和编辑 skill 的参考指南。
-- **`/afk-issue-loop [issue numbers]`**：处理指定 Tickets；省略 numbers 时扫描 open `ready-for-agent`。按 GitHub 原生依赖递归编排并自动恢复。
+- **`/afk-issue-loop [issue numbers]`**：指定 Tickets；省略时扫描 open `ready-for-agent`。原生依赖 DAG、四槽流式实现/审查、单 Merger 即时合并解锁下游；证据驱动无限恢复，同 stage 首次可重试失败 Sonnet→Opus。默认 subagent（不可用明确等待），Herdr 仅显式选择；初始 CLOSED 只审计跳过。
 - **`/qa-plan`**：从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue。
 - **`/clean-branches`**：清理本地和远程已合并的 Git 分支。
 - **`/git-flow-conventions`**：Git Flow 分支管理与提交规范指南。

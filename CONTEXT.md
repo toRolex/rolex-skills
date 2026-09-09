@@ -1,66 +1,77 @@
 # Rolex Skills
 
-mattpocock/skills 的中文改编版：一套 agent skill 集合，按 bucket 组织在 `skills/` 下。
+mattpocock/skills 的中文改编版：按 bucket 组织的 agent skill 集合。
 
 ## Language
 
 **Skill**:
-一个 `SKILL.md` + 可选附属文件的目录，通过 frontmatter 的 `disable-model-invocation` 区分 user-invoked 与 model-invoked。
+一个可调用的工作流或参考知识单元。User-invoked 仅由人调用，Model-invoked 也可由模型调用。
 
 **Bucket**:
-`skills/` 下的分组目录。已推广 bucket（`engineering/`、`productivity/`、`personal/`）必须出现在顶层 README 与 plugin.json；`misc/` 不推广。
+Skill 的推广分组；engineering、productivity、personal 为已推广组，misc 为保留但不推广组。
 
 ### afk-issue-loop 编排
 
 **控制者**:
-运行 afk-issue-loop 的主 Claude 会话；只编排角色、Execution DAG、验证与恢复。
+AFK 主会话，负责角色编排、依赖推进与验收，而非实现工作。
 _Avoid_: 主 agent、orchestrator
 
 **角色**:
-Planner、Implementer、Reviewer、Merger 四种分派单元；对齐 sandcastle `parallel-planner-with-review`。
+Planner、Implementer、Reviewer、Merger 四种职责单元。
 
 **载体**:
-角色的运行方式：`subagent` 或 `herdr`。载体不改变角色语义。
-
-**Worktree 管理**:
-Worktrunk（`wt`）负责 Ticket worktree 的创建、复用、查询与清理；Git 负责 commit、diff 与 merge。
-_Avoid_: 直接管理 git worktree
-
-**SPEC Issue**:
-GitHub 原生 parent issue，描述整体规格并挂载 sub-issues。它提供上下文，不属于 Execution DAG；全部 sub-issues 关闭后完成。
-_Avoid_: PRD 节点、父 PRD
+角色的运行方式，subagent 或 Herdr；载体不改变角色语义。
 
 **Ticket Issue**:
-AFK 的执行单元：用户显式给定的 Issue，或默认扫描得到的 open `ready-for-agent` Issue。显式输入中的 closed Ticket 表示续跑前已完成。
+AFK 可执行工作单元，包括初始输入及其开放依赖。初始已关闭输入仅作为审计节点。
 _Avoid_: PRD issue、DAG 外任务
 
+**SPEC Issue**:
+Ticket 的原生父 Issue，提供整体规格上下文，不属于执行节点。
+_Avoid_: PRD 节点、父 PRD
+
 **Execution DAG**:
-初始 Ticket 加上全部开放 `blocked_by` 递归闭包。Planner 从 GitHub 原生 issue dependencies 读取并验证；closed blocker 视为已满足。
+初始 Tickets 与其开放依赖闭包形成的无环执行图；已关闭依赖视为满足。
 _Avoid_: SPEC DAG、分轮 plan、推断 DAG
 
-**watchdog**:
-分派时启动的 hang detector；盯 worktree 文件活性，无活动超时后通知控制者进入自动恢复。
-_Avoid_: 一次性计时器、轮询
+**Ticket 槽**:
+一条活动 Ticket 管线占用的容量，包括实现、审查、等待合并与恢复。
 
-**runbook**:
-Ticket 恢复档案 `docs/afk-failures/issue-{N}.md`，记录 branch、worktree、stage、attempts、commits 与最近失败。
+**合并单元**:
+由一个已审查 Ticket 及其固定交付版本构成的独立合并、验收与清理范围。
+_Avoid_: 全批 barrier
+
+**流式调度**:
+Ticket 独立推进，合并完成后立即释放容量并解锁下游，不等待其他独立 Ticket。
+
+**初始关闭审计**:
+记录输入在运行开始前已关闭的事实，不代表本次或历史上已合并。
+
+**完成来源**:
+区分初始关闭跳过与本次执行合并的来源事实。
 
 **恢复**:
-失败 Ticket 在同 branch、同 Worktrunk worktree、同 stage 自动重派；无次数上限，始终占原槽，成功后解锁下游。
-_Avoid_: 人工恢复、重试上限、重新创建现场
+失败角色基于已保存证据，在原现场延续原阶段；不替代权限或业务决策授权。
+_Avoid_: 重建现场、无证据重试
+
+**runbook**:
+角色恢复档案，包含失败证据、已尝试动作、模型选择与下一恢复依据。
 
 **status**:
-Plan 节点状态 `pending` / `dispatched` / `recovering` / `done`；失败沿 `dispatched → recovering → dispatched` 循环，Merger验证后进入 `done`。
+执行节点的 pending、dispatched、recovering、done 状态；角色汇报的 BLOCKED 等信号不属于这套节点状态。
+
+**watchdog**:
+角色活性观察器，异常提示需核实，不等于死亡证明。
 
 **主窗口预算**:
-控制者上下文窗口的预算约束：材料和事实留在角色或环境，只传地址与极简信号。
+控制者上下文容量约束，材料与事实保留在角色或环境中。
 
 **寻址注入**:
-分派 prompt 只给命令与路径，由角色自行获取 Ticket、SPEC 和领域材料。
+只传上下文地址，由角色自行获取材料。
 _Avoid_: 全文注入、控制者代读
 
 **模板自加载**:
-分派 prompt 只传模板路径与参数，角色自行 Read 完整指令。
+角色根据传入路径自行读取完整角色指令。
 
 **极简汇报**:
-角色只返回 completion signal、状态及必要的一行疑虑；测试与 commits 留在环境中。
+角色只返回完成信号、状态与必要疑虑；详细证据可寻址。

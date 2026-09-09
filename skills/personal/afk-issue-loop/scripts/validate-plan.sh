@@ -82,6 +82,7 @@ if ! errors=$(jq -r '
   else
     (.issues | map({key: (.number | tostring), value: .}) | from_entries) as $by_number
     | (issue_numbers) as $numbers
+    | .roots as $roots
     | ([.specs[].number]) as $spec_numbers
     | (
         [
@@ -89,7 +90,8 @@ if ! errors=$(jq -r '
           (if (.roots | duplicate_values | length) > 0 then "roots 含重复 issue: \(.roots | duplicate_values | join(", "))" else empty end),
           (if ($numbers | duplicate_values | length) > 0 then "issues.number 重复: \($numbers | duplicate_values | join(", "))" else empty end),
           (if ($spec_numbers | duplicate_values | length) > 0 then "specs.number 重复: \($spec_numbers | duplicate_values | join(", "))" else empty end),
-          (.roots[] | select(($numbers | index(.)) == null) | "root issue \(.) 不在 issues 中"),
+          (.roots[] as $root | select(($numbers | index($root)) == null) | "root issue \($root) 不在 issues 中"),
+          (if ([.issues[] | select(.status == "dispatched" or .status == "recovering")] | length) > 4 then "Ticket 槽位超过 4" else empty end),
           ($spec_numbers[] as $s | select(($numbers | index($s)) != null) | "SPEC \($s) 同时出现在执行节点中"),
           (.specs | to_entries[] | .key as $k | .value as $s |
             if ($s.number | positive_integer | not) then "specs[\($k)]: number 缺失或不是正整数"
@@ -109,8 +111,12 @@ if ! errors=$(jq -r '
             elif ($i.stage | valid_stage | not) then "issue \($i.number): stage 非法"
             elif ($i.status == "pending" and $i.stage != "implement") then "issue \($i.number): pending 节点的 stage 必须是 implement"
             elif ($i.status == "done" and $i.stage != "merge") then "issue \($i.number): done 节点的 stage 必须是 merge"
+            elif ($i.status == "done" and $i.done_source != "initial_closed" and $i.done_source != "merged") then "issue \($i.number): done_source 缺失或非法，须核实来源"
+            elif ($i.status != "done" and ($i | has("done_source"))) then "issue \($i.number): 非 done 节点不能有 done_source"
+            elif ($i.done_source == "initial_closed" and (($roots | index($i.number)) == null or ($i.blocked_by | length) != 0)) then "issue \($i.number): initial_closed 必须是无 blocker 的 root"
             else empty end),
           (.issues[] | .number as $n | .blocked_by[]? as $b | select(($numbers | index($b)) == null) | "issue \($n): blocked_by 引用不存在的 issue \($b)"),
+          (.issues[] as $i | select($i.status != "pending") | $i.blocked_by[]? as $b | select($by_number[$b | tostring].status != "done") | "issue \($i.number): 非 pending 节点的 blocker \($b) 必须 done"),
           (walk_blockers($by_number; []; .roots) as $reachable | $numbers[] as $n | select(($reachable | index($n)) == null) | "issue \($n) 不在 roots 的依赖闭包中"),
           ({remaining: .issues, done: []}
             | until((.remaining | length) == 0;
@@ -167,6 +173,11 @@ fi
 
 if [ "$live" -eq 0 ]; then
   exit 0
+fi
+
+if ! jq -e '.issues | all(.status == "pending" or (.status == "done" and .done_source == "initial_closed"))' "$plan" >/dev/null; then
+  echo "validate-plan: live 仅验收初始 pending/initial_closed 快照" >&2
+  exit 1
 fi
 
 repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner) || {

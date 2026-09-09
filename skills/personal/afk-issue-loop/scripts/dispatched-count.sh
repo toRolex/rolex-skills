@@ -23,4 +23,9 @@ if ! jq -e '
   exit 1
 fi
 
-jq '[.issues[] | select(.status == "dispatched" or .status == "recovering")] | length' "$plan"
+count=$(jq '[.issues[] | select(.status == "dispatched" or .status == "recovering")] | length' "$plan") || exit 1
+if [ "$count" -gt 4 ]; then
+  printf 'dispatched-count: Ticket 槽位超过 4（实际 %s）\n' "$count" >&2
+  exit 1
+fi
+printf '%s\n' "$count"

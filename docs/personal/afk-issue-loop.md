@@ -10,7 +10,9 @@ bash scripts/link-skills.sh
 
 ## 功能
 
-处理用户指定的 GitHub Ticket numbers；未指定时扫描 open `ready-for-agent` Tickets。Planner 读取原生 parent/sub-issue 与 `blocked_by`，角色在 Worktrunk worktree 中实现和审查，Merger 拓扑合并并关闭 Tickets；失败会在原现场自动恢复。
+处理指定 GitHub Tickets；省略时扫描 open `ready-for-agent`。原生依赖 DAG、最多四条 Ticket 管线；reviewed 即排队交给唯一 Merger，完整合并/测试/关闭/清理验收后立即解锁下游，不等独立慢任务。初始 CLOSED 只审计跳过。默认 subagent，不可复用现场则明确等待；Herdr 仅显式使用。失败在原现场证据驱动恢复，同 stage 首次可重试失败 Sonnet 升 Opus；权限与四槽边界不被恢复绕过。
+
+详见 [执行规范](../../skills/personal/afk-issue-loop/SKILL.md) 与 [上游差异](../research/sandcastle-vs-afk-sequence.md)。
 
 ## 何时使用
 

@@ -84,81 +84,57 @@ flowchart LR
 
 ## 技能一览
 
-### Bootstrap（一次性，每个仓库执行一次）
+按 invocation 分组；Model-invoked 同时支持用户手动调用。TDD 是 implement 的内部引擎，AFK 是独立的批量交付入口。
 
-| 命令 | 职责 |
-|------|------|
-| `/setup-rolex-skills` | 配置 Issue Tracker、Triage 标签、领域文档路径 |
+### User-invoked
 
-### 主交付流（从想法到交付）
+| Skill | 职责 |
+|---|---|
+| [ask-rolex](skills/engineering/ask-rolex/SKILL.md) | 询问哪个 skill 或 flow 适合当前场景。本仓库所有 user-invoked skill 的路由器。 |
+| [grill-with-docs](skills/engineering/grill-with-docs/SKILL.md) | 一场无情的追问，用来打磨方案或设计，同时生成文档（ADR 和 glossary）。 |
+| [implement](skills/engineering/implement/SKILL.md) | "根据 spec 或一组 tickets 实现一项工作。" |
+| [improve-codebase-architecture](skills/engineering/improve-codebase-architecture/SKILL.md) | 扫描代码库找出 deepening opportunities，以可视化的 HTML report 呈现出来，然后对你挑中的那个进行 grilling。 |
+| [setup-rolex-skills](skills/engineering/setup-rolex-skills/SKILL.md) | 配置本仓库的工程 skill：设置 issue tracker、triage 标签词汇和领域文档布局。每个仓库在首次使用其他工程 skill 之前运行一次。 |
+| [to-spec](skills/engineering/to-spec/SKILL.md) | 把当前对话变成一份 spec，并发布到项目的 issue tracker：不做访谈，只综合你们已经讨论过的内容。 |
+| [to-tickets](skills/engineering/to-tickets/SKILL.md) | 将计划、spec 或当前对话拆解为一组 tracer bullet tickets，每张 ticket 声明其 blocking edges，并发布到已配置的 tracker（本地以每张 ticket 一个文件用文本记录 edges，或在真实 tracker 上使用原生 blocking 链接）。 |
+| [triage](skills/engineering/triage/SKILL.md) | 将 issue 和外部 PR 通过一个分类角色 state machine 进行 triage 流转：分类、验证、如有需要，grill（追问澄清），并编写 agent-ready brief。 |
+| [wayfinder](skills/engineering/wayfinder/SKILL.md) | 把一大块工作（超过一个 agent 会话能容纳的体量）规划为 issue tracker 上共享的 decision tickets 的 map，然后逐个解决它们，直到通往 destination 的路清晰可见。 |
+| [afk-issue-loop](skills/personal/afk-issue-loop/SKILL.md) | 处理指定 GitHub Ticket；未指定时批量处理 open `ready-for-agent` Tickets，按依赖实现、审查并流式合并。 |
+| [ask-advisor](skills/personal/ask-advisor/SKILL.md) | 显式把当前决策点交给强模型顾问（strong-model-consultant），获取决策建议。 |
+| [blind-spot-pass](skills/personal/blind-spot-pass/SKILL.md) | 找出用户的 unknown unknowns 并向用户解释。当用户要求 blind spot pass 时使用。 |
+| [qa-plan](skills/personal/qa-plan/SKILL.md) | 根据最近一批 commit 生成 step-by-step QA 测试计划，并保存为 GitHub issue。用户通过 /qa-plan 调用。 |
+| [quiz-me](skills/personal/quiz-me/SKILL.md) | 就一次变更出报告和测验，满分通过才 merge。 |
+| [to-pitch](skills/personal/to-pitch/SKILL.md) | 打包 prototype、spec、implementation notes 成一份争取 buy-in 和批准的文档。 |
+| [to-plan](skills/personal/to-plan/SKILL.md) | 写一份供审阅的 implementation plan，最可能变的决策置顶，机械性工作沉底。 |
+| [vertical-slice-review](skills/personal/vertical-slice-review/SKILL.md) | 审查 ticket 拆解方案是否符合 vertical slice 方法论：逐条判定是否贯穿 schema/API/UI/tests、能否独立 demo、大小能否放进一个 context window，读代码库验证、必要时重拆，并调用 strong-model-consultant 复核。 |
+| [grill-me](skills/productivity/grill-me/SKILL.md) | 一场无情的追问，用来打磨计划或设计。 |
+| [handoff](skills/productivity/handoff/SKILL.md) | 将当前对话压缩为 handoff 文档，供另一个 agent 接续。 |
+| [teach](skills/productivity/teach/SKILL.md) | 在教学工作区内教授用户一项新技能或概念。 |
+| [to-questionnaire](skills/productivity/to-questionnaire/SKILL.md) | 把一个你无法完全回答的决策，变成一个让其他人填写的问题单。 |
+| [wait-what](skills/productivity/wait-what/SKILL.md) | 停下。上一条消息没有说清楚：重新讲一遍。 |
+| [writing-great-skills](skills/productivity/writing-great-skills/SKILL.md) | 技能写作词汇与可预测流程原则。 |
 
-```
-/grill-with-docs → /to-spec → /to-tickets → /implement → /code-review
-```
+### Model-invoked
 
-| 命令 | 触发 | 职责 |
-|------|------|------|
-| `/grill-with-docs` | 手动 | 方案拷问 → 写入 CONTEXT.md（术语表）+ ADR |
-| `/to-spec` | 手动 | 合成 Spec/PRD（Problem/Solution/User Stories/Seams） |
-| `/to-tickets` | 手动 | 拆分为垂直切片 Ticket，声明阻塞关系 |
-| `/implement` | 手动 | 逐一实现 Ticket，内部驱动 TDD → typecheck → 全量测试 → code-review 后提交 |
-| `/code-review` | 自动/手动 | 双轴并行：Standards（规范） + Spec（需求吻合度） |
-
-> `tdd` 是 implement 内部引擎，不是独立步骤。
-
-### 接入主链的入口
-
-| 命令 | 触发 | 职责 | 接入点 |
-|------|------|------|--------|
-| `/wayfinder` | 手动 | 超大模糊项目 → 决策地图 → 迷雾清除 | 接入 `/to-spec` |
-| `/triage` | 手动 | Issue 分类验证 → ready-for-agent | 接入 `/implement` |
-| `/improve-codebase-architecture` | 手动 | 扫描架构问题 → 报告 → 深化方案 | 接入拷问流程 |
-
-### 独立工具
-
-| 命令 | 触发 | 职责 |
-|------|------|------|
-| `/prototype` | 自动/手动 | 一次性原型验证设计想法 |
-| `/diagnosing-bugs` | 自动/手动 | 严谨诊断：tight loop → 假设排序 → 修复 → 回归 |
-| `/research` | 自动/手动 | 一手资料调研，输出带引用的 Markdown |
-| `/resolving-merge-conflicts` | 自动/手动 | 按意图（非文本）解决合并冲突 |
-| `/domain-modeling` | 自动/手动 | 打磨领域术语，更新 CONTEXT.md 和 ADR |
-| `/codebase-design` | 自动/手动 | 深度模块设计词汇（module/interface/depth/seam） |
-| `/wizard` | 自动/手动 | 生成交互式 bash wizard，引导人类完成只有他们能执行的步骤 |
-
-### 日常效率
-
-| 命令 | 触发 | 职责 |
-|------|------|------|
-| `/grilling` | 自动/手动 | 拷问原语：一次一问的设计树访谈 |
-| `/grill-me` | 手动 | 无代码库的轻量拷问（/grill-with-docs 无状态版） |
-| `/handoff` | 自动 | 长会话压缩交接文档 |
-| `/teach` | 手动 | 跨 session 长期教学 |
-| `/to-questionnaire` | 手动 | 把无法独自回答的决策变成问卷，交给别人填写 |
-| `/wait-what` | 手动 | 上一条消息没讲清楚时的纠正 |
-| `/writing-for-agents` | 自动/手动 | 面向 agent 的文档写作参考（skill、AGENTS.md、CLAUDE.md） |
-| `/writing-great-skills` | 手动 | skill 编写的共享词汇与原则参考（predictability 等，与 writing-for-agents 互补） |
-
-### 路由器
-
-| 命令 | 触发 | 职责 |
-|------|------|------|
-| `/ask-rolex` | 手动 | 告诉你当前场景该用哪个 skill、什么顺序 |
-
-## 🆕 原创技能 + 工具
-
-**6 个原创 skill**，覆盖 Git 操作到发版的完整运维链：
-
-| 命令 | 职责 |
-|------|------|
-| `/safe-pull` ★ | 安全 git pull + rebase，自动 stash |
-| `/clean-branches` ★ | 清理已合并的本地和远程分支 |
-| `/git-flow-conventions` ★ | 分支命名、commit 格式、发版规范参考 |
-| `/publish-release` ★ | 从 develop 一键发版 |
-| `/qa-plan` ★ | 从 commit 生成 Step-by-Step 测试计划 |
-| **[/afk-issue-loop](skills/personal/afk-issue-loop/SKILL.md)** ★ | 处理指定 Ticket；未指定时批量执行 open `ready-for-agent` Tickets |
-| **技能守卫** |  |  |
-| `hooks/` | grilling/wayfinder 阶段自动阻止写代码的 Claude hooks |
+| Skill | 职责 |
+|---|---|
+| [code-review](skills/engineering/code-review/SKILL.md) | 审查自某个 fixed point（commit、branch、tag 或 merge-base）以来的变更，沿两个轴进行：Standards（代码是否遵循本仓库文档化的编码规范？）和 Spec（代码是否匹配原始 issue/spec 的要求？）。两个并行 sub-agent 分别运行审查并并排报告结果。当用户想要 review branch、PR、进行中的变更，或要求 "review since X" 时使用。 |
+| [codebase-design](skills/engineering/codebase-design/SKILL.md) | 用于设计 deep modules 的 shared vocabulary。当用户想设计或改进某个 module 的 interface、寻找 deepening 机会、决定 seam 放在哪里、让代码更可测试或更易被 AI 导航，或当其他 skill 需要 deep-module vocabulary 时使用。 |
+| [diagnosing-bugs](skills/engineering/diagnosing-bugs/SKILL.md) | 针对硬 bug 和 performance regression 的诊断循环。当用户说"诊断"/"调试这个"，或报告有东西坏了/抛异常/失败/慢时使用。 |
+| [domain-modeling](skills/engineering/domain-modeling/SKILL.md) | 构建并打磨项目的 domain model。在讨论代码库术语、编写或编辑 CONTEXT.md、或记录或编辑 ADR 时使用。 |
+| [prototype](skills/engineering/prototype/SKILL.md) | 构建一个 throwaway prototype 来回答设计问题。当用户想确认某个 state model 或 logic 是否合理，或想探索 UI 应该长什么样时使用。 |
+| [research](skills/engineering/research/SKILL.md) | 针对高信任度一手资料调研问题，并将发现作为 Markdown 文件保存在仓库中。当用户希望调研某个主题、查阅文档或 API 事实、或将阅读工作委托给后台 agent 时使用。 |
+| [resolving-merge-conflicts](skills/engineering/resolving-merge-conflicts/SKILL.md) | 当你需要解决进行中的 git merge/rebase 冲突时使用。 |
+| [tdd](skills/engineering/tdd/SKILL.md) | 测试驱动开发（Test-Driven Development）。当用户希望以测试先行（test-first）的方式构建功能或修复 bug、提到 "red-green-refactor"，或需要集成测试时使用。 |
+| [wizard](skills/engineering/wizard/SKILL.md) | 生成一个交互式 bash wizard，引导人类一步步完成只有他们能执行的步骤。用于开通基础设施、设置凭据或 CI secrets、在一个不熟悉的第三方 dashboard 中操作，或运行一次性迁移或切换。不要为 agent 自己能执行的步骤调用它。 |
+| [brainstorm](skills/personal/brainstorm/SKILL.md) | 在一个充满 unknown knowns 的领域发散：列举可能性、产出多个截然不同的方向供用户反应。当用户要求 brainstorm、头脑风暴多个方案，或 grilling 中发现剩下的决策要看到实物才能定时使用。 |
+| [clean-branches](skills/personal/clean-branches/SKILL.md) | "清理本地和远程已合并的 Git 分支。扫描所有本地分支和远程 tracking branches，标记已合并入当前分支的分支，一次性列表让用户勾选确认后删除并验证结果。使用场景包括：分支太多要清理、合并后残留、worktree 未清理、远程 stale branches。当用户提到 清理分支/删分支/整理分支/clean branches/branch cleanup/prune branches/git clean 时务必使用。对于合并后残留的发布分支、废弃的功能分支、已修复的 bugfix 分支尤其适用。" |
+| [git-flow-conventions](skills/personal/git-flow-conventions/SKILL.md) | Git Flow 分支与提交规范参考。 |
+| [pre-implement](skills/personal/pre-implement/SKILL.md) | 在计划或讨论结束、开始实际交付任务时调用：新建并维护 implementation notes，逐步记录实现决策；偏离 plan、spec 时记录 Deviations。 |
+| [publish-release](skills/personal/publish-release/SKILL.md) | 当用户说发版/发布/release/publish/bump version/tag，或准备发布新版本时使用。自动检测 Git Flow（存在 develop）与 Trunk-based（无 develop）两种分支模型，走对应发版流程。 |
+| [safe-pull](skills/personal/safe-pull/SKILL.md) | Git Flow 分支与提交规范参考。 |
+| [grilling](skills/productivity/grilling/SKILL.md) | 对 plan、decision 或 idea 进行无休止的追问。当用户想要压力测试他们的思考，或使用任何 'grill' 触发短语时使用。 |
+| [writing-for-agents](skills/productivity/writing-for-agents/SKILL.md) | 为 agent 撰写文档。在创建或编辑 skill，或修改 AGENTS.md 或 CLAUDE.md 时使用。 |
 
 ## 场景速查
 

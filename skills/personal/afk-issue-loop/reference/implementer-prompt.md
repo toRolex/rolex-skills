@@ -4,7 +4,7 @@
 
 ## 工作目录
 
-控制者已用 Worktrunk 创建或复用 `BRANCH` 的 worktree。进入 `WORKTREE` 后工作；herdr 载体可运行 `wt switch BRANCH` 进入同一 worktree。所有修改、测试和 commits 都发生在这里。
+控制者已用 Worktrunk 创建或复用 `BRANCH` 的 worktree。先读取[现场绑定：角色检查](workspace-binding.md#角色绑定检查)，以 `EXPECTED_DIR=WORKTREE`、`EXPECTED_BRANCH=BRANCH` 验收现场。所有修改、测试和 commits 都发生在这里。控制者同时传入固定 `IMPLEMENTATION_BASE_SHA`；恢复沿用，不随其他 Ticket 合并漂移。
 
 ## 上下文
 
@@ -20,7 +20,7 @@
 2. 用 TDD 完成每个垂直切片：red → green → refactor。
 3. 运行仓库要求的全量测试。
 4. 按独立可回滚的语义单元 commit；commit 描述使用中文。
-5. 自查 `git diff TARGET_BRANCH..HEAD` 只包含本 Ticket 所需改动。
+5. 自查 `git diff IMPLEMENTATION_BASE_SHA..HEAD` 只包含本 Ticket 所需改动；按[安全基线](../REFERENCE.md#状态与槽位)记录当前目标变化。
 
 ## Completion criterion
 
@@ -29,7 +29,7 @@
 - Ticket 的每个验收项均已实现；
 - 对应测试存在且通过；
 - 全量测试通过；
-- 分支相对 `TARGET_BRANCH` 至少有一个 commit；
+- 分支相对固定 `IMPLEMENTATION_BASE_SHA` 至少有一个 commit；
 - commits 为语义原子粒度，worktree 满足 [clean 交接门](../REFERENCE.md#运行时文件与-clean-边界)；
 - merge、Issue 关闭和 Worktrunk 清理留给 Merger。
 

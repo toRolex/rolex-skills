@@ -1,5 +1,7 @@
 # afk-issue-loop 原生 DAG 与自动恢复
 
+> 部分 superseded：barrier、每批 summary 与无条件立即重派已由[流式合并决策](../plans/afk-streaming-merge-implementation-notes.md)替代。现行协议见 [REFERENCE](../../skills/personal/afk-issue-loop/REFERENCE.md)。本文保留历史决定；上游 allSettled 是结束后合并成功部分，不要求全部成功，四槽是本地限制而非模板限制。
+
 AFK 的输入已经由 SPEC 拆成 GitHub Ticket，并通过原生 parent/sub-issue 与 issue dependencies 表达关系。旧 Planner 又从正文推断依赖，旧失败流程停在 `failed` 等待用户；两者分别引入双重真相和无人值守中断。
 
 决定：

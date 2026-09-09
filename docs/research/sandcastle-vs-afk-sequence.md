@@ -1,27 +1,20 @@
 # sandcastle vs afk-issue-loop：现行差异
 
-基准：sandcastle `parallel-planner-with-review`。两者共享四角色、Implementer→Reviewer 同现场串行、跨 Ticket ≤4、barrier Merger、`git merge --no-edit` 与 Merger 统一关闭 Ticket。
+固定基准：mattpocock/sandcastle commit `e99f832f26dc9d245c019a9ddd19fa5dee792427`，`src/templates/parallel-planner-with-review`。本次采用已核验源码事实，不重新联网。共享四角色、同 Ticket Implementer→Reviewer、自改审查和拓扑合并理念；下表区分模板、dogfood 调用层与本地增强。
 
-| 维度 | sandcastle | afk-issue-loop |
+| 维度 | sandcastle 基准 | 本地 AFK |
 |---|---|---|
-| 编排器 | TypeScript `main.mts` | 当前 Claude 会话（控制者） |
-| Planner | 每轮重 plan，输出当前 unblocked | 开头一次，输出完整 Execution DAG 并落盘 |
-| Issue 关系 | Planner 从文本推断 | GitHub 原生 parent/sub-issue 与 `blocked_by` |
-| 输入 | 扫描 open `ready-for-agent` | 显式 Ticket numbers；未给时默认扫描 |
-| 隔离 | sandcastle sandbox + 内部 worktree | subagent/herdr + Worktrunk worktree |
-| 状态恢复 | 失败结果从本轮过滤 | 同 branch/worktree/runbook 无限自动恢复 |
-| 超时 | 引擎 stdout idle timeout | 文件 mtime + reflog watchdog |
-| SPEC | Merger prompt 识别父 PRD | 原生 parent 只供上下文；全部 sub-issues closed 后关闭 |
-| Plan 校验 | Zod 输出校验 | bash+jq schema/拓扑校验 + GitHub live 校验 |
-| Summary commit | 一条 summarizing commit | 每批固定一条 `--allow-empty` summary commit |
+| 输入 | 模板只处理 open Issues | 显式输入或默认 open ready-for-agent；显式初始 CLOSED 标记来源，仅审计跳过 |
+| 建图 | Planner 每轮输出当前 unblocked | 开头一次，原生 parent/sub-issue/blocked_by 递归 DAG |
+| 合并边界 | Promise.allSettled 后过滤失败，合并成功部分；不是成功一个立即 merge，也不要求所有 Ticket 成功 | reviewed 即入队，唯一 Merger 单 Ticket 串行；完整验收即 done、释放槽、启动下游 |
+| 并发 | 模板无固定四槽上限；dogfood 调用并发 4、最多 10 轮 | 执行/恢复/等 merge/授权等待共最多四个 Ticket 槽 |
+| 载体 | sandbox/内部 worktree | 默认 subagent；显式 Herdr；Worktrunk 现场复用；默认不可用等待、不自动换 |
+| 数量确认 | 无 >5 载体确认门 | 同样无该门 |
+| BLOCKED | 无本地这套状态/原因分流协议 | 输入资格终止、现场修正重派、权限/决策等待、可重试执行失败恢复 |
+| 恢复 | 本轮过滤失败；dogfood 有有界外层重跑 | 同现场同 stage、无限证据驱动恢复，受权限、四槽及单写者约束 |
+| 模型 | 无同 stage Sonnet→Opus 升级协议 | 首次可重试失败升级，后续保持；实际接口支持才选择，不可用暂停 |
+| 完成来源 | 无本地 done_source 契约 | initial_closed 与 merged 明确区分，关闭事实不等于合并证据 |
+| 证据与清理 | 上游模板自己的合并流程 | 固定 reviewed/目标/result/test/summary SHA、逐单元恢复，仅清理本次该 Ticket |
+| 校验 | 结构化输出校验 | bash+jq schema/来源/拓扑/槽位及初始 GitHub live 校验 |
 
-AFK 的 Worktrunk 适配：
-
-```text
-新 Ticket       wt switch -c afk/issue-N -b TARGET --no-cd --format=json
-恢复/复用       wt switch afk/issue-N --no-cd --format=json
-查询            wt list --format=json
-合并后清理      wt remove afk/issue-N -D --foreground
-```
-
-现行协议以 `skills/personal/afk-issue-loop/SKILL.md` 与 `REFERENCE.md` 为准；sandcastle 原始源码调研见 `sandcastle-original-design.md`。
+流式合并、四槽硬上限、无限恢复、模型升级与精确恢复记录均是**本地增强**，不称严格对齐上游。历史 ADR/计划中的 barrier 与零重试描述只代表当时决策；现行权威为 [SKILL](../../skills/personal/afk-issue-loop/SKILL.md) 和 [REFERENCE](../../skills/personal/afk-issue-loop/REFERENCE.md)。

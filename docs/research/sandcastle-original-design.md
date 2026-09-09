@@ -1,5 +1,7 @@
 # Sandcastle 原始设计调研笔记
 
+> 现行基准说明：本文主要研究历史 `.sandcastle/run.ts`；其中 MAX_PARALLEL=4、最多10轮属于 dogfood/历史调用层，不能据此声称 `src/templates/parallel-planner-with-review` 模板也有四槽上限。固定 commit `e99f832f26dc9d245c019a9ddd19fa5dee792427` 模板只处理 open、allSettled 后合并成功部分，无本地 >5确认/BLOCKED分流/模型升级。现行本地流式增强见 [差异表](sandcastle-vs-afk-sequence.md)。
+
 > 调研对象：`https://github.com/mattpocock/sandcastle`（本次通过 `git clone --depth 1` 成功获取，随后 `git fetch --unshallow` 拉全 1193 个 commit，因此**读到了完整源码与历史**，非仅 README）。
 >
 > 调研日期：2026-08-16。当前 HEAD = `e99f832`。
