@@ -4,6 +4,10 @@
 
 Reviewer 执行 sandcastle 式**一次性自改**：在 Implementer 的同一 Worktrunk worktree、同一 branch 上审查、修正、测试并 commit。
 
+## 通信
+
+所有载体额外接收 `RUN_ID`、`ROLE`、`STAGE`、`ATTEMPT` 与任务标识。Herdr 模式先读[跨 session 通信协议](peer-messaging.md)：只读握手阶段不执行本模板；身份绑定且收到 TASK/RESUME 后 ACK，再开始业务。进度、问答、阻塞和完成均用 SendMessage 回复已绑定控制者，完成输出作为信封 payload，证据另附；不写 dispatch/runbook。
+
 ## 上下文
 
 1. 先读取[现场绑定：角色检查](workspace-binding.md#角色绑定检查)，以 `EXPECTED_DIR=WORKTREE`、`EXPECTED_BRANCH=BRANCH` 验收现场。

@@ -39,7 +39,7 @@ Planner / Merger 的 `EXPECTED_DIR=REPO`、`EXPECTED_BRANCH=TARGET_BRANCH`；Imp
    ```
 
    从该目录启动常规交互会话，保留正常权限及配置，不加 `--worktree`、`--background` 或跳过权限参数。启动成功不等于现场已通过验收。
-3. 用 `herdr agent prompt "$ROLE_NAME" "$ROLE_PROMPT"` 提交模板路径与参数；登记 pane、agent 名称和可获取的 session 身份，挂 watchdog。用后台 `herdr agent wait` 等待生命周期事件；settled/idle 不等于完成，读取结果并按角色门槛验收。
+3. 按[跨 session 通信协议](peer-messaging.md)用 Herdr 发送只读握手引导，`ListAgents` 发现并核对 peer；收到身份回复、确认现场与实际模型后，才用 `SendMessage` 发送 TASK/RESUME 和完整模板参数。登记 pane、Herdr name、peer name/ref、session 身份和消息结果，挂 watchdog。Herdr wait 仅观察生命周期；settled/idle 不等于完成，业务进度与结果经原生消息接收并验收。
 4. 角色完成信号（Planner 的 `<plan>`，其余角色的 COMPLETE）通过验收后，确认其前台会话及写入子进程退出，再交接现场或推进下一阶段。Herdr 交互角色通常只是 idle，不会因输出完成信号自动退出；按 Herdr 操作契约退出本次角色并核实。只清理本次创建的 pane。
 
 启动异常先核对是否已经产生实例；实例身份不明时不重复启动。运行记录补齐实际现场、branch、绑定结果及阻塞原因；仅当前 attempt 的事件可以推进状态。

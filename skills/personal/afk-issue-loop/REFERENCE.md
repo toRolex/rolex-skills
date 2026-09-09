@@ -62,11 +62,11 @@ GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by?per_page=100&p
 
 ### 进度快照
 
-分派、reviewed 入队、merge 验收、恢复/权限等待和用户询问时，简报 active/4、各 Ticket stage/模型、merge 队列与当前单元、等待原因（依赖/旧写者/授权/四槽/主仓库）。独立任务有空槽继续；无槽如实等，不承诺绕过上限。
+分派、reviewed 入队、merge 验收、恢复/权限等待和用户询问时，分别报告逻辑 Ticket 槽 active/4、已核实的运行角色数（未知则注明未知）、recovering Ticket 数、各 Ticket stage/实际模型、merge 队列与当前单元、等待原因（依赖/旧写者/授权/四槽/主仓库）。运行角色为 0 不代表槽位为空；独立任务有空槽继续，无槽如实等。
 
 ## 协议信号
 
-Planner 输出与磁盘 JSON 相同的 `<plan>`；其余输出 `<promise>COMPLETE</promise>`。信号需同时满足门槛；控制者交叉核实 commits、测试、GitHub 和 Worktrunk。旧/重复通知只归档。
+Planner 输出与磁盘 JSON 相同的 `<plan>`；其余输出 `<promise>COMPLETE</promise>`。信号需同时满足门槛；控制者交叉核实 commits、测试、GitHub 和 Worktrunk。旧/重复通知只归档。Herdr 模式必须先读取[跨 session 通信协议](reference/peer-messaging.md)，按身份握手、消息信封与去重规则收发；SendMessage success/ACK 不代表业务完成，COMPLETE 不代表证据验收或进程退出。该协议同时定义 dispatch 的 peer 绑定与消息日志扩展，载体变更不改变所有权。
 
 ## BLOCKED 分流
 

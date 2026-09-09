@@ -4,6 +4,10 @@
 
 先读取[现场绑定：角色检查](workspace-binding.md#角色绑定检查)，以 `EXPECTED_DIR=REPO`、`EXPECTED_BRANCH=TARGET_BRANCH` 验收现场。plan 落盘到 `REPO/docs/afk-plan.json`。恢复先读 RUNBOOK；仅 plan 尚未验收时续跑。BLOCKED 按[真实原因分流](../REFERENCE.md#blocked-分流)，只有输入资格错误终止；绑定修正后重派、权限等授权，其余可重试失败按[模型与证据](../REFERENCE.md#模型与证据)处理。
 
+## 通信
+
+所有载体额外接收 `ROLE`、`STAGE`、`ATTEMPT` 与任务标识。Herdr 模式先读[跨 session 通信协议](peer-messaging.md)：只读握手阶段不执行本模板、不写 plan；身份绑定且收到 TASK/RESUME 后 ACK，再开始业务。进度、问答、阻塞和 `<plan>` 完成输出均用 SendMessage 回复已绑定控制者，保留消息信封；不写 dispatch/runbook。
+
 ## 目标
 
 把本次 GitHub Ticket 输入及其开放 blocker 递归闭包写成一个可恢复的 Execution DAG。GitHub 原生 parent/sub-issue 与 issue dependencies 是权威；你读取并记录这些关系。

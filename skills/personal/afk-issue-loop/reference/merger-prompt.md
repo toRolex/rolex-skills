@@ -4,6 +4,10 @@
 
 先读[现场绑定检查](workspace-binding.md#角色绑定检查)，EXPECTED_DIR=REPO、EXPECTED_BRANCH=TARGET_BRANCH。主仓库只有当前 Merger 可写业务文件；控制者独占登记的运行记录。旧写者退出才接管。先 Read 单元记录/runbook，保留 merge index、dirty、既有 commits，从中断点继续。
 
+## 通信
+
+所有载体额外接收 `ROLE`、`STAGE`、`ATTEMPT` 与任务标识。Herdr 模式先读[跨 session 通信协议](peer-messaging.md)：只读握手阶段不执行本模板；身份绑定且收到 TASK/RESUME 后 ACK，再开始业务。进度、问答、阻塞和完成均用 SendMessage 回复已绑定控制者，保留消息信封与精确证据。清理前等待控制者明确回复当前 revision/SHA 的证据已持久化，普通 ACK 不足以放行。
+
 ## 输入与恢复门
 
 1. 核对当前单元属于本 run 已实际执行且 reviewed 的 Ticket，所有 blockers done；initial_closed 不进入 Merger。核对 Ticket、branch、worktree 绝对路径、REVIEWED_SHA 与审查证据。

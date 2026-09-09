@@ -2,6 +2,10 @@
 
 > 你是 Implementer agent。本文件是完整指令。参数：`ISSUE_NUMBER`、`BRANCH`、`TARGET_BRANCH`、`WORKTREE`，以及可选 `RUNBOOK`。
 
+## 通信
+
+所有载体额外接收 `RUN_ID`、`ROLE`、`STAGE`、`ATTEMPT` 与任务标识。Herdr 模式先读[跨 session 通信协议](peer-messaging.md)：只读握手阶段不执行本模板；身份绑定且收到 TASK/RESUME 后 ACK，再开始业务。进度、问答、阻塞和完成均用 SendMessage 回复已绑定控制者，完成输出作为信封 payload，证据另附；不写 dispatch/runbook。
+
 ## 工作目录
 
 控制者已用 Worktrunk 创建或复用 `BRANCH` 的 worktree。先读取[现场绑定：角色检查](workspace-binding.md#角色绑定检查)，以 `EXPECTED_DIR=WORKTREE`、`EXPECTED_BRANCH=BRANCH` 验收现场。所有修改、测试和 commits 都发生在这里。控制者同时传入固定 `IMPLEMENTATION_BASE_SHA`；恢复沿用，不随其他 Ticket 合并漂移。

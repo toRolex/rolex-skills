@@ -26,7 +26,7 @@ argument-hint: "[issue-number ...] [mode=subagent|herdr]"
 2. 按[运行时文件与 clean 边界](REFERENCE.md#运行时文件与-clean-边界)检查。新运行生成 `RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$`；恢复按[分派记录](REFERENCE.md#现场所有权与分派记录)核对现场，沿用 run_id、mode、目标分支；仅 plan 已验收时跳过 Planner。
 3. 新运行输入非空即 roots，否则 Planner 扫描全部 open `ready-for-agent`。恢复从已验收 plan 取 roots；Planner 未完成则从分派记录恢复初始输入。
 4. 新运行本地或远程存在 develop 时用 develop，否则 main。检查 gh、jq、wt；角色按[领域上下文](REFERENCE.md#contextmd)读取材料。
-5. 新运行在 Planner 前、恢复在重派前完成[载体选择](reference/workspace-binding.md#控制者选择载体)。Herdr 模式调用 `Skill("herdr")`，需要布局再加载 herdr-instances。
+5. 新运行在 Planner 前、恢复在重派前完成[载体选择](reference/workspace-binding.md#控制者选择载体)。Herdr 模式先检查 `HERDR_ENV=1`，调用 `Skill("herdr")`，再加载[跨 session 通信协议](reference/peer-messaging.md)：Herdr 管生命周期，ListAgents/SendMessage 管业务通信；需要布局再加载 herdr-instances。
 
 **完成标准**：RUN_ID、ISSUE_NUMBERS、MODE、TARGET_BRANCH 已确定且载体可用、现场获授权；否则如实等待。
 
