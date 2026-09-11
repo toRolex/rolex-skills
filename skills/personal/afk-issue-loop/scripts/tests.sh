@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 保留的既有离线 schema/闭包测试；夹具适配批次记录。
-# 旧恢复、Planner、watchdog 专属断言已退役。本次重构未运行本文件。
+# v2 记录工具的离线 schema/闭包测试，不验证 AFK 业务调度。
+# 不作为新运行的开工步骤。
 set -uo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # dispatched-count.sh <plan.json>
+# 仅用于已有 v2 记录；新运行不必为计数创建 plan。
 # 输出当前未 settled 批次的固定成员数，不是进程数或可补位额度。
 set -uo pipefail
 

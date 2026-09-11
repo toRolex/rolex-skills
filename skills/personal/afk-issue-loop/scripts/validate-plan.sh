@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # validate-plan.sh [--expected-run-id ID] [--expected-roots N,N] [--live] <plan.json>
+# 仅核对已有 v2 记录，不是 AFK 新运行的开工步骤。
 # 离线校验 plan schema/拓扑；--live 同时核对 GitHub 原生 parent、labels 与 open blockers。
 set -uo pipefail
 

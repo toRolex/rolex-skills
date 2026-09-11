@@ -1,102 +1,60 @@
-# AFK Issue Loop — Reference
+# AFK Issue Loop 参考
 
-执行顺序见 [SKILL.md](SKILL.md)。本文件定义输入、状态和安全边界；角色只加载自身模板。
+## 输入与依赖
 
-## 输入闭包
+- 显式编号去重；没有编号时，完整分页读取 open `ready-for-agent` Issues。所有读取排除 PR，引用带仓库归属，不能把跨仓同号当成本仓 Ticket。
+- GitHub 原生 blocked-by 是执行依赖。递归纳入初始范围的开放 blocker，每个开放执行节点均须有 `ready-for-agent`；检查完整分页、遗漏节点、自环和循环。每批前刷新候选资格与依赖，不沿用已过时的关闭状态，也不吸入新的无关 Tickets。
+- 父 SPEC 和执行依赖分开处理。用户明确提供的 SPEC 或正文 Parent 链接可作上下文，缺少原生 parent 关联不影响执行资格；SPEC 本身不派实现。只有缺失内容确实影响 Ticket 验收时，才报告具体缺什么，不要求先修 GitHub 父子关系。
+- 正文明确声明的执行 blocker 与原生 blocked-by 不一致时，报告受影响的票，不猜测或擅自创建依赖。`Parent`、`Part of`、背景链接本身不是执行 blocker。
+- 输入读取不完整的票及其依赖者保持阻塞；其余已完整核对的独立票可开工。循环或不合格节点也按受影响范围报告，不把错误当成空列表或无依赖。
+- 初始 CLOSED 只计历史事实，不算本次交付。已知未验收成果即使 Issue 关闭也不能解锁下游；已验证交付只做剩余收尾。明确父 SPEC、无父节点和无开放 blocker 都是正常输入，不需要增加准备角色。
 
-- roots 为显式编号去重，或首次分页扫描的全部 open `ready-for-agent` Issues（过滤 `pull_request`）。显式 PR 是输入错误。
-- 控制者逐个读取完整 Issue、labels、原生 parent 和 blocked-by；递归纳入所有 open blockers。每个开放执行节点必须有 `ready-for-agent`，缺资格报告具体节点，不能当成普通依赖等待。
-- 数组端点用 `gh api --paginate --slurp` 取全页；检查响应结构、仓库归属和状态，失败/截断/非法 JSON 不当空数组。执行节点编号按当前仓库解析，跨仓依赖不受当前编号 schema 支持，明确报告而非误映射。
+Issue 操作用 `gh`；blocked-by、parent、sub-issues 分别使用 GitHub 原生关系。首次执行相应操作时查看已有接口说明即可，完整角色模板和业务代码由实际角色按需读取。
 
-```text
-GET /repos/{owner}/{repo}/issues?state=open&labels=ready-for-agent&per_page=100
-GET /repos/{owner}/{repo}/issues/{number}/parent
-GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by?per_page=100
-GET /repos/{owner}/{repo}/issues/{number}/sub_issues?per_page=100
-```
+## 读取失败
 
-只有明确的无 parent 404 可解释为无父节点；其他读取错误报告。父 SPEC 去重进入 `specs`，不与执行节点重叠；显式 SPEC 或 SPEC blocker 不能作为代码 Ticket 执行。文本依赖缺少相应原生关系、关系自环/循环或缺节点时停止并报告，不猜测补图。
+EOF、超时或临时服务错误出现在无副作用的读取中时，用原有已授权方式最多再试两次，遵守服务要求的等待时间。同一读取的计数跨分步调用保留，不重启整轮来重置次数。耗尽后记录具体请求和未知数据，阻塞受影响范围；这不是 Ticket 实现失败。
 
-初始 CLOSED root 为 `done_source=initial_closed`，不递归其 blockers、不执行/清理历史现场，不计本次交付。closed blocker 通常已满足、不纳入初始边；**本次或相关历史中已知未验收成果优先于 CLOSED**，须核实交付，否则阻塞对应依赖，不用关闭事实冲掉责任。
+权限拒绝、用户停止、认证失败和确定的输入错误不按临时故障重试。需要用户操作时说明具体原因，不自行要求“原协议重启”等确认口令。关闭 Issue、启动角色、merge 等可能已有副作用的操作，结果不明时先核对，不能照此规则盲重发。宿主额外的授权或停止要求仍须遵守。
 
-每批前重新读取候选的资格和完整 live blockers，递归补齐新开放依赖并检查循环。原始 roots 和 `blocked_by` 保留为审计图，新发现边追加且去重；每个节点的 `live_blocked_by` 保存最新有效的开放依赖。初始两者相同，后续旧边删除只从 live 数组移除。审计边的历史并集可能成环，循环检测只针对 live 图；闭包归属通过审计图追溯。就绪依据最新 GitHub 关系与交付账本，不仅看旧图 `done`：重新 OPEN 的 blocker 不沿用旧 done；skipped 和已知未验收成果即使 CLOSED 也不能解锁。当前 live 图有环或新节点不合格则停止建批。默认 roots 本次固定，不每批吸入新的无关 Tickets。
+## 失败与停止
 
-## 状态与批次
+- 正常尝试内允许调试、测试和修正。Implementer、Reviewer 或合并明确失败后，该票加入本次跳过集合，不自动重派、不升级模型；实现或审查失败的分支不进入合并。
+- 本批全部失败就不派 Merger，继续下一批独立就绪任务。未开始的下游记依赖阻塞，不记执行失败。
+- 业务完成、idle、停止请求受理不等于写者退出。交接和清理需要宿主终态、状态查询等覆盖相关写者及其子进程的证据；已有证据足够时不再增加握手或进程演练。
+- 退出未知时，预先定下有限观察次数或期限，到界保留现场并报告。失败归类不释放写入占用；只有能确认不会影响成功项、目标及共享 Git 元数据，才推进独立工作。不同 worktree 路径本身不足以证明隔离。
+- 用户停止的任务保持停止，不能通过恢复、换代理或换工具继续同一工作。用户重新发起任务时按新授权处理，不复活被停止的旧任务。
 
-运行记录分为图 `plan` 与薄的 `dispatch`；以下 schema 是本实现的内部约定，不是 spec 指定的公共 API。`version=2` 明确拒绝旧恢复状态，保留脚本路径以便调用。
+## 运行记录与重新开始
 
-```json
-{
-  "version": 2,
-  "run_id": "20260912T120000Z-12345",
-  "target_branch": "main",
-  "roots": [42],
-  "specs": [],
-  "batch": {"id": 0, "phase": "idle", "tickets": []},
-  "issues": [
-    {"number": 42, "title": "Ticket", "branch": "afk/issue-42", "spec": null,
-     "blocked_by": [], "live_blocked_by": [], "status": "pending", "stage": "implement", "writer": "none"}
-  ]
-}
-```
+你维护一份简短、可在会话续接后找回的运行记录，格式使用当前环境已有方式即可。记录随执行更新，不先生成完整状态框架。它至少包含：
 
-| 字段 | 契约 |
-|---|---|
-| status | `pending` 未尝试（可依赖阻塞）；`dispatched` 当前批实现/审查/等合并；`skipped` 本次失败、不再派；`done` 已验收交付或初始关闭审计 |
-| stage | `implement` / `review` / `merge`；pending 只 implement，done 只 merge |
-| writer | `none` 未启动、`active` 写者活动、`unknown` 退出不明、`exited` 有覆盖写者的退出证据；失败和 writer 独立 |
-| done_source | done 必填 `initial_closed` / `merged`，其他状态不允许；merged 仅证明交付，不要求清理完成 |
-| failure | skipped 必填简短原因；阶段、成果、现场及退出证据在 dispatch 关联 |
-| batch | id 单调递增；phase 为 `idle` / `pipelines` / `merging` / `settled`；tickets 为固定、唯一的最多四个编号 |
+- 本次运行、范围、目标分支、本批成员和阶段；
+- 每票的依赖、执行身份、目录/分支、原始实现基线、审查与合并 SHA、测试结果或证据地址；
+- 本次跳过及原因、写者是否退出、已交付/已关闭/待清理事实。
 
-批次创建后成员不增不换；Implementer→Reviewer 串行，Ticket 间并发。所有管线都得到成功/失败结果才进入 merging；一个批次最多一次 Merger，dispatch 在启动前记录其 intent。settled 后才能建立下一批。skipped 在整个 RUN_ID 下单调累积；旧失败现场退出不明可以跨批保留，**不算下一批成员，但不是释放现场**。
+分派前记本次尝试和现场，返回后关联执行身份；同一阶段的重复结果只处理一次。本次跳过集合跨压缩和续接保留。角色返回自己的成果，你保存调度记录；没有必要为记录另派代理。日志与记录不含凭据，不纳入业务提交，也不覆盖别的运行材料。
 
-计数脚本输出当前未 settled 批次成员数（含本批已失败/等合并项），不是存活进程数或可补位数。另外报告 active/unknown 写者及冻结资源；四是单批 Ticket 容量，不能据逻辑计数判断写入安全。
+用户要求“重新开始”时，建立新运行。只检查本次要用的分支、worktree、目标及直接相关成果，确认没有旧写者；不重建旧调度过程，不恢复旧代理，也不让无关历史挡住全部工作。复用有效 commits 时保留原始实现基线，不用当前 HEAD 隐去已有改动。dirty 或占用不明则保留现场，报告受影响范围。
 
-## 阶段验收
+已关闭但已知未验收的 Ticket，只有在本次授权范围内、资格与依赖满足、原始基线可核对且旧写者退出后，才可开始新尝试；不自动 reopen。已交付仅待关闭或清理的，不再派 Implementer。
 
-- Implementer：验收项实现、固定实现基线可核对、存在可交付变化和语义 commits、要求的测试通过、现场 clean。正常返回、COMPLETE 或单纯有 commit 均不够；无交付变化明确 skipped（原因 no-deliverable），不进入 Merger。
-- Reviewer：完整实现 diff 已审查，正确性/安全/类型/回归/相邻接口问题已修正，要求的全量测试通过且对应 reviewed SHA/tree；记录 review base、reviewed SHA、审查结论及证据路径。Reviewer 无新增 commit 可以成功。
-- Merger 入选：仅本批实现与审查都验收通过、写者已退出的精确分支；实现/审查失败不退回只合实现。目标基线变化由 Merger 复核完整 Ticket diff 和新集成结果，旧测试不能替代新目标验收。
-- 交付：精确 reviewed SHA 在目标历史中，实际 result/summary 与受测 tree 一致、目标 clean，无未解决冲突；Issue 关闭及现场清理单独记录。
+## 测试要求
 
-测试职责针对实际业务 Tickets；遵循用户针对具体 Ticket 的显式测试限制，未测试要如实记录、不能伪造通过或自动弱化其他验收门槛。权限拒绝原样报告动作和范围，不换角色、模型、载体或权限绕过。
+本次授权要求执行的测试须通过。用户明确免测时记录未执行及该限制，不单凭免测判失败，其余验收照常；工具报错或测试失败不能自行改称免测。记录测试命令、实际结果及对应的 SHA/tree，代码改变后重新执行本次要求的测试。
 
-## 记录与再次调用
+## 交付与收尾
 
-控制者独占 plan/dispatch，原子写入。登记本次运行文件的准确绝对路径（例如 `REPO/docs/afk-RUN_ID/` 下 plan、dispatch 和各角色结果），不得暂存进业务 commits；路径已存在先读、不可覆盖用户或其他运行材料。角色只写其独占 `RESULT_PATH`，控制者核对后引用，完整代码日志留在角色或结果文件。
+成功必须有对应成果：实现相对原始基线有可交付改动及 commits，独立审查绑定最终 SHA，合并后的目标包含该 SHA，额外修改经过验证。无可交付变化不进入本次成功集；已验证历史交付只收尾，其余记无交付变化及原因、本次跳过。Reviewer 无新增 commit 不影响已有实现通过审查。单纯返回成功、输出 COMPLETE 或 Issue 已关闭都不够。
 
-薄 dispatch 至少关联：RUN_ID、mode、repo/target、roots；批次成员及 Merger 是否已派；每个 Ticket 的任务身份、stage、模型偏好/实际已知模型、branch/worktree、固定实现基线、审查/交付 SHA、测试与结果地址、失败原因、writer/退出与隔离证据；`delivered`、`issue_closed`、`cleanup` 分别记录。cleanup 可为 pending/done/blocked，不影响 delivered。共享目标另记 writer、最后验收 SHA 及未验收修改。
+只有实际交付的 Ticket 才能关闭。Merger 只能最终返回、无法自行保存时，你保存并核对其逐票证据，再直接关闭已交付项，继续收尾与下一批，不为关闭重新派 Merger。
 
-分派前写 intent，启动后补宿主稳定 task ID。启动报错且副作用未知先只读核对，不重复派发。通知以 run+batch+Ticket（Merger 为批次）+stage+task ID 关联；该阶段已处理则重复/旧通知不再推进。无需新信封、双向消息总线或中途 ACK。正常路径使用宿主现有启动和通知；单顶层 workflow 必须包含完整批次循环。
+你核对交付和写者退出后，只清理归属明确、tip 与记录一致且 clean 的 worktree。清理前，唯一的交付、审查和测试证据须已保存在清理范围之外，且后续调用可核对；只留下指向待删目录的地址不够。clean 只豁免准确登记的运行文件，不豁免所有未跟踪文件。清理失败单独报告，不撤销交付，也不重做实现。
 
-同次续接保留所有 skipped、批次边界及任务 ID，查询既有任务，不重复发送工作。下一次明确调用才重新评估失败 Ticket：读 GitHub、refs、原始基线、成果和相关占用；活着的旧任务不接管、不复写。已有有效 commits 可在确认退出、所有权和新尝试基线后利用，不能把当前 HEAD 伪装为原始实现基线。dirty 不自动覆盖/清空。
+目标有冲突、未知写者或未验收修改时，停止后续合并并保留现场；不能用 reset/abort 掩盖问题。保留已验收的部分成果，不把整个批次算成功。不 push、不建 PR、不自动同步 origin。
 
-旧 version=1/recovering/runbook 只供事实核对，不机械迁移成新任务，不修改正在运行的旧会话。仅冻结有关系的 branch/worktree/目标资源；无关历史不阻塞所有新工作。已证明 delivered 的成果不重新实现；待关闭、待清理只做必要安全收尾。已关闭未验收仍保留交付责任。
+你负责核对涉及的 SPEC：完整分页读取原生子票集合，非空、全部 CLOSED 且没有已知未验收成果时才关闭。仅有正文 Parent 链接而无法确认完整子票集合时，保留 SPEC 开放，不影响已核实 Tickets 的交付。
 
-再次调用遇到 CLOSED 但账本已知未验收：首次 live 快照中的 `initial_closed` 只证明关闭事实，不能解锁依赖或计交付。先将该审计事实与旧证据保存在 dispatch；只读核对可证明已经交付则仅收尾。若仍需尝试，仅当 Ticket 属于本次明确输入/授权闭包、有 `ready-for-agent` 资格、原始基线与现场归属可核对、旧写者已退出且当前依赖满足时，控制者在运行中将其转为 `pending/implement`、移除 `done_source` 并沿用已核对成果，采用离线结构校验及 live 关系核对。缺任一条件则保留未验收责任并报告阻塞；不自动 reopen Issue，不把任意 CLOSED 输入都重新执行。同次调用已经 skipped 的项不适用此转换。
+## 已有脚本
 
-## 有限停止与隔离
-
-明确失败立即 skipped；仍在正常尝试中的调试测试可继续，但失败后不再启动替代 Implementer、Reviewer 或 Merger，不自动升级模型。普通工具安全失败处理不等于重跑 Ticket，副作用未知先核对。
-
-失败需停止时，使用宿主原生停止/状态机制；在开始观察时记录有限期限或有限观察次数及依据，按宿主可用终止机制选择，不反复延长。到界仍不明则 writer=unknown、保存现场和相关证据，返回可见阻塞；不把文件 mtime、idle、STOP 受理或业务 COMPLETE 当退出。
-
-宿主明确保证覆盖相关写者及子进程的终态通知可作为退出证据，不强制额外握手/进程探针；保证不覆盖的外部写者需另核实。同现场交接/清理必须先确认旧写者退出。
-
-allSettled 等管线分类，不无限等未知退出。仅在**已知隔离边界证明未知写者无法影响成功项、目标分支及相关共享 Git 元数据操作**时，才合并独立成功集并建下一批；不同 worktree 路径本身不证明隔离，因为 refs/元数据共享。无法证明则有限观察后结束并报告阻塞，保留全部受影响占用。目标存在冲突、未知写者或未验收修改时暂停后续合并；不 reset/abort 来掩盖失败，也不往污染现场叠加。
-
-## Clean 与收尾
-
-Clean 指除准确登记的运行文件外，无未提交/暂存差异、未跟踪交付物或未解决 merge；不豁免整个 docs/ 或所有 untracked。新目标现场 dirty 则报告，不擅自清空。Git 管 refs/commit/merge，Worktrunk 管 worktree 生命周期；操作时加载对应 skill，串行处理共享元数据。
-
-Merger 将每项交付证据写到独占结果文件后再关闭对应 Issue，不关闭其他 Ticket。控制者最终通知后核对并持久化，确认写者退出才负责机械清理：只移除已交付、归属明确、tip 与记录一致、clean 的登记现场，保留其他运行/初始关闭历史现场。清理失败记录 blocked 并结束该项收尾，不重派业务。保留可寻址交付凭据，不能删除唯一证据后靠 summary message 猜测成功。
-
-沿用不 push、不创建 PR、不自动同步 origin 的交付边界。SPEC 关闭由控制者按主流程单独核对。
-
-## Scripts
-
-- `validate-plan.sh [--expected-run-id ID] [--expected-roots N,N] [--live] PLAN`：内部 schema、批次、唯一性、闭包与无环；live 只校验首次 pending/initial_closed 快照。运行中 live 资格、文本关系冲突、隔离、SHA/测试真实性和跨快照状态单调性由控制者核对，静态校验不能证明业务验收。
-- `dispatched-count.sh PLAN`：先离线校验，再输出当前未 settled 批次成员数；不授权补位或回收现场。
-
-`tests.sh` 仅保留既有离线结构/闭包断言并适配夹具，旧协议部分退役；本次未新增或运行测试，不作新批次流程已验证的依据。
+`scripts/validate-plan.sh` 和 `scripts/dispatched-count.sh` 仅用于核对已有 v2 JSON 记录，`scripts/tests.sh` 检查这些脚本。它们不是新运行的开工步骤，不要求为调用它们先创建 plan/dispatch，也不能用通过 schema 校验代替真实开工或交付验收。
