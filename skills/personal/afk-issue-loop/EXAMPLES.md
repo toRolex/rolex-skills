@@ -1,72 +1,72 @@
 # AFK Issue Loop 示例
 
-具体演练；权威契约见 [REFERENCE.md](REFERENCE.md)。
+以下是调度说明，**不是本次运行过的测试**。权威边界见 [REFERENCE.md](REFERENCE.md)。
 
-## 原生关系与初始 CLOSED
+## 原生关系与初始关闭
 
-运行 `/afk-issue-loop 42 44 45`。#42 初始 CLOSED，#44 blocked by #43，#43/#44/#45 open ready-for-agent，#45 独立。
+调用 `/afk-issue-loop 42 44 45`：#42 初始 CLOSED；#44 blocked by #43；#43/#44/#45 open ready-for-agent；#45 独立。
 
 ```json
 {
-  "version": 1,
-  "run_id": "20260829T120000Z-12345",
+  "version": 2,
+  "run_id": "20260912T120000Z-12345",
   "target_branch": "main",
   "roots": [42, 44, 45],
   "specs": [],
+  "batch": {"id": 0, "phase": "idle", "tickets": []},
   "issues": [
-    {"number": 42, "title": "Closed input", "branch": "afk/issue-42", "spec": null, "blocked_by": [], "status": "done", "stage": "merge", "done_source": "initial_closed"},
-    {"number": 43, "title": "A", "branch": "afk/issue-43", "spec": null, "blocked_by": [], "status": "pending", "stage": "implement"},
-    {"number": 44, "title": "C", "branch": "afk/issue-44", "spec": null, "blocked_by": [43], "status": "pending", "stage": "implement"},
-    {"number": 45, "title": "B", "branch": "afk/issue-45", "spec": null, "blocked_by": [], "status": "pending", "stage": "implement"}
+    {"number": 42, "title": "Closed input", "branch": "afk/issue-42", "spec": null, "blocked_by": [], "live_blocked_by": [], "status": "done", "stage": "merge", "writer": "none", "done_source": "initial_closed"},
+    {"number": 43, "title": "A", "branch": "afk/issue-43", "spec": null, "blocked_by": [], "live_blocked_by": [], "status": "pending", "stage": "implement", "writer": "none"},
+    {"number": 44, "title": "C", "branch": "afk/issue-44", "spec": null, "blocked_by": [43], "live_blocked_by": [43], "status": "pending", "stage": "implement", "writer": "none"},
+    {"number": 45, "title": "B", "branch": "afk/issue-45", "spec": null, "blocked_by": [], "live_blocked_by": [], "status": "pending", "stage": "implement", "writer": "none"}
   ]
 }
 ```
 
-#42 只计入初始关闭跳过审计，不称已合并，不创建/清理其历史 worktree。仅作为 closed blocker 而非显式输入时不出现在 plan。
+#42 只计关闭审计，不称本次交付、不创建或清理历史 worktree。父 SPEC 只入 specs。#43 缺资格、某页读取失败、文本 blocker 未录入原生关系、PR 输入或图有环，均报告具体输入错误，不空图成功。
 
-## A→C，B 独立：即时合并
+## A→C，B 独立：固定批次
 
-1. #43(A)、#45(B) 占 2/4 槽。#44(C) 等 A done。
-2. A Implementer 完成，退出后同现场 Reviewer；A reviewed 后固定 SHA，立即排队。B 可仍在实现或 recovering。
-3. 唯一 Merger 在主仓库处理 A：核对精确 reviewed SHA/目标基线，拓扑 merge，全量测试，summary，关闭 A，持久化证据，仅清理 A。
-4. 控制者完整验收且 Merger 退出，A 标记 done_source=merged、释放槽，**立即启动 C，不等 B**。A 若清理失败保持 merge/recovering，C 仍 blocked。
-5. B reviewed 后排队；目标因 A 前进，B 合并前复核新的集成基线与完整验收，再全量测试。
+1. 批 1 固定 `[43,45]`，一起启动两个真实 Implementer；无探测。#44 等依赖。
+2. A 实现验收、退出后立即 Reviewer；B 仍可实现。A 审查完成后等批末，不能先合并，也不能趁空位启动 C。
+3. B 审查结束，整批 allSettled。A、B 均可验收，启动**一个** Merger，顺序合 A 再 B；B 在新目标上复核并测试。
+4. 核对两项交付，关闭和清理各自登记。批 1 settled 后刷新原生依赖，A 已交付且关闭才解锁 C；批 2 才启动 C。
+5. A 清理失败但交付/关闭已验证且现场安全：标待清理，不重做 A，不单因清理阻塞 C。
 
-四个 Ticket 均 recovering 或等 merge 时没有空槽；报告 4/4 等待，不能新开第五个。Merger 恢复占用主仓库期间，不再派第二 Merger；独立实现/审查使用剩余槽推进。
+若五个独立 Tickets 就绪，批 1 只取前四个；其中任何项先结束也不补第五个。计数仍为固定四成员，直到批 1 settled；存活角色数单独报告。
 
-## 首次失败升 Opus
+## 局部失败与全失败
 
-C Implementer watchdog 超时。先核实停滞、停止旧实例并确认写入子进程退出；文件没变但长测试有输出时只重挂 watchdog。
+批 1 `[A,B]`：A Implementer 明确失败，记录 `skipped/implement`、原因、原始基线/成果地址和 `writer=exited`；B 正常审查。allSettled 后唯一 Merger 只合 B。下一批跳过 A，A 的下游依赖阻塞，无关就绪任务继续。上下文压缩后仍是同 run，不重新选 A。
+
+A、B 全失败或全无可交付变化：成功集为空，不启动 Merger，结束本批再选择剩余就绪项。Reviewer 无新增 commit，但完整审查及测试通过，仍可进入成功集；Reviewer 失败则不能只合 Implementer commits。
+
+下一次用户明确调用才重新评估 A；先核对旧进程、现场、原始实现基线和有效 commits，不能用当前 HEAD 掩盖既有实现范围。
+
+## 未知退出与局部冻结
+
+A 失败且停止仅返回“请求受理”：A 可 skipped，但 writer=unknown，现场仍占用。按宿主机制记录有限观察边界，到界不再延长。
+
+- 有可信隔离证据证明 A 不影响 B、目标及相关共享元数据，B 可在批末合并；A 现场跨批冻结，不启动同现场替代写者。
+- 只知道不同 worktree 路径，无法证明共享 refs/元数据隔离：不强合 B，保存成功成果后返回安全阻塞，不无限等退出。
+- 宿主最终通知明确保证所有相关写者退出：接受该证据，正常交接，无额外 ACK/进程探针要求。
+- 目标存在未解决冲突、未验收 commits 或未知 Merger 写者：冻结目标，停止后续合并，不以 skipped 释放主现场。
+
+## 批次 Merger 部分成功
+
+清单 `[A,B,C]`：A 已合并、复核测试及 summary 证据保存，关闭成功；B merge 后测试失败，目标留下未验收提交；C 尚未处理。
+
+逐项记录 A delivered、B/C 本次 skipped，目标污染明确阻塞。不能用整批 FAILED 抹掉 A，也不能再次派 Merger 重试 B/C。A 的交付事实不意味着污染目标可以继续使用。
+
+若仅 A 关闭失败：A 保留 delivered，记待关闭；目标安全时仍可处理 B/C。若最终通知丢失，控制者只读核对 RESULT_PATH 与真实 refs/GitHub，不盲重发合并或关闭副作用。证据先落盘，最终通知后控制者再清理，无需 Merger 中途等 durable ACK。
+
+## 最终报告示意
 
 ```text
-branch: afk/issue-44
-worktree: /path/to/afk-issue-44
-stage: implement
-retryable_failures: 1
-requested_model: opus
-actual_model: 待分派后核实
-error: AgentIdleTimeoutError
-summary: 已核实旧实例停滞并退出
-commits: a1b2c3d 实现 debug 输出骨架
-next_action: 保留已有骨架，从失败测试与日志继续
+部分完成：批次 2；交付 3；初始关闭审计 1。
+本次跳过：#43 implement 测试失败；下游 #44 依赖阻塞。
+待关闭：#45（权限拒绝，保留原错误）；待清理：#46（现场移除失败）。
+退出未知：#47，现场 /repo-wt/afk-47，已达有限观察边界。
+证据：<运行记录绝对路径>；目标 SHA：<最后验收提交>。
+未安全结束不计成功；下次明确调用再评估失败项。
 ```
-
-原 worktree、原 stage、原槽重派 Implementer；接口确实支持 Opus 才设置并登记 actual_model。失败再次发生追加证据与下一动作，保持 Opus、无次数上限；相同失败无新证据先诊断或等待。新 Reviewer stage 默认 Sonnet，自己的首次可重试失败才升 Opus。Opus 不可用则该角色暂停报告，独立任务仍可继续。
-
-Merger 失败按单元保存 merge stage 计数和模型；即使 summary 已存在，也须核对精确 result/test/summary SHA 与关闭、清理状态，不能凭 message 跳过测试。
-
-## 现场绑定与 BLOCKED
-
-- 默认 subagent 强制另建隔离 worktree：明确缺失现场复用能力并等待，不自动 Herdr；超过五个 Ticket 也无载体确认门。
-- 显式 mode=herdr：环境与接口可用才启动，保持正常权限；实际 model 从接口核实。
-- 同 Ticket 交接：Implementer 退出后同路径 Reviewer；旧交互会话仅 idle 先退出核实；恢复保留 commits/runbook。
-- 历史 #5 式拒绝：预期 Studio.afk-issue-5，实际 Studio/.claude/worktrees/agent-*，返回 WORKTREE_MISMATCH，零业务写入；现场修正并获必要授权才重派。Read 成功不能代替 Git/写入授权。
-- 嵌套简化：子代理只读返回建议，当前唯一 Implementer 写入/测试/commit。
-- Planner 报 open blocker #41 缺 ready-for-agent：INPUT_INELIGIBLE，终止且不覆盖/执行旧 plan。
-- Planner 绑定错误：不是标签缺失，修正后原角色重派、不升模型。Planner 授权拒绝：等用户授权，不通过换载体绕过。
-
-## 中断与收尾
-
-合并后、关闭前中断：从受测 SHA 与 summary SHA 恢复关闭；关闭后、清理前中断：只验收并清理该单元；分支已删则用持久化精确 SHA 验证 ancestor。证据不足保留现场诊断。
-
-所有实际执行 Ticket 完成后，分页查询 SPEC 的全部 sub-issues，全 CLOSED 才关闭 SPEC。只清理本次登记且用途完成的运行文件，其他活动 worktree 不动；分别报告执行完成与初始关闭跳过数，提示 review/QA。
