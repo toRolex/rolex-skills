@@ -51,8 +51,8 @@ if [ ! -f "$plan" ]; then
   echo "validate-plan: 文件不存在: $plan" >&2
   exit 1
 fi
-if ! jq empty "$plan" 2>/dev/null; then
-  echo "validate-plan: 不是合法 JSON: $plan" >&2
+if ! jq -se 'length == 1 and (.[0] | type == "object")' "$plan" >/dev/null 2>&1; then
+  echo "validate-plan: 必须恰好包含一个 JSON object: $plan" >&2
   exit 1
 fi
 
@@ -60,7 +60,7 @@ if ! errors=$(jq -r '
   def positive_integer: type == "number" and . > 0 and floor == .;
   def issue_numbers: [.issues[].number];
   def duplicate_values: group_by(.) | map(select(length > 1) | .[0]);
-  def valid_status: . == "pending" or . == "dispatched" or . == "recovering" or . == "done";
+  def valid_status: . == "pending" or . == "dispatched" or . == "skipped" or . == "done";
   def valid_stage: . == "implement" or . == "review" or . == "merge";
   def walk_blockers($by_number; $seen; $frontier):
     ($frontier | map(. as $n | select(($seen | index($n)) == null)) | unique) as $new
@@ -73,16 +73,27 @@ if ! errors=$(jq -r '
       end;
 
   if type != "object" then "plan 顶层必须是 object"
-  elif (.version != 1) then "version 必须是 1"
+  elif (.version != 2) then "version 必须是 2；旧记录只供核对，不自动恢复"
   elif (.run_id | type) != "string" or (.run_id | length) == 0 then "run_id 缺失或不是非空字符串"
   elif (.target_branch != "main" and .target_branch != "develop") then "target_branch 必须是 main 或 develop"
   elif (.roots | type) != "array" then "roots 缺失或不是数组"
   elif (.specs | type) != "array" then "specs 缺失或不是数组"
   elif (.issues | type) != "array" then "issues 缺失或不是数组"
+  elif (.batch | type) != "object" then "batch 缺失或不是 object"
+  elif (.batch.id | type) != "number" then "batch.id 必须是非负整数"
+  elif (.batch.id < 0 or (.batch.id | floor) != .batch.id) then "batch.id 必须是非负整数"
+  elif (.batch.phase != "idle" and .batch.phase != "pipelines" and .batch.phase != "merging" and .batch.phase != "settled") then "batch.phase 非法"
+  elif (.batch.tickets | type) != "array" then "batch.tickets 必须是数组"
+  elif (.batch.tickets | all(positive_integer) | not) then "batch.tickets 含非正整数"
+  elif (.batch.tickets | duplicate_values | length) > 0 then "batch.tickets 重复"
+  elif (.batch.tickets | length) > 4 then "单批 Ticket 超过 4"
+  elif (.batch.phase == "idle" and (.batch.id != 0 or (.batch.tickets | length) != 0)) then "idle 仅用于空初始批次"
+  elif (.batch.phase != "idle" and (.batch.id == 0 or (.batch.tickets | length) == 0)) then "非 idle 批次必须有正 id 和成员"
   else
     (.issues | map({key: (.number | tostring), value: .}) | from_entries) as $by_number
     | (issue_numbers) as $numbers
     | .roots as $roots
+    | .batch as $batch
     | ([.specs[].number]) as $spec_numbers
     | (
         [
@@ -91,7 +102,15 @@ if ! errors=$(jq -r '
           (if ($numbers | duplicate_values | length) > 0 then "issues.number 重复: \($numbers | duplicate_values | join(", "))" else empty end),
           (if ($spec_numbers | duplicate_values | length) > 0 then "specs.number 重复: \($spec_numbers | duplicate_values | join(", "))" else empty end),
           (.roots[] as $root | select(($numbers | index($root)) == null) | "root issue \($root) 不在 issues 中"),
-          (if ([.issues[] | select(.status == "dispatched" or .status == "recovering")] | length) > 4 then "Ticket 槽位超过 4" else empty end),
+          ($batch.tickets[] as $n | select(($numbers | index($n)) == null) | "batch 引用不存在的 Ticket \($n)"),
+          (.issues[] as $i | select($i.status == "dispatched") |
+            if ($batch.tickets | index($i.number)) == null or ($batch.phase != "pipelines" and $batch.phase != "merging")
+            then "issue \($i.number): dispatched 必须属于当前活动批次" else empty end),
+          ($batch.tickets[] as $n | $by_number[$n | tostring] as $i |
+            if $i.status == "pending" or $i.done_source == "initial_closed" then "batch Ticket \($n) 尚未派发或只是关闭审计"
+            elif $batch.phase == "merging" and $i.status == "dispatched" and ($i.stage != "merge" or $i.writer != "exited") then "batch Ticket \($n): 合并前必须 reviewed 且退出"
+            elif $batch.phase == "settled" and ($i.status != "done" and $i.status != "skipped") then "batch Ticket \($n): settled 必须逐项有结果"
+            else empty end),
           ($spec_numbers[] as $s | select(($numbers | index($s)) != null) | "SPEC \($s) 同时出现在执行节点中"),
           (.specs | to_entries[] | .key as $k | .value as $s |
             if ($s.number | positive_integer | not) then "specs[\($k)]: number 缺失或不是正整数"
@@ -107,7 +126,16 @@ if ! errors=$(jq -r '
             elif ($i.blocked_by | all(positive_integer) | not) then "issue \($i.number): blocked_by 含非正整数元素"
             elif ($i.blocked_by | duplicate_values | length) > 0 then "issue \($i.number): blocked_by 含重复引用"
             elif ($i.blocked_by | index($i.number)) != null then "issue \($i.number): blocked_by 包含自环"
+            elif ($i.live_blocked_by | type) != "array" then "issue \($i.number): live_blocked_by 必须是数组"
+            elif ($i.live_blocked_by | all(positive_integer) | not) then "issue \($i.number): live_blocked_by 含非正整数"
+            elif ($i.live_blocked_by | duplicate_values | length) > 0 then "issue \($i.number): live_blocked_by 重复"
+            elif ($i.live_blocked_by | index($i.number)) != null then "issue \($i.number): live_blocked_by 包含自环"
+            elif any($i.live_blocked_by[]; . as $b | ($i.blocked_by | index($b)) == null) then "issue \($i.number): live 边必须同时进入审计记录"
             elif ($i.status | valid_status | not) then "issue \($i.number): status 非法"
+            elif ($i.writer != "none" and $i.writer != "active" and $i.writer != "unknown" and $i.writer != "exited") then "issue \($i.number): writer 非法"
+            elif ($i.status == "pending" and $i.writer != "none") then "issue \($i.number): pending 不得有写者占用"
+            elif ($i.status == "skipped" and (($i.failure | type) != "string" or ($i.failure | length) == 0)) then "issue \($i.number): skipped 必须记录 failure"
+            elif ($i.status == "done" and ($i.writer == "active" or $i.writer == "unknown")) then "issue \($i.number): done 仍有未退出 Ticket 写者"
             elif ($i.stage | valid_stage | not) then "issue \($i.number): stage 非法"
             elif ($i.status == "pending" and $i.stage != "implement") then "issue \($i.number): pending 节点的 stage 必须是 implement"
             elif ($i.status == "done" and $i.stage != "merge") then "issue \($i.number): done 节点的 stage 必须是 merge"
@@ -116,12 +144,12 @@ if ! errors=$(jq -r '
             elif ($i.done_source == "initial_closed" and (($roots | index($i.number)) == null or ($i.blocked_by | length) != 0)) then "issue \($i.number): initial_closed 必须是无 blocker 的 root"
             else empty end),
           (.issues[] | .number as $n | .blocked_by[]? as $b | select(($numbers | index($b)) == null) | "issue \($n): blocked_by 引用不存在的 issue \($b)"),
-          (.issues[] as $i | select($i.status != "pending") | $i.blocked_by[]? as $b | select($by_number[$b | tostring].status != "done") | "issue \($i.number): 非 pending 节点的 blocker \($b) 必须 done"),
+          # blocked_by 保留审计边；运行中是否就绪由最新 live 关系与交付账本核对。
           (walk_blockers($by_number; []; .roots) as $reachable | $numbers[] as $n | select(($reachable | index($n)) == null) | "issue \($n) 不在 roots 的依赖闭包中"),
           ({remaining: .issues, done: []}
             | until((.remaining | length) == 0;
                 .done as $done
-                | (.remaining | map(select((.blocked_by // []) | all(. as $b | $done | index($b) != null)))) as $ready
+                | (.remaining | map(select(.live_blocked_by | all(. as $b | $done | index($b) != null)))) as $ready
                 | if ($ready | length) == 0
                   then .cycle = (.remaining | map(.number)) | .remaining = []
                   else .done += ($ready | map(.number)) | .remaining -= $ready
@@ -175,7 +203,7 @@ if [ "$live" -eq 0 ]; then
   exit 0
 fi
 
-if ! jq -e '.issues | all(.status == "pending" or (.status == "done" and .done_source == "initial_closed"))' "$plan" >/dev/null; then
+if ! jq -e '.batch.phase == "idle" and (.issues | all((.status == "pending" or (.status == "done" and .done_source == "initial_closed")) and ((.blocked_by | sort) == (.live_blocked_by | sort))))' "$plan" >/dev/null; then
   echo "validate-plan: live 仅验收初始 pending/initial_closed 快照" >&2
   exit 1
 fi
@@ -195,7 +223,14 @@ if [ -z "$expected_roots" ]; then
     echo "validate-plan: 无法读取默认 ready-for-agent roots" >&2
     exit 1
   fi
-  live_roots=$(jq -c 'add // [] | map(select(has("pull_request") | not) | .number) | unique | sort' <<<"$roots_pages")
+  if ! live_roots=$(jq -ce '
+      def posint: type == "number" and . > 0 and floor == .;
+      if type == "array" and length > 0 and all(type == "array" and all(type == "object" and (.number | posint)))
+      then add | map(select(has("pull_request") | not) | .number) | unique | sort
+      else error("分页响应结构非法") end' <<<"$roots_pages"); then
+    echo "validate-plan: 默认 roots 分页响应不完整或非法" >&2
+    exit 1
+  fi
   plan_roots=$(jq -c '.roots | unique | sort' "$plan")
   if [ "$live_roots" != "$plan_roots" ]; then
     append_error "默认 roots 与 GitHub 不一致（plan=${plan_roots}, GitHub=${live_roots}）"
@@ -207,9 +242,9 @@ while IFS= read -r number; do
     append_error "issue $number: 无法从 GitHub 读取"
     continue
   fi
-  if ! jq -e '
+  if ! jq -e --argjson expected "$number" '
       type == "object"
-      and (.number | type == "number")
+      and .number == $expected
       and (.state == "open" or .state == "closed")
       and (.labels | type == "array")
     ' >/dev/null <<<"$issue_json"; then
@@ -237,10 +272,13 @@ while IFS= read -r number; do
   fi
 
   if parent_json=$(gh api "repos/$repo/issues/$number/parent" 2>&1); then
-    live_parent=$(jq -r '.number' <<<"$parent_json")
+    if ! live_parent=$(jq -er 'if type == "object" and (has("pull_request") | not) and (.number | type == "number" and . > 0 and floor == .) then .number else error("parent 响应非法") end' <<<"$parent_json"); then
+      append_error "issue $number: parent SPEC 响应非法"
+      continue
+    fi
   else
     case "$parent_json" in
-      *"HTTP 404"*|*"No parent issue found"*) live_parent=null ;;
+      *"No parent issue found"*) live_parent=null ;;
       *)
         append_error "issue $number: 无法读取 parent SPEC"
         continue
@@ -252,14 +290,28 @@ while IFS= read -r number; do
     append_error "issue $number: parent SPEC 不匹配（plan=$expected_parent, GitHub=$live_parent）"
   fi
 
-  blockers_json='[]'
+  blockers_json='[[]]'
   if [ "$state" = "open" ]; then
     blockers_json=$(gh api --paginate --slurp "repos/$repo/issues/$number/dependencies/blocked_by?per_page=100") || {
       append_error "issue $number: 无法读取 blocked_by"
       continue
     }
   fi
-  live_blockers=$(jq -c 'add // [] | map(select(.state == "open") | .number) | unique | sort' <<<"$blockers_json")
+  if ! live_blockers=$(jq -ce --arg repo "$repo" '
+      def valid_issue:
+        type == "object" and (has("pull_request") | not)
+        and (.number | type == "number" and . > 0 and floor == .)
+        and (.state == "open" or .state == "closed")
+        and (.url | type == "string");
+      if type != "array" or length == 0 then error("缺分页")
+      elif (all(type == "array" and all(valid_issue)) | not) then error("blocker 响应非法")
+      else add | if all(. as $i | .url | endswith("/repos/" + $repo + "/issues/" + ($i.number | tostring)))
+        then map(select(.state == "open") | .number) | unique | sort
+        else error("跨仓 blocker 不受当前编号 schema 支持") end
+      end' <<<"$blockers_json"); then
+    append_error "issue $number: blocked_by 分页、PR、仓库或响应结构非法"
+    continue
+  fi
   expected_blockers=$(jq -c --argjson n "$number" '.issues[] | select(.number == $n) | .blocked_by | unique | sort' "$plan")
   if [ "$live_blockers" != "$expected_blockers" ]; then
     append_error "issue ${number}: open blocked_by 不匹配（plan=${expected_blockers}, GitHub=${live_blockers}）"

@@ -1,47 +1,18 @@
 # Reviewer 分派模板
 
-> 你是 Reviewer agent。本文件是完整指令。参数：`ISSUE_NUMBER`、`BRANCH`、`TARGET_BRANCH`、`WORKTREE`，以及可选 `RUNBOOK`。
+你是 Reviewer，在 Implementer 已退出的同一现场一次性审查、自改、测试和 commit。参数：RUN_ID、BATCH_ID、ISSUE_NUMBER、REPO、TARGET_BRANCH、BRANCH、WORKTREE、IMPLEMENTATION_BASE_SHA、REVIEW_BASE_SHA、实现成果地址、RESULT_PATH。
 
-Reviewer 执行 sandcastle 式**一次性自改**：在 Implementer 的同一 Worktrunk worktree、同一 branch 上审查、修正、测试并 commit。
+## 审查与自改
 
-## 通信
+1. 读取 [现场绑定检查](workspace-binding.md#角色绑定检查)，核对 WORKTREE/BRANCH、实现 SHA 和成果地址。读取 Ticket、原生父 SPEC、CONTEXT.md/相关 ADR 与编码规范。
+2. 从固定 IMPLEMENTATION_BASE_SHA 审查完整 Ticket diff；核对 REVIEW_BASE_SHA 的目标上下文，不用浮动 TARGET..HEAD 缩小实现范围。
+3. 逐项检查验收条件和边界行为、测试/回归、类型/安全/错误处理、结构与复杂度、相邻接口及规范一致性。发现问题直接修正，按独立意图 `refine: <中文说明>` commit，保留实现历史。无问题则无需新增 commit。
+4. 运行仓库要求的全量测试，代码改变后重跑。固定最终 REVIEWED_SHA，保证所有审查与测试证据对应这一成果。
 
-所有载体额外接收 `RUN_ID`、`ROLE`、`STAGE`、`ATTEMPT` 与任务标识。Herdr 模式先读[跨 session 通信协议](peer-messaging.md)：只读握手阶段不执行本模板；身份绑定且收到 TASK/RESUME 后 ACK，再开始业务。进度、问答、阻塞和完成均用 SendMessage 回复已绑定控制者，完成输出作为信封 payload，证据另附；不写 dispatch/runbook。
+## 完成边界
 
-## 上下文
+完整 diff 和所有审查维度均覆盖，发现的问题已修复，要求的测试通过且现场 clean，才是可验收成功。正常返回或已有实现 commit 不等于审查通过。
 
-1. 先读取[现场绑定：角色检查](workspace-binding.md#角色绑定检查)，以 `EXPECTED_DIR=WORKTREE`、`EXPECTED_BRANCH=BRANCH` 验收现场。
-2. 读取 Ticket、其原生父 SPEC、`CONTEXT.md` / ADR 与仓库规范。
-3. `RUNBOOK` 存在时先 Read，从当前现场继续。
-4. 读取控制者传入的固定 `IMPLEMENTATION_BASE_SHA` 到 HEAD 的完整 Ticket diff；固定当前 `REVIEW_BASE_SHA`，按[安全基线](../REFERENCE.md#状态与槽位)核对目标变化。完成后报告 reviewed SHA 与 review base SHA，由控制者登记；目标再次前进必须合并前复核，不能沿用旧绿灯。
+先写独占 RESULT_PATH：身份、现场、实现基线、review base、reviewed SHA、逐项审查结论、修正 commits（可空）、测试命令/退出码/受测 SHA 或 tree、遗留问题。退出自己产生的写入进程，再通过原生最终通知返回 `COMPLETE — #N review — REVIEWED_SHA — RESULT_PATH`。
 
-## 审查
-
-逐项检查：
-
-- Ticket 验收项与边界行为；
-- 测试覆盖与回归；
-- 类型、安全、错误处理；
-- 命名、结构、重复与不必要复杂度；
-- 与相邻代码和仓库规范的一致性。
-
-发现问题时直接修正；每个独立改进使用 `refine: <中文说明>` commit。保留 Implementer 的既有 commits。无问题时不创建 commit。
-
-## Completion criterion
-
-以下条件全部成立后输出完成信号：
-
-- 每个审查维度均已检查；
-- 发现的正确性、测试、安全和维护性问题均已修复；
-- 全量测试通过；
-- Reviewer 修改已按独立意图 commit；
-- 分支已达到可合并状态，worktree 满足 [clean 交接门](../REFERENCE.md#运行时文件与-clean-边界)。
-
-输出仅两行：
-
-```text
-<promise>COMPLETE</promise>
-DONE
-```
-
-无法满足 completion criterion 时，输出 `DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED` 加一行原因，作为控制者的恢复输入。授权受阻时读取[权限门](../REFERENCE.md#权限门)；其余失败按[自动恢复](../REFERENCE.md#自动恢复)继续。Reviewer 自己完成修正；merge 与 Issue 关闭留给 Merger，远端保持不变。
+无法完成则 `FAILED/BLOCKED — #N review — 原因 — RESULT_PATH`，保留成果和占用事实；本次不再次派 Reviewer，也不能回退为只合实现。你不合并、关闭或清理现场，不 push、不建 PR，不写控制者记录；无需中途 ACK。成功分支等整批 allSettled 后由唯一 Merger 处理。

@@ -1,98 +1,66 @@
 ---
 name: afk-issue-loop
-description: 处理指定 GitHub Ticket；未指定时批量处理 open `ready-for-agent` Tickets，按依赖实现、审查并流式合并。
+description: 按 GitHub 原生依赖成批并行实现与审查 Tickets，批末统一合并成功部分；失败本次跳过。
 disable-model-invocation: true
 argument-hint: "[issue-number ...] [mode=subagent|herdr]"
 ---
 
 # AFK Issue Loop
 
-借鉴 sandcastle 四角色；本地增强为原生 Execution DAG、四槽流式调度与证据驱动恢复。Worktrunk 管理隔离 worktree。控制者只编排，不写实现代码。[上游事实与差异](../../../docs/research/sandcastle-vs-afk-sequence.md)。
+**读取依赖 → 一批并行 Implementer→Reviewer → allSettled → 一个 Merger → 刷新依赖 → 下一批。** 控制者只读业务输入、调度和核对成果，不写实现代码。单批最多四个 Ticket，批内不补位。
 
-## 角色
+## 1. 读取真实任务
 
-| 角色 | 顺序 | 完成边界 |
-|---|---|---|
-| Planner | 开头一次 | plan 通过结构与 GitHub live 校验 |
-| Implementer | 每 Ticket | 全量测试通过、语义原子 commits、COMPLETE |
-| Reviewer | 同 Ticket、Implementer 后 | 同现场一次性自改、全量测试通过、COMPLETE |
-| Merger | reviewed Ticket 即时排队，串行处理 | 精确输入已合并、测试/summary/关闭/仅该 Ticket 清理均验证 |
+1. 解析显式 Ticket 编号；未指定时分页读取全部 open `ready-for-agent` Issues，排除 PR。默认 `mode=subagent`；仅显式选择才用 Herdr。保留用户模型/角色偏好，未指定使用宿主默认，实际不可用时报告原因。
+2. 确定 `REPO`、本次加载目录的绝对 `SKILL_ROOT`、`RUN_ID`、目标分支（本地或远端存在 develop 则 develop，否则 main）。同次压缩/续接沿用运行身份和跳过集合；用户下一次明确调用才建立新运行。
+3. 控制者按 [输入闭包](REFERENCE.md#输入闭包)直接读取原生 blocked-by、父 SPEC 及资格，保存薄记录。原生父 SPEC 只供上下文。输入失败、关系不完整、资格不符或循环，报告具体节点并停止建批，不执行旧图。
+4. 按 [记录与再次调用](REFERENCE.md#记录与再次调用)核对相关旧现场及已交付证据；已交付只处理剩余收尾。按 [现场绑定](reference/workspace-binding.md)在真实分派/写入/交接时检查所需边界。
+5. 首次图使用 `scripts/validate-plan.sh --expected-run-id RUN_ID [--expected-roots N,N] --live PLAN` 校验。默认输入省略 expected-roots。运行中离线校验结构，实时资格和依赖由控制者逐批核对。
 
-角色默认 Sonnet；同一恢复单元同 stage 首次可重试失败升 Opus，详见[模型与证据](REFERENCE.md#模型与证据)。仅在实际分派接口支持时设置模型，不以 prompt 冒充模型选择。
+**完成标准**：输入及开放 blocker 闭包完整、唯一、无环，现场归属明确；或有具体阻塞报告。直接进入真实任务，不启动 Planner、能力探测或握手角色。
 
-## 0. 建立运行参数
+## 2. 固定批次，并行流水线
 
-1. 提取 issue numbers 与 mode；默认 `subagent`，数量超过 5 无额外确认。显式 `mode=herdr` 可用；默认载体无法复用现场时明确报告并等待，不自动改用 Herdr。
-2. 按[运行时文件与 clean 边界](REFERENCE.md#运行时文件与-clean-边界)检查。新运行生成 `RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$`；恢复按[分派记录](REFERENCE.md#现场所有权与分派记录)核对现场，沿用 run_id、mode、目标分支；仅 plan 已验收时跳过 Planner。
-3. 新运行输入非空即 roots，否则 Planner 扫描全部 open `ready-for-agent`。恢复从已验收 plan 取 roots；Planner 未完成则从分派记录恢复初始输入。
-4. 新运行本地或远程存在 develop 时用 develop，否则 main。检查 gh、jq、wt；角色按[领域上下文](REFERENCE.md#contextmd)读取材料。
-5. 新运行在 Planner 前、恢复在重派前完成[载体选择](reference/workspace-binding.md#控制者选择载体)。Herdr 模式先检查 `HERDR_ENV=1`，调用 `Skill("herdr")`，再加载[跨 session 通信协议](reference/peer-messaging.md)：Herdr 管生命周期，ListAgents/SendMessage 管业务通信；需要布局再加载 herdr-instances。
+1. 每批前刷新候选资格与原生依赖；从未尝试且依赖满足的 Ticket 按编号选最多四个，持久化固定批次。失败集合始终排除。相关未知占用按 [有限停止与隔离](REFERENCE.md#有限停止与隔离)处理。
+2. 控制者用 Worktrunk 为入选 Ticket 建立独立 `afk/issue-{N}` 现场，固定 `IMPLEMENTATION_BASE_SHA`。一次派发本批所有真实 Implementer，不等待第一个结果才派其余。每次携带运行/批次/Ticket 身份、模板绝对路径、现场、基线及模型偏好；模板由角色自行读取。
+3. 每个 Implementer 成果验收且写者退出后，立即在同现场启动 Reviewer；其他 Ticket 可以仍在实现。Reviewer 自查、自改并测试；固定 `REVIEW_BASE_SHA`、`REVIEWED_SHA` 与证据位置。
+4. 依 [阶段验收](REFERENCE.md#阶段验收)分类结果。明确失败置 `skipped`，本次不重派；正常尝试内可调试修正。原生最终通知即可工作，无中途 ACK 要求。
+5. **allSettled**：等待本批每条管线审查成功或明确失败；退出未知也可归类失败，但现场仍冻结。所有管线有结果后才建立成功集合，批内空位保持空置。
 
-**完成标准**：RUN_ID、ISSUE_NUMBERS、MODE、TARGET_BRANCH 已确定且载体可用、现场获授权；否则如实等待。
-
-## 1. Planner 建图
-
-所有分派遵守[现场绑定](reference/workspace-binding.md#控制者启动角色)。Planner 首次启动前，主仓库 clean 且旧写者退出，才检出 TARGET_BRANCH：本地已有则 switch；仅远端存在则建立 tracking 分支。失败保留现场报告，不抢占其他 worktree；恢复 dirty 现场先核对所有权。
+分派提示只需以下寻址参数，无需控制者全文加载角色模板。
 
 ```text
-Read ~/.claude/skills/afk-issue-loop/reference/planner-prompt.md 获取完整指令并执行。
-参数：RUN_ID=${RUN_ID}, ISSUE_NUMBERS={逗号分隔，可空}, TARGET_BRANCH=${TARGET_BRANCH}, REPO={主仓库绝对路径}
+直接读取 ${SKILL_ROOT}/reference/implementer-prompt.md 执行真实 Ticket。
+RUN_ID, BATCH_ID, ISSUE_NUMBER, REPO, TARGET_BRANCH, BRANCH, WORKTREE,
+IMPLEMENTATION_BASE_SHA, RESULT_PATH；按宿主接口设置模型偏好。
 ```
 
-Planner 读取原生 parent/sub-issue 与 blocked_by：递归纳入 open blockers；每个 open 执行节点要求 ready-for-agent；parent SPEC 只供上下文。显式 CLOSED root 保留 `done/merge` 并标记 `done_source: initial_closed`，只审计跳过，不声称已合并。
+Reviewer 换用 `reviewer-prompt.md`，额外传实现成果地址和 `REVIEW_BASE_SHA`。通知按稳定任务身份关联、阶段只生效一次。
 
-任何 BLOCKED 先按[真实原因分流](REFERENCE.md#blocked-分流)：输入资格不合格终止且不执行旧 plan；现场身份错误修正后重派；权限等授权阻塞等待。
+**完成标准**：本批每个 Ticket 均已审查可验收或本次跳过；不会因某个失败取消无关管线，也不会因未知退出无限等待。
 
-```bash
-bash ~/.claude/skills/afk-issue-loop/scripts/validate-plan.sh \
-  --expected-run-id "${RUN_ID}" --expected-roots "${ISSUE_NUMBERS}" \
-  --live docs/afk-plan.json
-```
+## 3. 批末一个 Merger
 
-**完成标准**：exit 0，roots 与 open blockers 闭包完整且唯一；登记 plan_accepted=true 后才执行 Tickets。
+1. 成功集合为空：不派 Merger，记录本批结果，进入步骤 4。
+2. 成功集合非空：确认各入选现场已退出、目标分支安全，且失败未知写者与成功集合及目标分支的隔离可证明。无法证明则有限观察后返回阻塞，不强行合并。
+3. 只启动一次 Merger，读取 `reference/merger-prompt.md`，传本批成功集合清单绝对路径、运行/批次身份、目标现场、结果文件地址。Merger 按编号顺序处理分支，目标分支始终单写者。
+4. Merger 返回后逐 Ticket 核对精确 SHA、审查与测试证据、目标实际历史；汇总 COMPLETE 不能证明全部交付。保留已验收成功；未交付部分本次 skipped。目标冲突、未知写者或未验收修改会阻塞后续合并。
+5. **交付、关闭、清理分别登记**。结果与证据先保存，写者退出后才按准确现场清单安全清理；清理失败不撤销交付、不重新实现。具体合并算法只在 Merger 模板维护。
 
-## 2. 流式调度
+**完成标准**：本批每个入选项均有实际交付或失败事实，关闭和残留可区分；Merger 已安全退出或相关现场明确冻结。
 
-每个当前 attempt 通知验收后运行一次控制循环，按[进度快照](REFERENCE.md#进度快照)报告。调度规则以[状态与槽位](REFERENCE.md#状态与槽位)为准。
+## 4. 批末刷新与结束
 
-1. Read plan 和 dispatch，核对通知身份、旧写者退出及阶段门槛。
-2. Implementer 完成推进同现场 Reviewer；Reviewer 完成固定 reviewed SHA 与 review base SHA，置 dispatched/merge 并立即入队。
-3. Merger 空闲且主仓库可安全交接时，从已就绪队列取一个 Ticket 分派步骤 3；不等待其他 Implementer、Reviewer 或 recovering Ticket。
-4. 运行 dispatched-count；从 pending 中选 blocked_by 全部 done 的 frontier，按 issue number 排序，用剩余 `4 - active` 槽即时补位。新 worktree 基于最近已验证目标提交；Merger 正在更新目标时，串行化 Worktrunk 元数据操作，待安全点创建，其他活动角色仍继续。
-5. 没有可分派工作时等待通知：四槽已满如实等待（recovering/授权等待/等 merge 都占槽），不得开第五个。全 done 才收尾；无活动且 pending 无合法 frontier 则校验并报告状态违规。
+1. 上批合并/无成功集处理及核对完成后，再刷新 GitHub 资格、关闭事实和原生依赖，回步骤 2。被 skipped blocker 的下游仍依赖阻塞，不伪造执行失败。
+2. 无可安全推进工作时结束本次调用，保留简短失败与现场证据。下次调用重新评估；上下文压缩不清空本次 skipped。
+3. 对涉及的 SPEC 分页读取全部原生 sub-issues：非空且全部 CLOSED、无本次已知未验收成果，才可关闭 OPEN SPEC；读取失败报告，不推断完成。
+4. 报告本次交付、初始关闭审计、本次跳过、依赖阻塞、退出未知、待关闭/待清理，附批次、SHA/证据和现场地址；区分全部完成、部分失败和安全阻塞。提示后续 review/QA。
 
-### Worktrunk 与交接
+**完成标准**：所有已开始工作有事实归类，未安全结束现场有记录；停止不等于成功。运行记录保留到可安全核对及收尾，不通配删除其他运行材料。
 
-控制者创建/复用 `afk/issue-{N}`，从 `wt switch` JSON 获取绝对路径。新 branch 用 `wt switch -c afk/issue-{N} -b TARGET_BRANCH --no-cd --format=json`；已有 branch 用不带 -c 的 switch。Git 管 commit/merge，Worktrunk 管生命周期。
+## 按需读取
 
-分派前原子登记 Ticket、stage、attempt、模型、现场和 runbook；返回后补任务标识并挂 watchdog。交接确认旧角色及写入子进程已退出。Implementer 至少有相对其固定实现基线的 commit；Reviewer 完成后该 Ticket 仍占原槽。
-
-### 恢复
-
-失败按[自动恢复](REFERENCE.md#自动恢复)保留 branch、worktree、stage、槽位与证据。独立任务使用剩余槽继续，不设置恢复次数上限，也不将“无限恢复”解释为无证据忙重试或绕过权限。
-
-**完成标准**：每个可推进事件均已处理；可用槽已分派或有具体等待原因。无需全体 reviewed 的 barrier。
-
-## 3. 串行 Merger
-
-按[Merger 契约](REFERENCE.md#merger)在主仓库 TARGET_BRANCH 分派唯一 Merger，传入单 Ticket 合并单元及其精确输入。恢复遵守[Merger 恢复](REFERENCE.md#merger-恢复)。主仓库始终单写者。
-
-完成后控制者核对精确 reviewed SHA 的 ancestor、测试对应目标 SHA、summary SHA、GitHub CLOSED、该 Ticket worktree 已移除、主仓库 clean。全部通过且 Merger 退出后原子置 `done/merge, done_source: merged`，释放该槽，立刻回步骤 2 解锁下游。
-
-**完成标准**：该合并单元完整验收；例如 A→C、B 独立，A done 后立刻启动 C，不等 B。A 清理未完成则仍占槽、不解锁 C。
-
-## 4. 收尾
-
-1. 对 plan 中每个 SPEC 分页读取全部原生 sub-issues；全部 CLOSED 且 SPEC OPEN 才关闭。
-2. 全部节点 done；initial_closed 只核对关闭事实、计入跳过审计。仅本次实际执行 Ticket 要求 merge/测试/关闭/清理证据，且只清理其登记的 worktree；其他运行或活动 worktree 保持不动。
-3. 按准确路径清单清理本次已完成用途的 plan、dispatch 与 runbooks；中断或未完成时保留恢复记录。
-4. 分开报告本次完成数、初始 CLOSED 跳过数、merge/summary commits、关闭的 SPEC；提示 code review 与 QA。
-
-**完成标准**：本次执行 Ticket 均完成；初始 CLOSED 不冒充本次合并；本次登记残留已处理，其他现场不受影响。
-
-## 按需 Reference
-
-- 关系、状态、恢复或 watchdog：[REFERENCE.md](REFERENCE.md)
-- 具体场景演练：[EXAMPLES.md](EXAMPLES.md)
-- 角色分派：[planner](reference/planner-prompt.md) / [implementer](reference/implementer-prompt.md) / [reviewer](reference/reviewer-prompt.md) / [merger](reference/merger-prompt.md)
-- 校验与测试：[scripts/](scripts/)
+- 输入、状态、失败、薄记录及脚本：[REFERENCE.md](REFERENCE.md)
+- 角色动作边界：[现场绑定](reference/workspace-binding.md)
+- 角色自加载：[Implementer](reference/implementer-prompt.md) / [Reviewer](reference/reviewer-prompt.md) / [Merger](reference/merger-prompt.md)
+- 调度与异常示例：[EXAMPLES.md](EXAMPLES.md)
