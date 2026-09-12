@@ -1,51 +1,44 @@
 ---
 name: afk-issue-loop
-description: 按 GitHub 依赖分批实现 Tickets，逐票审查，批末合并成功部分；失败本次跳过。
+description: 启动独立本地脚本，分批实现、审查、合并并关闭 GitHub Tickets。
 disable-model-invocation: true
-argument-hint: "[issue-number ...]"
+argument-hint: "[issue-number ...] [provider/model/target]"
 ---
 
 # AFK Issue Loop
 
-你就是调度者，亲自读票、分派和核对结果。**直接派 Implementer，不把本 skill 或整批调度转交给另一个 agent。** 业务代码由 Implementer 实现、独立 Reviewer 审查，Merger 负责批末合并。
+你只负责解析输入、启动独立本地编排进程、报告启动结果。脚本是唯一调度者，通过本机 CLI 执行 Implementer、Reviewer、Merger；发起会话可在确认启动后结束。
 
-```text
-当前 agent
-├─ Implementer A → Reviewer A
-├─ Implementer B → Reviewer B
-└─ 本批结果明确 → 一个 Merger → 刷新依赖 → 下一批
+## 1. 解析启动输入
+
+1. 将本 skill 目录解析为绝对路径，读取公开入口 `node "<skill绝对路径>/scripts/afk.mjs" help`。从当前项目确定目标仓库绝对路径，作为 `--repo`；不是 skill 安装仓库。
+2. 显式 Ticket 编号转为 `--issues 3,4,5`；没有编号则省略，由脚本首次分页读取 open `ready-for-agent`，固定本次范围。用户标明的父 SPEC 传 `--spec`，仅作上下文，不实施或关闭。
+3. 用户指定目标传 `--target`，否则脚本选择已有 develop、其次 main。用户指定执行 CLI 传 `--provider claude|codex|pi`，默认 **claude**，不按调用宿主猜。`--model`、`--effort` 仅在用户明确指定时传入，省略沿用所选 CLI 本机配置。项目验证要求可传 `--verify`。
+4. 从项目约定确定优先级标签，按高到低传 `--priority-labels`；没有约定就省略，全部同级按编号。本仓库目前没有现存项目优先级映射，不能把示例标签当约定。
+5. 只有用户明确确认旧 `afk/issue-N` 分支及现场属于对应票、允许继续时才传 `--reuse N`；同名本身不是接管许可。归属未知保留并报告。
+
+完成条件：目标路径、固定输入及显式选项明确；所需 Node >=22、Git、Worktrunk、GitHub CLI、所选执行 CLI 与授权已准备。平台为 macOS/Linux，运行组件仅用 Node 内置模块，无运行时包下载；缺项或 Worktrunk hooks 审批由用户完成，不自动安装、绕过权限或传 `--yes`。
+
+## 2. 启动独立编排
+
+执行公开命令，以实际绝对路径和已确认选项替换占位：
+
+```sh
+node "<skill绝对路径>/scripts/afk.mjs" start --repo "<目标仓库绝对路径>" --issues 3,4,5
 ```
 
-使用当前 harness 已有的委派和结果获取方式，遵守其调用约束及用户指定的模型。需要创建现场或查询执行接口时，读 [工作现场](reference/workspace-binding.md)。
+等启动握手返回，入口握手最多 120 秒；普通前置命令默认 30 秒期限，挂起须可见失败，两者都不是角色总运行时长。启动失败报告错误及已有日志位置；不要把普通后台工具任务当独立编排，也不回退为宿主原生子代理或另一个 LLM 总调度者。读票、选批、worktree、接力、等待和下一批均由脚本执行。
 
-## 1. 选票
+完成条件：公开入口实际返回 `started` 及运行身份；仅创建文件或发出启动请求不算成功。
 
-1. 有编号就读取指定 Tickets；否则分页读取所有 open `ready-for-agent` Issues，排除 PR。按 [输入与依赖](REFERENCE.md#输入与依赖)核对原生 blocked-by、开放 blocker 闭包、资格和循环；父 SPEC 的处理也在该处。
-2. 确定目标分支：用户指定优先，否则本地或远端有 develop 就用 develop，没有则 main。从依赖已满足的未尝试 Tickets 中按编号选最多四个，固定本批成员；一票就绪也可开工。
-3. 在简短 [运行记录](REFERENCE.md#运行记录与重新开始)中记下本批。读取临时失败按 [读取失败](REFERENCE.md#读取失败)处理；需要复用旧现场或用户要求重新开始时，只核对该记录章节规定的相关事实。
+## 3. 报告已启动
 
-完成条件：每个入选 Ticket 的执行资格和依赖均已确认，本批成员已记录。未知或不满足的项有具体阻塞原因，未被当成就绪票。
+报告返回的运行身份、目标仓库/分支、日志目录及原样可用的 `status`、`stop` 命令。日志归目标仓库 `.afk/logs/`；说明 **已启动不等于 Tickets 已交付**，最终进展与结果由脚本记录，用户可在发起会话结束后查看。
 
-## 2. 直接派发 Implementer
+`stop` 的停止请求受理不等于角色已结束；以后续 `status` 确认最终停止，未知状态保留现场。独立运行不承诺关机或重启恢复。
 
-1. 按 [工作现场](reference/workspace-binding.md#分派)用 Worktrunk 为本批各票建独立 worktree，记录原始实现基线。
-2. 按 [Implementer 模板](reference/implementer-prompt.md)，直接派出各票实现者，给出 Ticket、目录、分支、固定基线、目标分支、必要材料及模型要求。让本批各票并发工作，不等第一票结束再派其余。
+完成条件：启动身份、日志、查看与停止方式均已告知，此 skill 任务结束。
 
-完成条件：本批各票的真实 Implementer 已启动，任务与现场可以关联；未能启动的项已有失败或阻塞记录。准备清单、记录或调用脚本不算启动实现。结果未知时按 [失败与停止](REFERENCE.md#失败与停止)处理。
+维护运行 prompt 时读 [Implementer](reference/implementer-prompt.md)、[Reviewer](reference/reviewer-prompt.md)、[Merger](reference/merger-prompt.md)：三份是固定上游的逐段中文版，仅作必要本机与 AFK 适配；不再有 common 层。启动握手前从 skill 内读取三 MD，缺失、不可读或空白使启动失败；角色启动前展开可信模板中的 Git 命令，自动注入 Implementer 最近十条提交、Reviewer 完整 diff/log，失败可见。任务参数只作单次替换的数据，命令插参安全转义；结果短协议由引擎附加，职责不在代码重复定义。
 
-## 3. 逐票接力审查
-
-1. 某票实现结束，核对提交、测试结果及写者退出后，立即按 [Reviewer 模板](reference/reviewer-prompt.md)派独立审查者接手同一现场；其他票继续实现。
-2. Reviewer 直接修正问题、测试并提交。明确失败按 [失败与停止](REFERENCE.md#失败与停止)记为本次跳过，无关票继续。批内成员保持不变，不补新票。
-
-完成条件：本批每票均有绑定精确 SHA 的审查通过结果，或明确的失败/阻塞结果。退出不明的现场保持占用；实现或审查失败的分支不进入成功集。
-
-## 4. 批末合并与下一批
-
-1. 成功集为空则结束本批。有成功集时，确认目标现场及写者隔离安全，派一个 [Merger](reference/merger-prompt.md) 顺序合并本批成功分支。
-2. 按 [交付与收尾](REFERENCE.md#交付与收尾)逐票核对实际合并、测试、Issue 关闭及现场清理结果，登记部分成功和待收尾事项。
-3. 本批核对完成后刷新依赖，回步骤 1。没有可安全推进的任务时，汇报已交付、初始已关闭、本次跳过、依赖阻塞和待收尾事项，附提交及现场位置。
-
-完成条件：本批每项成果均已核对并记录；只有合并与目标安全状态明确后才建下一批。结束运行时，所有未交付或未安全结束的工作均有具体去向。
-
-需要对照完整批次、父 SPEC、读取故障或重新开始的例子时，读 [EXAMPLES.md](EXAMPLES.md)。
+需要理解自动批次规则时读 [业务参考](REFERENCE.md)；核对进程、日志及现场边界时读 [工作现场](reference/workspace-binding.md)；演练场景见 [示例](EXAMPLES.md)。接口存在不等于三个 CLI 均已实测通过；以所选 CLI 的实际运行结果为准。

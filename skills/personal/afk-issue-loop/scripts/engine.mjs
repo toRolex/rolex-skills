@@ -1,0 +1,671 @@
+// 改编自 https://github.com/mattpocock/sandcastle
+// e99f832f26dc9d245c019a9ddd19fa5dee792427 的 src/templates/parallel-planner-with-review/main.mts。
+// MIT，Copyright (c) 2026 Matt Pocock；完整许可见同目录 LICENSE.sandcastle，分发时一并保留。
+// 保留逐票 execute→review、Promise.allSettled 屏障与单 Merger，替换 LLM 规划器、Docker 和有轮次上限的外层循环。
+// 仓库维护研究（运行及许可不依赖）：../../../../docs/research/afk-local-cli-source-provenance.md。
+import { createServer } from 'node:net';
+import { createHash } from 'node:crypto';
+import { realpathSync, existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { setTimeout as delay } from 'node:timers/promises';
+import { buildInvocation } from './providers.mjs';
+import { loadTemplates, renderPrompt } from './prompts.mjs';
+
+const permission = /permission denied|permission.*denied|not permitted|unauthorized|forbidden|HTTP 40[13]|requires? approval|cannot prompt for approval|权限拒绝|未经授权/i;
+const unsafeTermination = /终止未确认|禁止交接|进程组.*(?:EPERM|not permitted)/i;
+const configurationFailure = /not logged in|authentication|auth_unavailable|no auth available|invalid.{0,20}(?:api.?key|model)|(?:unknown|unsupported|not found).{0,20}model|model.{0,40}(?:not found|not supported|does not exist)|nested.*session|cannot be launched inside|login required|missing.{0,20}(?:credential|api.?key)|登录|模型.*不支持/i;
+const workspaceFailure = /现场分支改变|角色离开绑定|现场不属于|运行日志被暂存|运行日志被提交|归属未经确认|写锁被占用|worktree 已锁定|not a git repository/i;
+const conventional = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^\n)]+\))?!?: .*[㐀-鿿]/u;
+const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
+const isSpec = issue => (issue.labels || []).some(label => /^spec$/i.test(typeof label === 'string' ? label : label.name)) || /^spec$/i.test(issue.type?.name || '') || /^(?:\[spec\]|spec\s*[:：])/i.test(issue.title || '');
+
+function worktreeRecords(text) {
+  return text.split('\0\0').filter(Boolean).map(record => {
+    const fields = Object.fromEntries(record.split('\0').filter(Boolean).map(line => {
+      const space = line.indexOf(' ');
+      return space < 0 ? [line, true] : [line.slice(0, space), line.slice(space + 1)];
+    }));
+    return { cwd: fields.worktree, branch: fields.branch?.replace(/^refs\/heads\//, ''), locked: fields.locked, prunable: fields.prunable };
+  });
+}
+
+// Socket 不保存任务状态，仅在本进程生命周期内持有。
+// 不删除被占用或遗留的 socket，不抢占其他写者的现场。
+async function writerLock(common, branch) {
+  const key = createHash('sha256').update(`${common}\0${branch}`).digest('hex').slice(0, 32);
+  const path = join(tmpdir(), `afk-writer-${key}.sock`);
+  const server = createServer(socket => socket.end('AFK workspace in use\n'));
+  try {
+    await new Promise((accept, reject) => {
+      server.once('error', reject);
+      server.listen(path, accept);
+    });
+  } catch (error) {
+    if (error.code === 'EADDRINUSE') throw new Error(`现场写锁被占用或遗留：${branch} (${path})；请用户核实原运行已结束，勿强抢`);
+    throw error;
+  }
+  return () => new Promise((accept, reject) => server.close(error => error ? reject(error) : accept()));
+}
+
+export async function createEngine(config, processes, event = () => {}) {
+  const command = (name, args, cwd = config.repo, options) => processes.command(name, args, cwd, options);
+  const git = (args, cwd = config.repo) => command('git', args, cwd);
+  const gh = args => command('gh', args);
+  const json = async args => JSON.parse(await gh(args));
+  const pages = async endpoint => {
+    const result = await json(['api', '--paginate', '--slurp', endpoint]);
+    if (!Array.isArray(result) || !result.every(Array.isArray)) throw new Error(`GitHub 分页响应无效：${endpoint}`);
+    return result.flat();
+  };
+  const retryRead = async operation => {
+    let failure;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (processes.stopping) throw new Error('用户停止');
+      try { return await operation(); }
+      catch (error) {
+        failure = error;
+        if (permission.test(error.message) || unsafeTermination.test(error.message)) throw error;
+        if (attempt < 2) await delay(250 * (attempt + 1));
+      }
+    }
+    throw failure;
+  };
+
+  // 完成前置检查并固定初始范围后才确认启动成功。
+  // 启动握手不等待角色，也不在确认启动前派角色。
+  // 模板随 skill 安装；在握手及任何外部命令前加载本运行的固定快照。
+  const templates = loadTemplates();
+  buildInvocation({ ...config, cwd: config.repo, prompt: '启动参数校验，不执行角色' });
+  for (const executable of ['git', 'wt', 'gh', config.provider]) await command(executable, ['--version']);
+  await gh(['auth', 'status']);
+  const root = realpathSync(await git(['rev-parse', '--show-toplevel']));
+  if (root !== realpathSync(config.repo)) throw new Error('--repo 必须为目标仓库 worktree 根目录');
+  const common = realpathSync(await git(['rev-parse', '--path-format=absolute', '--git-common-dir']));
+  const repository = (await json(['repo', 'view', '--json', 'nameWithOwner'])).nameWithOwner;
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository || '')) throw new Error('无法确定 GitHub owner/repo');
+  const localBranches = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads/'])).split('\n');
+  const target = config.target || (localBranches.includes('develop') ? 'develop' : 'main');
+  if (target.startsWith('-') || !localBranches.includes(target)) throw new Error(`目标本地分支不存在：${target}；不自动 fetch/pull`);
+  await git(['check-ref-format', '--branch', target]);
+  const specs = new Set(config.specs || []);
+  const scope = new Set();
+  const tickets = new Map();
+  const blocks = new Map();
+  const deliveryFailures = new Map();
+  const workspaces = new Map();
+  const releases = new Set();
+  const ownedTickets = new Set();
+  const attemptedTickets = new Set();
+  const deliveredTickets = new Set();
+  const mergeQueue = [];
+  let targetCwd, targetReason, pending, batch = 0, attempt = 0;
+  let running = false, finished = false, quarantined = false;
+
+  async function readIssue(number) {
+    const issue = await retryRead(() => json(['api', `repos/${repository}/issues/${number}`]));
+    if (!Number.isSafeInteger(issue.number) || !['open', 'closed'].includes(issue.state)) throw new Error(`Issue #${number} 响应字段无效`);
+    return issue;
+  }
+  async function readContext(number) {
+    const issue = await readIssue(number);
+    const comments = await retryRead(() => pages(`repos/${repository}/issues/${number}/comments?per_page=100`));
+    return { ...issue, comments: comments.map(comment => ({ author: comment.user?.login, body: comment.body })) };
+  }
+  async function relatedSpecs(issue, cache) {
+    const parents = new Set(specs);
+    // GitHub 原生父关系；404 表示没有可见父关系。其他读取错误只影响本票。
+    let parent;
+    try {
+      parent = await retryRead(() => json(['api', `repos/${repository}/issues/${issue.number}/parent`]));
+      if (!parent || !Number.isSafeInteger(parent.number) || !['open', 'closed'].includes(parent.state)) throw new Error(`Issue #${issue.number} 原生父关系响应未知`);
+    }
+    catch (error) { if (!/\bHTTP\s+404\b/.test(error.message)) throw error; }
+    if (parent?.number && isSpec(parent)) {
+      if (parent.repository_url && !parent.repository_url.endsWith(`/repos/${repository}`)) throw new Error(`父 SPEC 跨仓库，需显式确认：${parent.html_url || parent.repository_url}`);
+      parents.add(parent.number);
+    }
+    for (const match of (issue.body || '').matchAll(/(?:父\s*SPEC|parent\s*(?:SPEC|issue)|SPEC|需求)\s*[:：]?\s*#(\d+)/gi)) parents.add(Number(match[1]));
+    for (const match of (issue.body || '').matchAll(/https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)/g)) {
+      if (match[1] === repository) {
+        const referenced = await readIssue(Number(match[2]));
+        if (isSpec(referenced)) parents.add(referenced.number);
+      }
+    }
+    return Promise.all([...parents].map(async number => {
+      if (!cache.has(number)) cache.set(number, readContext(number));
+      const context = await cache.get(number);
+      if (context.pull_request) throw new Error(`父 SPEC #${number} 不能是 PR`);
+      return context;
+    }));
+  }
+  if (config.issues?.length) {
+    for (const number of config.issues) {
+      if (specs.has(number)) continue;
+      try {
+        const issue = await readIssue(number);
+        if (issue.pull_request || issue.state === 'closed' || isSpec(issue)) { event('scope-excluded', { ticket: number, reason: 'PR/closed/SPEC' }); continue; }
+        scope.add(number);
+        tickets.set(number, issue);
+      } catch (error) {
+        if (unsafeTermination.test(error.message)) throw error;
+        scope.add(number);
+        tickets.set(number, { number, state: 'unknown', readError: error.message });
+      }
+    }
+  } else {
+    const initial = await retryRead(() => pages(`repos/${repository}/issues?state=open&labels=ready-for-agent&per_page=100`));
+    for (const issue of initial) {
+      if (issue.pull_request || issue.state !== 'open' || specs.has(issue.number) || isSpec(issue)) continue;
+      scope.add(issue.number);
+      tickets.set(issue.number, issue);
+    }
+  }
+  if ([...scope].some(number => target === `afk/issue-${number}`)) throw new Error('目标分支不能同时是本轮 Ticket 工作分支');
+  async function refresh() {
+    const contextCache = new Map();
+    for (const number of scope) {
+      if (processes.stopping) return;
+      try {
+        const issue = await readIssue(number);
+        if (issue.pull_request || isSpec(issue)) {
+          blocks.set(number, '范围内项目变成 PR/SPEC，需用户确认范围');
+          tickets.set(number, { ...issue, state: 'unknown' });
+          continue;
+        }
+        if (issue.state === 'closed') {
+          tickets.set(number, issue);
+          const closing = [pending, ...mergeQueue].filter(Boolean).some(group => group.phase === 'close' && group.tickets.some(item => item.ticket.number === number));
+          if (closing) deliveredTickets.add(number);
+          else if (attemptedTickets.has(number) && !deliveredTickets.has(number)) deliveryFailures.set(number, `#${number} 已关闭，但 I/R 或交付未通过；需用户核实误关票`);
+          continue;
+        }
+        const comments = await retryRead(() => pages(`repos/${repository}/issues/${number}/comments?per_page=100`));
+        const dependencies = await retryRead(() => pages(`repos/${repository}/issues/${number}/dependencies/blocked_by?per_page=100`));
+        if (dependencies.some(dep => !Number.isSafeInteger(dep.number) || !['open', 'closed'].includes(dep.state) || typeof dep.repository_url !== 'string')) throw new Error(`Issue #${number} blocked_by 响应字段未知`);
+        let parents = [], specError;
+        try { parents = await relatedSpecs(issue, contextCache); }
+        catch (error) { if (unsafeTermination.test(error.message)) throw error; specError = `相关父 SPEC 读取失败：${error.message}`; }
+        tickets.set(number, { ...issue, comments: comments.map(comment => ({ author: comment.user?.login, body: comment.body })), dependencies, specs: parents, specError });
+      } catch (error) {
+        if (unsafeTermination.test(error.message)) throw error;
+        tickets.set(number, { ...tickets.get(number), number, state: 'unknown', readError: error.message });
+        if (permission.test(error.message)) blocks.set(number, `GitHub 权限拒绝：${error.message}`);
+        event('read-blocked', { ticket: number, reason: error.message });
+      }
+    }
+    const groups = [pending, ...mergeQueue].filter(Boolean);
+    mergeQueue.length = 0;
+    for (const group of groups) {
+      if (group.phase !== 'close') {
+        for (const item of group.tickets) if (tickets.get(item.ticket.number)?.state === 'closed') {
+          const reason = `#${item.ticket.number} 已关闭但本批合并/验证/summary 未通过验收；需用户核实，不能宣称交付`;
+          deliveryFailures.set(item.ticket.number, reason);
+          targetReason = reason;
+        }
+      } else group.tickets = group.tickets.filter(item => tickets.get(item.ticket.number)?.state !== 'closed');
+      if (group.tickets.length) mergeQueue.push(group);
+    }
+    pending = mergeQueue.shift();
+  }
+
+  function waitingReasons(includeMergeGroups = true) {
+    const reasons = new Map();
+    for (const [number, issue] of tickets) {
+      if (issue.state === 'closed') continue;
+      if (blocks.has(number)) reasons.set(number, blocks.get(number));
+      else if (issue.specError) reasons.set(number, issue.specError);
+      else if (issue.state === 'unknown' || !Array.isArray(issue.dependencies)) reasons.set(number, `上下文/原生依赖未知：${issue.readError || '尚未读取'}`);
+      else {
+        const outside = issue.dependencies.filter(dep => dep.state === 'open' && (!dep.repository_url.endsWith(`/repos/${repository}`) || !scope.has(dep.number)));
+        if (outside.length) reasons.set(number, `范围外开放前置：${outside.map(dep => dep.html_url || `${dep.repository_url}#${dep.number}`).join(', ')}`);
+      }
+    }
+    if (includeMergeGroups) for (const group of [pending, ...mergeQueue].filter(Boolean)) {
+      const reason = targetReason || group.blockedReason;
+      if (reason) for (const item of group.tickets) if (tickets.get(item.ticket.number)?.state !== 'closed') reasons.set(item.ticket.number, `本批交付等待用户：${reason}`);
+    }
+    // 范围外前置阻碍传递到所有受影响的范围内下游，
+    // 但不扩大初始 Ticket 集合。
+    let changed;
+    do {
+      changed = false;
+      for (const [number, issue] of tickets) {
+        if (issue.state === 'closed' || reasons.has(number)) continue;
+        const upstream = issue.dependencies?.find(dep => dep.state === 'open' && dep.repository_url.endsWith(`/repos/${repository}`) && reasons.has(dep.number));
+        if (upstream) { reasons.set(number, `等待范围内前置 #${upstream.number}：${reasons.get(upstream.number)}`); changed = true; }
+      }
+    } while (changed);
+    return reasons;
+  }
+  const priority = issue => {
+    const labels = (issue.labels || []).map(label => typeof label === 'string' ? label : label.name);
+    const index = (config.priorityLabels || []).findIndex(label => labels.includes(label));
+    return index < 0 ? (config.priorityLabels || []).length : index;
+  };
+  const ordered = (a, b) => priority(a) - priority(b) || a.number - b.number;
+  function selectBatch() {
+    const reasons = waitingReasons();
+    const pendingNumbers = new Set([pending, ...mergeQueue].filter(Boolean).flatMap(group => group.tickets.map(item => item.ticket.number)));
+    const candidates = [...tickets.values()].filter(issue => issue.state === 'open' && !reasons.has(issue.number) && !pendingNumbers.has(issue.number));
+    const internal = issue => issue.dependencies.filter(dep => dep.state === 'open' && dep.repository_url.endsWith(`/repos/${repository}`) && scope.has(dep.number));
+    const ready = candidates.filter(issue => internal(issue).length === 0).sort(ordered);
+    return ready;
+  }
+
+  const trees = async () => worktreeRecords(await git(['worktree', 'list', '--porcelain', '-z']));
+  async function dirty(cwd) {
+    // 运行日志保持未跟踪；不改 .gitignore 或全局排除配置，
+    // 此检查不得隐藏其他用户修改。
+    return git(['status', '--porcelain', '--untracked-files=all', '--', '.', ':(exclude).afk/logs', ':(exclude).afk/logs/**'], cwd);
+  }
+  async function correctWorkspace(workspace) {
+    if (realpathSync(await git(['rev-parse', '--show-toplevel'], workspace.cwd)) !== realpathSync(workspace.cwd)) throw new Error('角色离开绑定根目录');
+    if (await git(['symbolic-ref', '--short', 'HEAD'], workspace.cwd) !== workspace.branch) throw new Error(`现场分支改变：${workspace.branch}`);
+    if (realpathSync(await git(['rev-parse', '--path-format=absolute', '--git-common-dir'], workspace.cwd)) !== common) throw new Error('现场不属于目标 Git 仓库');
+    const staged = await git(['diff', '--cached', '--name-only', '--', '.afk/logs'], workspace.cwd);
+    if (staged) throw new Error('运行日志被暂存；保留现场等待用户，禁止提交日志');
+  }
+  async function inProgress(cwd) {
+    if (await git(['diff', '--name-only', '--diff-filter=U'], cwd)) return true;
+    for (const name of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply']) {
+      if (existsSync(resolve(cwd, await git(['rev-parse', '--git-path', name], cwd)))) return true;
+    }
+    return false;
+  }
+  async function prepareTarget() {
+    try {
+      releases.add(await writerLock(common, target));
+      const existing = (await trees()).find(tree => tree.branch === target);
+      if (existing?.locked || existing?.prunable) throw new Error('目标 worktree 已锁定或不可用');
+      if (existing) targetCwd = realpathSync(existing.cwd);
+      else {
+        await command('wt', ['switch', '--no-cd', target]);
+        const created = (await trees()).find(tree => tree.branch === target);
+        if (!created) throw new Error('Worktrunk 未返回目标分支现场');
+        targetCwd = realpathSync(created.cwd);
+      }
+      await correctWorkspace({ cwd: targetCwd, branch: target });
+      if (await dirty(targetCwd) || await inProgress(targetCwd)) throw new Error('目标有未归属本运行的 dirty/冲突；保留用户修改，独立实现/审查继续');
+    } catch (error) {
+      if (unsafeTermination.test(error.message)) throw error;
+      targetReason = error.message;
+      event('target-blocked', { target, cwd: targetCwd, reason: targetReason });
+    }
+  }
+  async function prepareTicket(ticket) {
+    const number = ticket.number;
+    if (workspaces.has(number)) {
+      const workspace = workspaces.get(number);
+      await correctWorkspace(workspace);
+      return workspace;
+    }
+    const branch = `afk/issue-${number}`;
+    const release = await writerLock(common, branch);
+    releases.add(release);
+    try {
+    const existing = (await trees()).find(tree => tree.branch === branch);
+    const branches = (await git(['for-each-ref', '--format=%(refname:short)', `refs/heads/${branch}`])).split('\n');
+    const branchExists = branches.includes(branch);
+    if ((existing || branchExists) && !ownedTickets.has(number) && !(config.reuse || []).includes(number)) throw new Error(`${branch} 已存在且归属未经确认；用户确认后用 --reuse ${number}，不接管其他会话`);
+    if (existing?.locked || existing?.prunable) throw new Error(`${branch} worktree 已锁定或不可用`);
+    // 串行准备现场。不使用 --yes、不写审批、不 clobber、不用 Git 修改 worktree；
+    // 未获批准的 hook 交给用户处理，不能自动绕过。
+    const args = ['switch', '--no-cd'];
+    if (!branchExists) args.push('--create', '--base', target);
+    args.push(branch);
+    try { await command('wt', args); }
+    finally {
+      // 即使命令在 post-start 失败，本运行刚创建的分支仍有明确归属。
+      if (!branchExists && !processes.hasUnsafeWriters) {
+        const created = (await trees()).find(item => item.branch === branch);
+        if (created && !existing) ownedTickets.add(number);
+      }
+    }
+    const tree = (await trees()).find(item => item.branch === branch);
+    if (!tree) throw new Error(`Worktrunk 未创建 ${branch} 的现场`);
+    const workspace = { branch, cwd: realpathSync(tree.cwd), release };
+    if (workspace.cwd === targetCwd) throw new Error('Ticket 与目标不得共享现场');
+    await correctWorkspace(workspace);
+    ownedTickets.add(number);
+    workspaces.set(number, workspace);
+    event('workspace', { ticket: number, ...workspace, reused: branchExists });
+    return workspace;
+    } catch (error) {
+      if (!processes.hasUnsafeWriters && !unsafeTermination.test(error.message)) {
+        try { await release(); releases.delete(release); }
+        catch (cleanup) { event('lock-release-failed', { ticket: number, reason: cleanup.message }); }
+      }
+      throw error;
+    }
+  }
+
+  async function closeWorkspace(ticket, workspace) {
+    if (processes.hasUnsafeWriters || quarantined) return;
+    try {
+      await correctWorkspace(workspace);
+      if (ownedTickets.has(ticket.number) && workspace.cwd !== targetCwd && !await dirty(workspace.cwd) && !await inProgress(workspace.cwd)) {
+        await command('wt', ['remove', '--foreground', '--no-delete-branch', workspace.branch]);
+        event('workspace-removed', { ticket: ticket.number, branch: workspace.branch, cwd: workspace.cwd });
+      } else event('workspace-retained', { ticket: ticket.number, cwd: workspace.cwd, reason: 'dirty/操作未完成或非归属现场' });
+    } catch (error) {
+      if (unsafeTermination.test(error.message) || processes.hasUnsafeWriters) quarantined = true;
+      event('workspace-cleanup-failed', { ticket: ticket.number, reason: error.message });
+    } finally {
+      if (!quarantined && !processes.hasUnsafeWriters) {
+        try { await workspace.release(); releases.delete(workspace.release); }
+        catch (error) { event('lock-release-failed', { ticket: ticket.number, reason: error.message }); }
+        workspaces.delete(ticket.number);
+      }
+    }
+  }
+
+  const resultContract = {
+    common: { run: config.run, attempt: '由本次 prompt 提供的整数', role: 'implementer|reviewer|merger', status: 'passed|failed|blocked', summary: '交付说明', tests: [{ command: '实际验证命令或具体人工检查', status: 'passed|failed|not-run', summary: '实际结果' }], remaining: ['未完成问题；无则空数组'] },
+    ticket: { ticket: '整数编号', branch: 'afk/issue-N', cwd: '绑定绝对路径', commits: ['可交付提交的文字摘要，非 SHA；可包含复用历史提交'] },
+    merger: { branch: target, cwd: '绑定目标绝对路径', summaryCreated: 'boolean：本批 summary 已完成（含上次已完成）', summarySubject: 'summaryCreated 为 true 时为实际中文 Conventional Commit 标题，否则 null', tickets: [{ ticket: '整数编号', branch: 'afk/issue-N', merged: 'boolean', verified: 'boolean', closed: 'boolean：实际 GitHub 状态' }] },
+  };
+  async function prompt(role, context) {
+    const related = context.ticket?.specs || [...new Map((context.items || []).flatMap(item => item.ticket.specs || []).map(spec => [spec.number, spec])).values()];
+    const input = { context, repository, target, specs: related, verify: config.verify || null };
+    const text = await renderPrompt(templates[role], {
+      TASK_ID: context.ticket ? String(context.ticket.number) : '',
+      ISSUE_TITLE: context.ticket?.title || '',
+      VIEW_TASK_COMMAND: `gh issue view ${context.ticket?.number || ''} --repo ${repository} --comments`,
+      BRANCH: context.branch,
+      TARGET_BRANCH: target,
+      BRANCHES: (context.items || []).map(item => `- ${item.workspace.branch}`).join('\n'),
+      CLOSE_TASK_COMMAND: `gh issue close --repo ${repository}`,
+      ISSUES: (context.items || []).map(item => `- ${item.ticket.number}: ${item.ticket.title}`).join('\n'),
+      CONTEXT: JSON.stringify(input),
+      VALIDATION_COMMANDS: config.verify || '按项目约定运行实际测试与类型检查，记录具体命令及结果。',
+    }, { cwd: context.cwd, command });
+    return `${text}\n` +
+      (config.verify ? `验证要求（配置）：${config.verify}\n` : '') +
+      `最后仅返回一个 <afk-result>JSON</afk-result> 结构化结果；退出码/完成字符串不是业务成功。身份必须逐字匹配本次 context 的 run/attempt/role。所有字段必填，布尔与整数用 JSON 原生类型。\n` +
+      `输出必须是平铺对象：顶层直接包含 run、attempt、role、status、summary、tests、remaining、branch、cwd 及当前角色字段。把下方 contract 的字段替换为实际值后输出；contract/context/repository/target/specs 是输入包装，绝不作为输出的外层键，也不回显整个输入。\n` +
+      JSON.stringify({ contract: { ...resultContract.common, ...(role === 'merger' ? resultContract.merger : resultContract.ticket) }, ...input }, null, 2);
+  }
+  function validTests(result) {
+    return Array.isArray(result.tests) && result.tests.every(test => test && typeof test.command === 'string' && test.command.trim() && ['passed', 'failed', 'not-run'].includes(test.status) && typeof test.summary === 'string');
+  }
+  function passedTests(result) { return result.tests.some(test => test.status === 'passed') && result.tests.every(test => test.status === 'passed'); }
+  function validateCommon(result, context) {
+    if (result.run !== config.run || result.attempt !== context.attempt || result.role !== context.role || !['passed', 'failed', 'blocked'].includes(result.status) || typeof result.summary !== 'string' || !validTests(result) || !strings(result.remaining)) throw new Error('角色业务结果通用字段无效');
+    if (result.branch !== context.branch || typeof result.cwd !== 'string' || !result.cwd.startsWith('/') || realpathSync(result.cwd) !== realpathSync(context.cwd)) throw new Error('角色业务结果 branch/cwd 与绑定不符');
+  }
+  async function runRole(role, context, onDispatch = () => {}) {
+    if (processes.stopping) return { status: 'stopped', reason: '用户停止' };
+    const identity = { ...context, run: config.run, attempt: ++attempt, role };
+    const logPath = join(config.logDir, `${String(attempt).padStart(5, '0')}-${role}-${context.tickets.join('-')}.stdout.log`);
+    await correctWorkspace(context);
+    const rendered = await prompt(role, identity);
+    if (processes.stopping) return { status: 'stopped', reason: '用户停止' };
+    await correctWorkspace(context);
+    onDispatch();
+    const result = await processes.role(config, { ...identity, prompt: rendered }, logPath, event);
+    event('role-result', { role, attempt: identity.attempt, tickets: context.tickets, result });
+    // Provider 层的失败/权限结果不含业务封套，
+    // 不能将其解读为成功的结构化交付结果。
+    if (!Object.hasOwn(result, 'run')) {
+      if (!['failed', 'blocked', 'stopped'].includes(result.status)) throw new Error('Provider 返回未知状态');
+      if (result.status === 'failed' && configurationFailure.test(result.reason || '')) return { ...result, status: 'blocked' };
+      return result;
+    }
+    validateCommon(result, identity);
+    if (role !== 'merger' && (result.ticket !== context.ticket.number || !strings(result.commits))) throw new Error('逐票结果 ticket/commits 字段无效');
+    return result;
+  }
+  async function deliverable(workspace) {
+    await correctWorkspace(workspace);
+    const commits = Number(await git(['rev-list', '--count', `${target}..${workspace.branch}`], workspace.cwd));
+    const changes = await git(['diff', '--name-only', `${target}...${workspace.branch}`], workspace.cwd);
+    if (changes.split('\n').some(path => path.startsWith('.afk/logs/'))) throw new Error('运行日志被提交，需用户处理现场');
+    return Number.isSafeInteger(commits) && commits > 0 && Boolean(changes) && !await dirty(workspace.cwd) && !await inProgress(workspace.cwd);
+  }
+  // 提取 main.mts:123–160 的 try/run→commits gate→review→累计 commits→finally。
+  // sandbox.run/close 替换本机 runRole/closeWorkspace；AFK 加平铺结果与实际交付检查。
+  async function pipeline(ticket, workspace) {
+    const context = { ticket, tickets: [ticket.number], ...workspace, target, targetCwd };
+    attemptedTickets.add(ticket.number);
+    try {
+      const implement = await runRole('implementer', context);
+      if (implement.status === 'blocked') blocks.set(ticket.number, implement.reason || implement.summary);
+      if (implement.status !== 'passed') return;
+      if (!await deliverable(workspace)) throw new Error('实现无可交付 commits/变更，或现场不一致/不干净');
+
+      // Only review if the implementer produced commits (upstream main.mts:137).
+      if (implement.commits.length > 0) {
+        const review = await runRole('reviewer', { ...context, previous: implement });
+        if (review.status === 'blocked') blocks.set(ticket.number, review.reason || review.summary);
+        if (review.status !== 'passed') return;
+        if (!review.commits.length || !passedTests(review) || !await deliverable(workspace)) throw new Error('审查未满足 commits/验证/现场契约');
+        return {
+          ...review,
+          commits: [...implement.commits, ...review.commits],
+          ticket, workspace, review,
+        };
+      }
+      throw new Error('实现结果没有提交摘要');
+    } catch (error) {
+      if (unsafeTermination.test(error.message) || processes.hasUnsafeWriters) quarantined = true;
+      throw error;
+    } finally {
+      await closeWorkspace(ticket, workspace);
+    }
+  }
+
+  function mergerCandidates(group) {
+    if (group.uncertain) return [];
+    const reasons = waitingReasons(false);
+    if (group.phase !== 'close') return group.tickets.some(item => reasons.has(item.ticket.number)) ? [] : group.tickets;
+    return group.tickets.filter(item => !blocks.has(item.ticket.number) && tickets.get(item.ticket.number)?.state === 'open');
+  }
+  function mergerReady(group) {
+    const ready = mergerCandidates(group);
+    group.blockedReason = group.uncertain || (ready.length ? undefined : group.tickets.map(item => `#${item.ticket.number}：${waitingReasons(false).get(item.ticket.number) || 'GitHub 状态未知'}`).join('; '));
+    return ready.length > 0;
+  }
+  function selectDelivery() {
+    if (!pending || targetReason || pending.phase !== 'close' || mergerReady(pending)) return;
+    // 一个未知的仅待关闭票不占用唯一 Merger；不可跨越未完成合并现场。
+    for (let index = 0; index < mergeQueue.length; index++) {
+      const next = mergeQueue[index];
+      if (mergerReady(next)) {
+        mergeQueue.splice(index, 1);
+        mergeQueue.unshift(pending);
+        pending = next;
+        return;
+      }
+      if (next.phase !== 'close') return;
+    }
+  }
+  async function inspectMerger(group, reason) {
+    // 坏最终封套不能回放旧 passed。只读取普通 Git/GitHub 事实，不建立快照/HEAD 协议。
+    const evidence = { reason, tickets: [] };
+    try {
+      await correctWorkspace({ cwd: targetCwd, branch: target });
+      evidence.status = await dirty(targetCwd);
+      evidence.inProgress = await inProgress(targetCwd);
+      evidence.history = await git(['log', '-10', '--format=%s%n%b'], targetCwd);
+      for (const item of group.tickets) {
+        let merged = false, state = 'unknown', error;
+        try { await git(['merge-base', '--is-ancestor', item.workspace.branch, target], targetCwd); merged = true; }
+        catch (failure) { if (unsafeTermination.test(failure.message)) throw failure; }
+        try { state = (await readIssue(item.ticket.number)).state; }
+        catch (failure) { if (unsafeTermination.test(failure.message)) throw failure; error = failure.message; }
+        evidence.tickets.push({ ticket: item.ticket.number, merged, state, error });
+      }
+    } catch (error) {
+      if (unsafeTermination.test(error.message)) throw error;
+      evidence.error = error.message;
+    }
+    event('merge-reconciled', { batch: group.id, ...evidence });
+    if (group.phase === 'close' && !evidence.error && !evidence.status && !evidence.inProgress && evidence.tickets.every(item => item.merged)) {
+      // 本运行已验收过合并/验证/summary，坏 close 封套只重读逐票状态，不重做交付。
+      for (const item of evidence.tickets) if (item.state === 'closed') deliveredTickets.add(item.ticket);
+      return;
+    }
+    group.uncertain = `Merger 最终结果不可用：${reason}；已读取现场/历史/GitHub，仍需核实验证与 summary 是否完成，禁止盲目重做`;
+    targetReason = group.uncertain;
+  }
+  async function mergePending() {
+    selectDelivery();
+    if (!pending || targetReason || processes.stopping || !mergerReady(pending)) return;
+    const group = pending;
+    const items = mergerCandidates(group).map(item => ({ ...item, ticket: tickets.get(item.ticket.number) || item.ticket }));
+    let dispatched = false;
+    try {
+      await correctWorkspace({ cwd: targetCwd, branch: target });
+      if (!group.started && (await dirty(targetCwd) || await inProgress(targetCwd))) {
+        targetReason = 'Merger 开始前目标出现未归属修改，保留现场等待用户';
+        return;
+      }
+      // 提取 main.mts:208–221 的单次 merger 调用及 BRANCHES/ISSUES 参数（见 prompt）。
+      // 本机接线 runRole 替代 sandcastle.run；本运行 started/previous/phase 是 D7 续作薄适配。
+      const result = await runRole('merger', { cwd: targetCwd, branch: target, target, tickets: items.map(item => item.ticket.number), mode: group.phase, batch: group.id, items, previous: group.previous, summarySubject: group.summarySubject || null }, () => {
+        // 可信预展开完成、实际调用载体前才进入可能有副作用的边界。
+        dispatched = true;
+        group.started = true;
+      });
+      if (result.status === 'stopped' || processes.stopping) return;
+      if (!Object.hasOwn(result, 'run')) {
+        await inspectMerger(group, result.reason || '最终结果缺少合法业务封套');
+        if (result.status === 'blocked') {
+          if (group.phase === 'close') for (const item of items) blocks.set(item.ticket.number, result.reason || 'Merger 权限阻碍');
+          else targetReason = result.reason || 'Merger 权限阻碍';
+        }
+        return;
+      }
+      if (typeof result.summaryCreated !== 'boolean' || !(result.summarySubject === null || typeof result.summarySubject === 'string') || !Array.isArray(result.tickets) || result.tickets.length !== items.length) throw new Error('Merger 结果缺少 summary/逐票状态');
+      const expected = new Map(items.map(item => [item.ticket.number, item]));
+      for (const item of result.tickets) {
+        const original = expected.get(item.ticket);
+        if (!original || original.workspace.branch !== item.branch || ['merged', 'verified', 'closed'].some(key => typeof item[key] !== 'boolean')) throw new Error('Merger 逐票结果与固定批次不符');
+        expected.delete(item.ticket);
+        if (item.verified && !item.merged || item.closed && (!item.verified || !result.summaryCreated)) throw new Error('Merger 提前验证/关闭');
+        if (item.merged) await git(['merge-base', '--is-ancestor', item.branch, target], targetCwd);
+      }
+      await correctWorkspace({ cwd: targetCwd, branch: target });
+      if (result.summaryCreated) {
+        if (!result.tickets.every(item => item.merged && item.verified) || !conventional.test(result.summarySubject || '') || (group.phase !== 'close' && !passedTests(result)) || await dirty(targetCwd) || await inProgress(targetCwd)) throw new Error('summary 前置条件未满足：合并/验证/clean/中文 Conventional Commit');
+        if (group.phase === 'close') {
+          if (result.summarySubject !== group.summarySubject) throw new Error('close-only 不得重写 summary');
+        } else {
+          // 普通提交历史核实，不锁 HEAD、不对标题计数，也不要求模型给 SHA。
+          const subject = await git(['log', '-1', '--format=%s'], targetCwd);
+          if (subject !== result.summarySubject) throw new Error('实际最新提交不是本次报告的 summary');
+          group.phase = 'close';
+          group.summarySubject = result.summarySubject;
+        }
+      } else if (group.phase === 'close' || result.summarySubject !== null || result.status === 'passed') throw new Error('Merger 成功/close-only 必须保留已完成 summary');
+      group.previous = result;
+      if (result.status === 'blocked') {
+        if (group.phase === 'close') {
+          for (const item of result.tickets) if (!item.closed) blocks.set(item.ticket, `关闭受阻：${result.summary}；${result.remaining.join('; ')}`);
+        } else targetReason = result.summary || 'Merger 权限/现场阻碍';
+      }
+      // 合并失败可接续；关闭失败逐票保留，下一轮仅关闭，绝不重跑 merge/test/summary。
+      event('merge-progress', { batch: group.id, phase: group.phase, summarySubject: group.summarySubject, tickets: result.tickets });
+    } catch (error) {
+      if (unsafeTermination.test(error.message)) throw error;
+      if (dispatched && !processes.stopping) await inspectMerger(group, error.message);
+      else if ([permission, configurationFailure, workspaceFailure].some(pattern => pattern.test(error.message))) targetReason = error.message;
+      event('merge-failed', { batch: group.id, reason: error.message });
+    }
+  }
+
+  await refresh();
+  event('scope', { repository, target, tickets: [...scope], specs: [...specs], waiting: Object.fromEntries(waitingReasons()) });
+  return {
+    describe: () => ({ repository, repo: root, target, targetCwd, tickets: [...scope], specs: [...specs], batch, pending: pending && { phase: pending.phase, tickets: pending.tickets.map(item => item.ticket.number) }, queued: mergeQueue.map(group => ({ batch: group.id, tickets: group.tickets.map(item => item.ticket.number) })), waiting: Object.fromEntries(waitingReasons()), deliveryFailures: Object.fromEntries(deliveryFailures), targetBlocked: targetReason }),
+    async run() {
+      if (running || finished) throw new Error('Engine 只允许运行一次；不提供恢复协议');
+      running = true;
+      try {
+        await prepareTarget();
+        while (!processes.stopping) {
+          const open = [...scope].filter(number => tickets.get(number)?.state !== 'closed');
+          if (!open.length) {
+            if (deliveryFailures.size) return { state: 'waiting-user', tickets: [...deliveryFailures.keys()], waiting: Object.fromEntries(deliveryFailures), batches: batch };
+            return { state: 'completed', tickets: [...scope], batches: batch };
+          }
+          batch++;
+          selectDelivery();
+          // 待合并或 close-only 始终由单个 Merger 继续；
+          // 不重派实现/审查，也不让新批次改变该组 summary。
+          if (pending && !targetReason && mergerReady(pending)) {
+            await mergePending();
+          } else {
+            const selected = selectBatch();
+            event('batch-selected', { batch, tickets: selected.map(issue => issue.number), fixed: true });
+            if (!selected.length) {
+              const reasons = waitingReasons();
+              if (pending && targetReason) for (const item of pending.tickets) reasons.set(item.ticket.number, `目标等待用户：${targetReason}`);
+              // 同时解释因目标尚待交付而阻塞的下游。
+              for (const number of open) if (!reasons.has(number)) {
+                const dependencies = tickets.get(number)?.dependencies?.filter(dep => dep.state === 'open') || [];
+                reasons.set(number, dependencies.length ? `原生 blocked-by 尚未关闭：${dependencies.map(dep => dep.html_url || `#${dep.number}`).join(', ')}` : targetReason ? `等待目标交付：${targetReason}` : '当前范围没有可安全派发的 Ticket，需用户核实现场');
+              }
+              return { state: 'waiting-user', tickets: open, waiting: Object.fromEntries(reasons), targetBlocked: targetReason, batches: batch };
+            }
+            const prepared = [];
+            for (const ticket of selected) {
+              if (processes.stopping) break;
+              try { prepared.push({ ticket, workspace: await prepareTicket(ticket) }); }
+              catch (error) {
+                if (unsafeTermination.test(error.message)) throw error;
+                if ([permission, configurationFailure, workspaceFailure].some(pattern => pattern.test(error.message))) blocks.set(ticket.number, error.message);
+                event('workspace-blocked', { ticket: ticket.number, reason: error.message });
+              }
+            }
+            // main.mts:114–162 提取：sandbox 创建移到串行 prepareTicket，
+            // 内联 try/finally 提为 pipeline；allSettled 不取消同批其他票。
+            const settled = await Promise.allSettled(
+              prepared.map(async ({ ticket, workspace }) => pipeline(ticket, workspace)),
+            );
+            for (const [index, outcome] of settled.entries()) {
+              if (outcome.status === 'rejected') {
+                if (unsafeTermination.test(outcome.reason?.message || '')) throw outcome.reason;
+                const number = prepared[index].ticket.number;
+                if ([permission, configurationFailure, workspaceFailure].some(pattern => pattern.test(outcome.reason?.message || ''))) blocks.set(number, outcome.reason.message);
+                event('pipeline-failed', { ticket: number, reason: String(outcome.reason?.message || outcome.reason) });
+              }
+            }
+            // main.mts:175–182 的 fulfilled+commits 筛选；AFK 仅允许审查通过值进入成功集。
+            const successful = settled
+              .map((outcome, i) => ({ outcome, issue: prepared[i] }))
+              .filter(entry => entry.outcome.status === 'fulfilled' && entry.outcome.value?.commits.length > 0)
+              .map(entry => entry.outcome.value);
+            if (successful.length) {
+              const group = { id: batch, phase: 'merge', tickets: successful };
+              if (pending) mergeQueue.push(group);
+              else pending = group;
+            }
+            await mergePending();
+          }
+          if (processes.stopping) break;
+          await refresh();
+          event('batch-settled', { batch, open: [...scope].filter(number => tickets.get(number)?.state !== 'closed'), waiting: Object.fromEntries(waitingReasons()) });
+          // 不设总重试/批次上限。短暂且可中断的退避，
+          // 避免空结果、格式错误或 CLI 持续失败导致忙循环。
+          for (let i = 0; i < 10 && !processes.stopping; i++) await delay(100);
+        }
+        return { state: 'stopped', tickets: [...scope].filter(number => tickets.get(number)?.state !== 'closed'), batches: batch };
+      } catch (error) {
+        quarantined = Boolean(processes.hasUnsafeWriters) || unsafeTermination.test(error.message);
+        if (quarantined) event('writers-quarantined', { reason: error.message, note: '终止未确认：保留现场写锁，不交接；需用户处理原运行' });
+        throw error;
+      } finally {
+        running = false;
+        finished = true;
+        // 管线 finally 已关闭其现场；未确认终止的写者保留 socket 锁。
+        // 单个锁释放失败不能遮盖交付结论，也不能阻止其余自身锁释放。
+        if (!quarantined && !processes.hasUnsafeWriters) for (const release of [...releases].reverse()) {
+          try { await release(); releases.delete(release); }
+          catch (error) { event('lock-release-failed', { reason: error.message }); }
+        }
+      }
+    },
+  };
+}

@@ -1,6 +1,8 @@
 # Sandcastle 原始设计调研笔记
 
-> 现行基准说明：本文主要研究历史 `.sandcastle/run.ts`；其中 MAX_PARALLEL=4、最多10轮属于 dogfood/历史调用层，不能据此声称 `src/templates/parallel-planner-with-review` 模板也有四槽上限。固定 commit `e99f832f26dc9d245c019a9ddd19fa5dee792427` 模板只处理 open、allSettled 后合并成功部分，无本地 >5确认/BLOCKED分流/模型升级。现行本地流式增强见 [差异表](sandcastle-vs-afk-sequence.md)。
+> **SPEC #8 阅读指引**：以下历史源码与验收结论原样保留，不是当前运行协议。现行 AFK 使用固定 `e99f832f26dc9d245c019a9ddd19fa5dee792427` 的函数级提取和三份原版中文角色模板；全部就绪票定批并发、不补位，删除全 blocked fallback，恢复真实 stdout 可续的60秒 completion grace。该版本已有 `src/sandboxes/no-sandbox.ts`，无 Docker 不等于必须重写。现行决定见 [ADR 0005](../adr/0005-afk-sandcastle-source-reuse.md)，逐项差异见 [对照表](sandcastle-vs-afk-sequence.md)；历史三CLI与长测不自动算 #8 通过。
+
+> 历史研究边界：本文主要研究历史 `.sandcastle/run.ts`，正文保留当时结论。固定 commit `e99f832f26dc9d245c019a9ddd19fa5dee792427` 的 `parallel-planner-with-review/main.mts` 无固定四票并发限制，但同样有最多 10 轮的外层循环；不要将 dogfood 的并发 4 当作模板限制。现行 AFK 的固定批次交付及其与上游的差异见 [差异表](sandcastle-vs-afk-sequence.md)。
 
 > 调研对象：`https://github.com/mattpocock/sandcastle`（本次通过 `git clone --depth 1` 成功获取，随后 `git fetch --unshallow` 拉全 1193 个 commit，因此**读到了完整源码与历史**，非仅 README）。
 >

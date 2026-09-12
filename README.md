@@ -99,7 +99,7 @@ flowchart LR
 | [to-tickets](skills/engineering/to-tickets/SKILL.md) | 将计划、spec 或当前对话拆解为一组 tracer bullet tickets，每张 ticket 声明其 blocking edges，并发布到已配置的 tracker（本地以每张 ticket 一个文件用文本记录 edges，或在真实 tracker 上使用原生 blocking 链接）。 |
 | [triage](skills/engineering/triage/SKILL.md) | 将 issue 和外部 PR 通过一个分类角色 state machine 进行 triage 流转：分类、验证、如有需要，grill（追问澄清），并编写 agent-ready brief。 |
 | [wayfinder](skills/engineering/wayfinder/SKILL.md) | 把一大块工作（超过一个 agent 会话能容纳的体量）规划为 issue tracker 上共享的 decision tickets 的 map，然后逐个解决它们，直到通往 destination 的路清晰可见。 |
-| [afk-issue-loop](skills/personal/afk-issue-loop/SKILL.md) | 处理指定 GitHub Ticket；未指定时批量处理 open `ready-for-agent` Tickets，按依赖实现、审查并流式合并。 |
+| [afk-issue-loop](skills/personal/afk-issue-loop/SKILL.md) | 启动独立本地脚本处理指定 Tickets（默认 open `ready-for-agent`）：全部就绪票一次定批并发、不补位、CLI 实现与审查、批末汇总合并关闭；确认启动后可结束发起会话，日志可查、运行可停止。 |
 | [ask-advisor](skills/personal/ask-advisor/SKILL.md) | 显式把当前决策点交给强模型顾问（strong-model-consultant），获取决策建议。 |
 | [blind-spot-pass](skills/personal/blind-spot-pass/SKILL.md) | 找出用户的 unknown unknowns 并向用户解释。当用户要求 blind spot pass 时使用。 |
 | [qa-plan](skills/personal/qa-plan/SKILL.md) | 根据最近一批 commit 生成 step-by-step QA 测试计划，并保存为 GitHub issue。用户通过 /qa-plan 调用。 |

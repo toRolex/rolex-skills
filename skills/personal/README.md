@@ -8,7 +8,7 @@ Rolex 原创的个人 skill——本仓库相比上游 mattpocock/skills 的差�
 - **[to-plan](./to-plan/SKILL.md)** — 写一份供审阅的实现计划：最可能变的决策置顶，机械性工作沉底。
 - **[to-pitch](./to-pitch/SKILL.md)** — 打包 prototype、spec、notes 成争取 buy-in 的文档：explainer 加速理解，pitch 加速批准。
 - **[quiz-me](./quiz-me/SKILL.md)** — 就一次变更出报告和测验，满分通过才 merge。
-- **[afk-issue-loop](./afk-issue-loop/SKILL.md)** — 处理指定 Ticket；未指定时扫描 open `ready-for-agent`，按原生依赖自动实现、审查与合并。
+- **[afk-issue-loop](./afk-issue-loop/SKILL.md)** — 启动独立本地脚本，以 CLI 和 worktree 将全部就绪 Tickets 一次定批并发实现、审查，批末合并关闭；默认 open `ready-for-agent`，启动后可结束发起会话，提供日志与停止入口。
 - **[ask-advisor](./ask-advisor/SKILL.md)** — 显式把当前决策点交给强模型顾问（strong-model-consultant），获取决策建议。
 - **[qa-plan](./qa-plan/SKILL.md)** — 从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue。
 
