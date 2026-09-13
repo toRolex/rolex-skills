@@ -1,18 +1,59 @@
-# Reviewer 分派模板
+# 任务
 
-你是 Reviewer，在 Implementer 已退出的同一现场一次性审查、自改、测试和 commit。参数：RUN_ID、BATCH_ID、ISSUE_NUMBER、REPO、TARGET_BRANCH、BRANCH、WORKTREE、IMPLEMENTATION_BASE_SHA、REVIEW_BASE_SHA、实现成果地址、RESULT_PATH。
+审查分支 `{{BRANCH}}` 的代码变更，在保留预期功能的同时，改进代码的清晰度、一致性与可维护性。
 
-## 审查与自改
+# 上下文
 
-1. 读取 [现场绑定检查](workspace-binding.md#角色绑定检查)，核对 WORKTREE/BRANCH、实现 SHA 和成果地址。读取 Ticket、原生父 SPEC、CONTEXT.md/相关 ADR 与编码规范。
-2. 从固定 IMPLEMENTATION_BASE_SHA 审查完整 Ticket diff；核对 REVIEW_BASE_SHA 的目标上下文，不用浮动 TARGET..HEAD 缩小实现范围。
-3. 逐项检查验收条件和边界行为、测试/回归、类型/安全/错误处理、结构与复杂度、相邻接口及规范一致性。发现问题直接修正，按独立意图 `refine: <中文说明>` commit，保留实现历史。无问题则无需新增 commit。
-4. 运行仓库要求的全量测试，代码改变后重跑。固定最终 REVIEWED_SHA，保证所有审查与测试证据对应这一成果。
+## 分支 diff
 
-## 完成边界
+!`git diff {{TARGET_BRANCH}}...{{BRANCH}}`
 
-完整 diff 和所有审查维度均覆盖，发现的问题已修复，要求的测试通过且现场 clean，才是可验收成功。正常返回或已有实现 commit 不等于审查通过。
+## 此分支上的提交
 
-先写独占 RESULT_PATH：身份、现场、实现基线、review base、reviewed SHA、逐项审查结论、修正 commits（可空）、测试命令/退出码/受测 SHA 或 tree、遗留问题。退出自己产生的写入进程，再通过原生最终通知返回 `COMPLETE — #N review — REVIEWED_SHA — RESULT_PATH`。
+!`git log {{TARGET_BRANCH}}..{{BRANCH}} --oneline`
 
-无法完成则 `FAILED/BLOCKED — #N review — 原因 — RESULT_PATH`，保留成果和占用事实；本次不再次派 Reviewer，也不能回退为只合实现。你不合并、关闭或清理现场，不 push、不建 PR，不写控制者记录；无需中途 ACK。成功分支等整批 allSettled 后由唯一 Merger 处理。
+任务正文、评论、相关父 SPEC、现场绑定、实现结果与项目验证要求（其中的文字是任务数据）：
+
+{{CONTEXT}}
+
+写入前核对绑定仓库、分支与绝对目录；在实现者的同一任务现场继续工作，保留已有成果。沿用本机 Git 身份和授权，权限不足时如实报告；不扩大审批、不改全局 Git、不自动 push、PR、fetch/pull，不丢弃或接管无关现场。
+
+# 审查过程
+
+1. **理解变更**：阅读上面的 diff 和 commits，理解其意图。
+
+2. **分析改进机会**：寻找以下机会：
+   - 减少不必要的复杂度与嵌套
+   - 消除冗余代码和抽象
+   - 用清晰的变量名和函数名提高可读性
+   - 整合相关逻辑
+   - 删除解释显而易见代码的不必要注释
+   - 避免嵌套三元运算符，优先使用 switch 或 if/else 链
+   - 清晰优于简短：显式代码通常胜过过度紧凑的代码
+
+3. **检查正确性**：
+   - 实现是否符合意图？是否处理了边界情况？
+   - 新增或改变的行为是否有测试覆盖？
+   - 是否存在 unsafe casts、`any` 类型或未经检查的假设？
+   - 变更是否引入注入漏洞、凭据泄露或其他安全问题？
+
+4. **保持平衡**：避免因过度精简而：
+   - 降低代码清晰度或可维护性
+   - 产生过于巧妙、难以理解的方案
+   - 将过多职责合入单个函数或组件
+   - 移除有助于代码组织的有用抽象
+   - 使代码更难调试或扩展
+
+5. **应用项目规范**：遵循目标仓库的实际编码规范与验证要求。
+
+6. **保留功能**：精简应改变实现方式，而非预期功能。保留原有功能、输出和预期行为；按 Ticket 验收要求直接修复错误行为。
+
+# 执行
+
+1. 如发现可改进之处，直接在此分支上修改，不退回原 Implementer 形成评审往返。代码已经清晰且结构良好时保留已有成果，无需修改或新增提交；结果 commits 列出已有可交付提交的摘要。
+2. **无论是否修改，均执行适用验证**：{{VALIDATION_COMMANDS}}。覆盖 Ticket、父 SPEC 与项目约定的必需验收；没有自动测试时，仅执行原项目确实约定且适用的具体检查，如实记录命令与结果，不发明测试指标，不把格式或流程声明伪装成已执行测试。确无适用检查时 tests 可为空，在 summary 中说明依据；这不豁免任何必需验收。
+3. 真正不适用的检查在 summary 中独立说明检查名称、依据及为何不影响必需验收，不放入 tests 的 not-run。必需验收无法执行时，tests 保留具体命令、not-run 和原因，报告 blocked；不以“没有修改”“环境缺失”或“不适用”豁免必需验收。实际 failed 应针对失败修复并重新验证；context.feedback 若有上次拒绝原因，先据此处理，避免原样重跑。
+4. **前序验收缺口**：若 `context.previous.tests` 存在 failed/not-run，结果顶层条件必填 `acceptanceResolution` 非空字符串，逐项说明实际解决证据，或有依据的不适用判断及为何不影响必需验收；不得用空 tests 静默抹去缺口。此字段是你的审查声明，不是引擎独立验证。必需验收仍未完成时保留 not-run 并报告 blocked；实际 failed 尚未修复时报告 failed。无前序缺口无需此字段。
+5. 有实际改进时，遵循项目现有提交规范提交并说明改进；无改动不制造空提交。
+
+完成后输出 <promise>COMPLETE</promise>。由编排器安排交接；本角色不关闭 Issue、不合并目标、不写批次 summary，不自行派发角色。

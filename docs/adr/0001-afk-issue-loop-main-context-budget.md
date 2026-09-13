@@ -1,5 +1,9 @@
 # afk-issue-loop 主窗口预算改造
 
+> **现行优先级：以 [SPEC #8](https://github.com/toRolex/rolex-skills/issues/8) / [ADR 0005](0005-afk-sandcastle-source-reuse.md) 为准。** 以下所有“仍有效”等状态均属当时历史；主会话调度与模板自加载已由独立 CLI、启动前读取三 MD 及动态 Git 注入替代。本文历史决定不重写。
+
+> **历史决策，现行替代范围见 [Issue #7](https://github.com/toRolex/rolex-skills/issues/7) / [ADR 0004](0004-afk-local-cli-orchestrator.md)。** 以下旧状态与正文仅记录当时结论。主会话原生调度、plan 落盘/恢复、固定 sonnet、载体确认、通知驱动和仅 completion signal 汇报均不再适用；现行为 skill 启动独立脚本、CLI 角色与引擎结构化结果，不要求主窗口持续在线。
+
 > 状态：部分被 [ADR 0002](0002-afk-issue-loop-sandcastle-failure-timeout.md) 与 [ADR 0003](0003-afk-issue-loop-native-dag-recovery.md) 修订。本文的主窗口预算、plan 落盘、统一 sonnet 与载体确认仍有效；超时和恢复语义以后二者为准。
 
 控制者上下文曾被 issue 全文、模板复制、测试输出和后台轮询快速填满。决定采用**主窗口预算**：

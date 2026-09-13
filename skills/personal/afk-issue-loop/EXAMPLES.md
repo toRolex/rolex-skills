@@ -1,72 +1,66 @@
 # AFK Issue Loop 示例
 
-以下是调度说明，**不是本次运行过的测试**。权威边界见 [REFERENCE.md](REFERENCE.md)。
+## 启动、查看与停止
 
-## 原生关系与初始关闭
+用户在目标项目调用 `/afk-issue-loop 3 4 5`；启动者把编号转为逗号分隔，使用已解析的 skill 绝对路径：
 
-调用 `/afk-issue-loop 42 44 45`：#42 初始 CLOSED；#44 blocked by #43；#43/#44/#45 open ready-for-agent；#45 独立。
-
-```json
-{
-  "version": 2,
-  "run_id": "20260912T120000Z-12345",
-  "target_branch": "main",
-  "roots": [42, 44, 45],
-  "specs": [],
-  "batch": {"id": 0, "phase": "idle", "tickets": []},
-  "issues": [
-    {"number": 42, "title": "Closed input", "branch": "afk/issue-42", "spec": null, "blocked_by": [], "live_blocked_by": [], "status": "done", "stage": "merge", "writer": "none", "done_source": "initial_closed"},
-    {"number": 43, "title": "A", "branch": "afk/issue-43", "spec": null, "blocked_by": [], "live_blocked_by": [], "status": "pending", "stage": "implement", "writer": "none"},
-    {"number": 44, "title": "C", "branch": "afk/issue-44", "spec": null, "blocked_by": [43], "live_blocked_by": [43], "status": "pending", "stage": "implement", "writer": "none"},
-    {"number": 45, "title": "B", "branch": "afk/issue-45", "spec": null, "blocked_by": [], "live_blocked_by": [], "status": "pending", "stage": "implement", "writer": "none"}
-  ]
-}
+```sh
+node "<skill绝对路径>/scripts/afk.mjs" start --repo "/absolute/project" --issues 3,4,5
+node "<skill绝对路径>/scripts/afk.mjs" status --run "/absolute/project/.afk/logs/<返回的run>"
+node "<skill绝对路径>/scripts/afk.mjs" stop --run "/absolute/project/.afk/logs/<返回的run>"
 ```
 
-#42 只计关闭审计，不称本次交付、不创建或清理历史 worktree。父 SPEC 只入 specs。#43 缺资格、某页读取失败、文本 blocker 未录入原生关系、PR 输入或图有环，均报告具体输入错误，不空图成功。
+只有握手返回 `started` 才报告已启动，并给出实际 run、目标、日志和控制命令。用户可以结束发起会话。启动失败则照实报告，不能说后台仍在工作；`stopping` 只代表停止请求，须确认 `stopped`，未知则保留现场。
 
-## A→C，B 独立：固定批次
+指定执行 CLI 时加 `--provider codex` 或 `--provider pi`；默认 claude 与宿主无关。省略 `--model`/`--effort` 使用所选 CLI 本机配置。`--spec 1 --issues 2,3` 只实施 Tickets。无项目优先级约定时省略 `--priority-labels`，全部同级按编号；若项目明确规定高到低为 critical、high、low，才传 `--priority-labels critical,high,low`，这不是本仓库现有映射。
 
-1. 批 1 固定 `[43,45]`，一起启动两个真实 Implementer；无探测。#44 等依赖。
-2. A 实现验收、退出后立即 Reviewer；B 仍可实现。A 审查完成后等批末，不能先合并，也不能趁空位启动 C。
-3. B 审查结束，整批 allSettled。A、B 均可验收，启动**一个** Merger，顺序合 A 再 B；B 在新目标上复核并测试。
-4. 核对两项交付，关闭和清理各自登记。批 1 settled 后刷新原生依赖，A 已交付且关闭才解锁 C；批 2 才启动 C。
-5. A 清理失败但交付/关闭已验证且现场安全：标待清理，不重做 A，不单因清理阻塞 C。
+新运行发现旧 `afk/issue-3` 时，先确认无旧写者及归属；只有用户明确允许继续该票旧现场才加 `--reuse 3`，不是同名自动接管。同次运行自己的失败进度则正常复用。
 
-若五个独立 Tickets 就绪，批 1 只取前四个；其中任何项先结束也不补第五个。计数仍为固定四成员，直到批 1 settled；存活角色数单独报告。
+## 固定批次与接力
 
-## 局部失败与全失败
+A 阻塞 C，B 独立。本批选 A、B，并发 Implementer。A 实现结束就接独立 Reviewer，B 继续实现；A 审查通过仍等批末。B 实现成功后同样接独立 Reviewer；全批实现/审查 pipeline settled 且写者结束后，一个 Merger 合并可交付分支，完成验证、写本批一个 summary，再关闭对应 Tickets。下一批刷新依赖才选择 C。
 
-批 1 `[A,B]`：A Implementer 明确失败，记录 `skipped/implement`、原因、原始基线/成果地址和 `writer=exited`；B 正常审查。allSettled 后唯一 Merger 只合 B。下一批跳过 A，A 的下游依赖阻塞，无关就绪任务继续。上下文压缩后仍是同 run，不重新选 A。
+五票独立就绪时五票同属首批并发；第六票在批中解除 blocked，也要等下一批，不中途补位。一票就绪也可启动。
 
-A、B 全失败或全无可交付变化：成功集为空，不启动 Merger，结束本批再选择剩余就绪项。Reviewer 无新增 commit，但完整审查及测试通过，仍可进入成功集；Reviewer 失败则不能只合 Implementer commits。
+## 实时输出与等待
 
-下一次用户明确调用才重新评估 A；先核对旧进程、现场、原始实现基线和有效 commits，不能用当前 HEAD 掩盖既有实现范围。
+独立脚本按 [实时输出与 idle](reference/workspace-binding.md#实时输出与-idle)持有 CLI stdout；以下是应满足的行为，不代表所有 CLI 均已实测通过。
 
-## 未知退出与局部冻结
+- A 在 00:00 实际启动，首行前截止点为 10:00；09:00 收到一行普通 stdout 调试输出，自动追加目标仓库 `.afk/logs/` 的 A 日志，截止点移到 19:00。无法解析的行也续期；B 的输出、stderr 和脚本心跳不影响 A。
+- A 持续逐行输出超过十分钟仍运行，没有角色总时长。发起会话结束不影响脚本以后启动 Reviewer、Merger 和下一批。
+- A 打印 `<promise>COMPLETE</promise>` 后切为默认 60 秒 completion grace；第 50 秒收到新 stdout，grace 从此再计 60 秒，未知行也续期；stderr 不续期。正常退出不等待满 grace。
+- A stdout EOF 或打印完成文本，但进程仍运行：仍管理生命周期；grace 到期主动收尾，确认受管执行结束且结果和成果有效才决定接 Reviewer。自身 grace 终止不因信号退出码一律失败；外部异常信号、idle、权限拒绝或坏结果不冒成功。
+- A 连续静默达到 600 秒，终止请求已发出但尚未确认结束：保留占用，不能接 Reviewer 或下批 Implementer。确认实际终止后按失败保留进度，独立票 B 继续。
+- 自动日志或接流出错必须报告故障，不以禁用监控、退回宿主委派作为成功运行。
 
-A 失败且停止仅返回“请求受理”：A 可 skipped，但 writer=unknown，现场仍占用。按宿主机制记录有限观察边界，到界不再延长。
+## 失败后保留进度重选
 
-- 有可信隔离证据证明 A 不影响 B、目标及相关共享元数据，B 可在批末合并；A 现场跨批冻结，不启动同现场替代写者。
-- 只知道不同 worktree 路径，无法证明共享 refs/元数据隔离：不强合 B，保存成功成果后返回安全阻塞，不无限等退出。
-- 宿主最终通知明确保证所有相关写者退出：接受该证据，正常交接，无额外 ACK/进程探针要求。
-- 目标存在未解决冲突、未验收 commits 或未知 Merger 写者：冻结目标，停止后续合并，不以 skipped 释放主现场。
+A 实现失败、B 审查通过：结束 A 当前执行，本批只合 B。A 的 clean worktree 可移除但 branch 和 commits 留着；dirty 目录保留。下一批读取 open 票，A 仍是候选，选中后新 Implementer 复用同名分支和已有进度。
 
-## 批次 Merger 部分成功
+全批失败时免去 Merger，下一批照常重新选票。复用 A 时即使本次没有新 commit，此前尚未交付的分支改动仍需独立审查；已有实现全部合格的 Reviewer 可以不增加 commit。
 
-清单 `[A,B,C]`：A 已合并、复核测试及 summary 证据保存，关闭成功；B merge 后测试失败，目标留下未验收提交；C 尚未处理。
+## 范围外依赖与内部僵局
 
-逐项记录 A delivered、B/C 本次 skipped，目标污染明确阻塞。不能用整批 FAILED 抹掉 A，也不能再次派 Merger 重试 B/C。A 的交付事实不意味着污染目标可以继续使用。
+用户给 A、B，A 的开放前置 X 不在范围：开头报告 X 和受影响的 A，B 继续。A 的下游同样等待，直到用户处理，不自动纳入 X。
 
-若仅 A 关闭失败：A 保留 delivered，记待关闭；目标安全时仍可处理 B/C。若最终通知丢失，控制者只读核对 RESULT_PATH 与真实 refs/GitHub，不盲重发合并或关闭副作用。证据先落盘，最终通知后控制者再清理，无需 Merger 中途等 durable ACK。
+范围内 A、B 互相 blocked，且无在途管线、可推进合并或待关闭交付：记录各自 blocker 并结束本次运行，不挑一票强行开工。若 A 的前置正在本批合并或关闭，则先完成在途交付再刷新，不能提前认定全阻塞停止。
 
-## 最终报告示意
+## 父 SPEC 与无改动
 
-```text
-部分完成：批次 2；交付 3；初始关闭审计 1。
-本次跳过：#43 implement 测试失败；下游 #44 依赖阻塞。
-待关闭：#45（权限拒绝，保留原错误）；待清理：#46（现场移除失败）。
-退出未知：#47，现场 /repo-wt/afk-47，已达有限观察边界。
-证据：<运行记录绝对路径>；目标 SHA：<最后验收提交>。
-未安全结束不计成功；下次明确调用再评估失败项。
-```
+用户说明 #1 是 SPEC，#2 是 Ticket，正文有 Parent #1。读 #1 作需求上下文，处理 #2，无需先补原生父子关联；#2 交付后 Merger 只关闭 #2。
+
+实现者报告无分支改动及 commits，就说明原因，免去空跑 Reviewer 和 Merger。若代码尚未满足 Ticket，下批继续处理；已合并验证且 summary 完成、只剩关闭的情况见下一例。
+
+## 合并后关闭失败
+
+Merger 完成本批 A、B 合并及测试，再写一个 summary。随后关闭 A 成功，B 因临时服务错误关闭失败；返回两票实际结果。下一批 B 只交给 Merger 补关闭，免去重复实现、审查和 summary。若拒绝源于权限，则等待用户处理权限，调度者不会换身份代关。
+
+## 合并尚未完成
+
+A 合并通过，B 合并后测试失败，C 尚未合并：Merger 先修复 B 再继续 C。确实无法修好则保留目标现场，返回 B 的问题及 C 未处理情况。后续由 Merger 接着修目标，按 [合并未完成](REFERENCE.md#合并未完成)继续；目标验证通过、原批可处理分支合完后才写原批一个 summary，再关闭对应票。若目标被用户事项阻挡，独立票 D 的现场可用，D 仍可继续实现与审查；D 属于新固定批次，Merger 按原批分组串行交付，不能把 D 混入 A/B/C 的 summary。
+
+## 读取与用户停止
+
+读取某票 blocked-by 出现 EOF，按原授权方式重试。仍无法读取则说明依赖未知，该票及受影响下游等待，独立票继续。
+
+用户停止或权限拒绝保持等待用户；失败票下批重选不等于重启被用户停止的执行。

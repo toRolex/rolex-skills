@@ -69,7 +69,7 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 | `clean-branches` | 自动 | 清理已合并的本地和远程分支，也清理残留 worktree |
 | `git-flow-conventions` | 自动 | Git Flow 分支命名、commit 格式、PR 流程、发版规范 |
 | `publish-release` | `/publish-release` 或自动 | 从 develop 发版：bump 版本、更新 changelog、打 tag、合并到 main |
-| `afk-issue-loop` | `/afk-issue-loop [issue numbers]` | 处理指定 Tickets；未指定时扫描 open `ready-for-agent`，按原生依赖自动实现、审查与合并 |
+| `afk-issue-loop` | `/afk-issue-loop [issue numbers]` | 启动独立本地脚本；以 CLI 和 worktree 将全部就绪 Tickets 一次定批并发实现、审查，不补位，批末汇总合并关闭（默认 open `ready-for-agent`），返回日志与停止命令 |
 | `qa-plan` | `/qa-plan` | 从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue |
 
 #### Shared Vocabulary（共享词汇层）
@@ -187,7 +187,7 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 | **修 Bug** | `triage` → `diagnosing-bugs` → 修复 + 测试 → merge |
 | **调研技术方案** | `research` → 审阅 → `grill-with-docs` → 进入主链路 |
 | **重构模块** | `improve-codebase-architecture` → 拷问 → `to-spec` → `implement` |
-| **批量处理 Issue** | `afk-issue-loop`（自动逐个处理） |
+| **批量处理 Issue** | `afk-issue-loop`（独立脚本固定批次处理；确认 started 后可结束会话，status/stop 见[用法](personal/afk-issue-loop.md)） |
 | **发版** | `publish-release`（从 develop 一键发版） |
 | **同步代码** | `safe-pull`（自动 stash + rebase） |
 | **清理分支** | `clean-branches`（删除已合并分支） |

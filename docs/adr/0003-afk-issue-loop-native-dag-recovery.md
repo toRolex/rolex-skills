@@ -1,5 +1,9 @@
 # afk-issue-loop 原生 DAG 与自动恢复
 
+> **现行优先级：以 [SPEC #8](https://github.com/toRolex/rolex-skills/issues/8) / [ADR 0005](0005-afk-sandcastle-source-reuse.md) 为准。** 以下四票/四槽与旧状态均为历史；现行一次并发全部就绪票、不补位，无在途或可推进交付且剩余全 blocked 则报告结束，不再 fallback。原生 blocked-by、批末 allSettled 和必要 Merger 续作保留，不恢复范围扩展或旧恢复协议。
+
+> **历史决策，现行替代范围见 [Issue #7](https://github.com/toRolex/rolex-skills/issues/7) / [ADR 0004](0004-afk-local-cli-orchestrator.md)。** 以下旧状态（包括“barrier 被流式合并替代”）仅为历史。现行保留原生 blocked-by 权威，采用固定最多四票、全批 settled barrier、每批一个 summary 后由 Merger 关 Ticket；递归扩大范围、依赖闭包证明、自动关 SPEC、plan/runbook、原阶段立即重派、占槽补位与模型升级均不适用。失败下批可重选复用，未完成合并和 close-only 直接由 Merger 续做。
+
 > 部分 superseded：barrier、每批 summary 与无条件立即重派已由[流式合并决策](../plans/afk-streaming-merge-implementation-notes.md)替代。现行协议见 [REFERENCE](../../skills/personal/afk-issue-loop/REFERENCE.md)。本文保留历史决定；上游 allSettled 是结束后合并成功部分，不要求全部成功，四槽是本地限制而非模板限制。
 
 AFK 的输入已经由 SPEC 拆成 GitHub Ticket，并通过原生 parent/sub-issue 与 issue dependencies 表达关系。旧 Planner 又从正文推断依赖，旧失败流程停在 `failed` 等待用户；两者分别引入双重真相和无人值守中断。

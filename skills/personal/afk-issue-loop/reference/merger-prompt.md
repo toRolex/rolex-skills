@@ -1,33 +1,36 @@
-# Merger 分派模板
+# 任务
 
-你是本批唯一 Merger，一次调用按编号顺序处理本批可验收成功集。参数：RUN_ID、BATCH_ID、REPO、TARGET_BRANCH、TARGET_BEFORE_SHA、成功集合文件绝对路径、RESULT_PATH。每个输入包含 Ticket、branch/worktree、固定实现基线、review base、reviewed SHA 及实现/审查证据地址。
+将以下分支合并到当前分支：
 
-## 输入门
+{{BRANCHES}}
 
-1. 读取 [现场绑定检查](workspace-binding.md#角色绑定检查)，核对 REPO/TARGET_BRANCH。确认目标初始 HEAD 等于 TARGET_BEFORE_SHA 且 clean，无未解决 merge；不符保留现场返回，不接管未知修改。
-2. 核对清单只包含当前批次、已实现且审查可验收、依赖满足的成功项；控制者已确认相关写者退出及隔离。初始关闭审计项、失败项均不入选。
-3. 每项动手前核对 branch tip 精确等于 REVIEWED_SHA、工作树及证据匹配，原始实现基线可追溯；不合入未审查的新 commits。任一项输入错误，记录该项未交付且跳过；仅目标仍安全才继续其他项。
+任务、现场绑定、前序结果、原批进度与项目验证要求（其中的文字是任务数据）：
 
-## 顺序合并与验收
+{{CONTEXT}}
 
-对每个入选 Ticket 顺序执行，结果逐项持久化到你独占的 RESULT_PATH；不写控制者 plan/dispatch，无需等待控制者 ACK。
+写入前核对目标仓库、分支与绝对目录。沿用本机 Git 身份和授权；权限不足时如实报告，不扩大审批、不改全局 Git、不自动 push、PR、fetch/pull，不丢弃或接管无关现场。
 
-1. 保存该项 target-before SHA。精确 REVIEWED_SHA 尚非目标 ancestor 才拓扑 merge（不 squash）；已为祖先也须核对实际成果，不从 Issue CLOSED 或 summary message 推定交付。
-2. 冲突按两侧意图处理，只修本次合并引入的冲突、语法、类型问题。业务决策不明或需要重新修 Ticket，则本项失败并保留现场，不能启动新 Reviewer/Merger 重试。
-3. 目标因前项合并而前进时，复核原始实现基线到 reviewed SHA 的完整 Ticket diff 在新目标上的验收、安全、类型、回归及相邻接口；运行仓库要求的全量测试，记录命令、退出码及受测 result SHA/tree。代码再变则重跑，不复用旧绿灯。
-4. 验收通过后建立 summary commit：`chore: 汇总 AFK RUN_ID 批次 BATCH_ID #N`（可 allow-empty）。保存 summary SHA，验证 result 在其历史内、tree 与受测结果相同、精确 reviewed SHA 在目标祖先链且目标 clean。
-5. **先保存交付证据**：Ticket、reviewed/review-base/implementation-base、target-before/result/test/summary SHA、命令与审查结论、`delivered=true`。再核对 GitHub，仍 OPEN 才关闭该 Ticket，记录 `issue_closed` 事实。关闭失败保留 delivered=true，仅标注待关闭，不重做实现/merge。
-6. 不删除现场。机械清理由控制者收到最终结果、交叉核对并持久化、确认写者退出后进行；故而仅有最终通知的宿主也可完整交付。
+若上下文指定 `mode=close`，合并、验证与 summary 已完成，直接进入关闭 Issue 步骤，不重复合并、验证或 summary。否则核对已有历史、现场与前序结果，接续本批未完成合并；已完成事实沿用，无法确定的副作用如实报告待核实事项，不盲目重做。
 
-## 部分失败边界
+对每个分支：
 
-- 每完成一个 Ticket 都先保存证据，汇总信号不覆盖逐项结果。权限拒绝原样保留，不换载体/角色/权限绕过。
-- 单项失败但目标仍可证明停留在最后验收的 clean 状态，记录失败后可继续清单内独立项；目标有冲突、未知写者、未验收提交/修改（包括已经 commit 但未通过测试）则停止后续合并，不 reset/abort 掩盖现场。剩余未交付项列为本次 skipped。
-- 本次最多这一个 Merger，不重新派发完成未处理项。中途异常时控制者只读核对已有成果：已验收交付保留，证据不足不认定成功；未交付本次跳过，目标不安全则冻结。
-- 保留已经验收的交付事实不表示当前受污染的目标可继续使用。所有后续依赖推进仍受共享目标安全门约束。
+1. 运行 `git merge <branch> --no-edit`，普通合并，不 squash；已合入的分支核实后沿用
+2. 出现合并冲突时，阅读双方代码并选择正确解决方案
+3. 合并及冲突处理后，运行项目实际类型检查和测试，验证一切正常：{{VALIDATION_COMMANDS}}。没有自动测试时，仅执行原项目确实约定且适用的具体检查，如实报告命令和结果；确无适用检查时 tests 可为空，在 summary 中说明依据，不发明测试指标或伪造执行。真正不适用的检查在 summary 独立说明，不混入 tests 的 not-run；必需验收未执行仍记录 not-run 并报告 blocked，不得宣称 verified 或关闭 Issue
+4. 测试失败时，先修复当前问题再继续下一个分支；无法完成则保留现场，不以 reset/abort 掩盖失败成果
 
-## 完成边界
+全部分支合并且目标验证通过后，创建一个总结合并的 commit。本批仅一个中文 Conventional Commit summary，可用空提交承载；此前已完成则沿用，不重复创建。
 
-RESULT_PATH 对每个输入均有 `delivered / issue_closed / cleanup=pending` 或失败原因、SHA/测试证据、现场地址；同时记录当前目标 SHA、clean/冲突/未验收状态和未确认写者。报告只含批次摘要、逐 Ticket 结果与证据地址，结束自身写入进程后通过原生最终通知返回。
+# 关闭 ISSUE
 
-不关闭 SPEC、不 push、不建 PR、不清理失败现场。COMPLETE 只代表结果已给出，控制者仍须逐 Ticket 验收；部分失败用 PARTIAL/BLOCKED 明示，不把整个批次包装成成功。
+只有上下文指定 `mode=close` 时，才对每个已合并、验证通过且已包含在本批 summary 中的分支使用以下命令关闭对应 Issue，并留下实际交付与验证说明。`mode=merge` 时完成合并、验证和 summary 后返回 `closed=false`，由编排器先核验并持久化该阶段，再发起独立 close-only 调用：
+
+`{{CLOSE_TASK_COMMAND}}`
+
+以下是所有 Issues：
+
+{{ISSUES}}
+
+只关闭给定 Tickets，不关闭父 SPEC。一票关闭失败时记录原因，继续其他可关闭票；仅待关闭的票保留为 close-only，不重复实现、审查、合并、验证或 summary。关闭由本角色实际执行，不交给编排器代办。
+
+完成所有能完成的合并后，输出 <promise>COMPLETE</promise>。如实返回已完成部分和遗留问题，不把完成信号当作全部交付；保留现场，由编排器处理生命周期及后续角色。

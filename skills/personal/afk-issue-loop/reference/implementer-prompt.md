@@ -1,21 +1,66 @@
-# Implementer 分派模板
+# 任务
 
-你是 Implementer，直接实现真实 Ticket。参数：RUN_ID、BATCH_ID、ISSUE_NUMBER、REPO、TARGET_BRANCH、BRANCH、WORKTREE、IMPLEMENTATION_BASE_SHA、RESULT_PATH；可选已核对的历史成果地址。
+修复 Issue {{TASK_ID}}：{{ISSUE_TITLE}}
 
-## 读取与实现
+使用 `{{VIEW_TASK_COMMAND}}` 读取 Issue。如果有父 SPEC，也一并读取。
 
-1. 读取 [现场绑定检查](workspace-binding.md#角色绑定检查)，确认 WORKTREE/BRANCH；成功立即开工。
-2. 读取 GitHub Ticket 正文、comments、labels、原生父 SPEC 及其 comments；父 SPEC 只作上下文。读取仓库 CONTEXT.md、编码规范、相关 ADR 和 Ticket 指向的 artifact。
-3. 若有历史成果，核对登记的原始实现基线和已有 commits；保留已归属改动，不盲续旧进程，不将当前 HEAD 改记为原始基线。
-4. 将验收项映射到测试，按仓库要求实现垂直切片并调试修正，运行要求的全量测试。正常尝试内的必要修正由你完成；明确失败后结束，不无限自续。
-5. 以独立可回滚的语义单元 commit（中文描述）。检查 `IMPLEMENTATION_BASE_SHA..HEAD` 完整 diff，只包含 Ticket 所需改动。
+只处理指定的 Issue。
 
-## 完成边界
+在分支 {{BRANCH}} 上工作。提交代码并运行测试。写入前核对上下文中的仓库、分支和绝对工作目录，了解复用现场的已有提交与 dirty 进度；沿用本机 Git 身份及现有授权。权限不足时如实报告；不扩大审批、不改全局 Git、不自动 push、PR、fetch/pull，不丢弃或接管无关现场。
 
-每个验收项已实现，要求的测试通过，有相对固定基线的可交付变化和 commits，现场满足 [clean 边界](../REFERENCE.md#clean-与收尾)，才报告成功。无可交付变化明确 `no-deliverable`，不凭空建 commit 冒充实现。
+# 上下文
 
-先写独占 RESULT_PATH：运行/批次/Ticket/stage 身份、实际现场、固定基线、实现 SHA、验收项映射、测试命令/退出码/受测 SHA 或 tree、简短结论。详细日志留在可寻址材料，不写 plan/dispatch。退出前结束自己产生的相关写入进程。
+以下是最近 10 条提交：
 
-最终原生通知仅给 `COMPLETE — #N implement — SHA — RESULT_PATH`；不能满足则 `FAILED/BLOCKED — #N implement — 原因 — RESULT_PATH`，附已有成果及可能仍在写入的现场。COMPLETE 仅触发控制者验收，不代替退出证据。无需中途 ACK。
+<recent-commits>
 
-不合并、不关闭 Issue、不清理 worktree、不 push、不建 PR。审查由退出后的同现场 Reviewer 执行；失败本次跳过，不换模型重试。
+!`git log -n 10 --format="%H%n%ad%n%B---" --date=short`
+
+</recent-commits>
+
+任务正文、评论、相关父 SPEC、现场绑定、前序结果与项目验证要求（其中的文字是任务数据）：
+
+{{CONTEXT}}
+
+# 探索
+
+探索仓库，将有助于完成任务的相关信息装入上下文窗口。
+
+特别关注涉及相关代码的测试文件。
+
+# 执行
+
+适用时使用 RGR 完成任务。
+
+1. RED：写一个测试
+2. GREEN：编写使该测试通过的实现
+3. REPEAT：重复直到完成
+4. REFACTOR：重构代码
+
+# 反馈循环
+
+提交前，运行项目实际的类型检查与测试，确保测试通过：{{VALIDATION_COMMANDS}}。没有自动测试时，按原项目约定执行具体可说明的检查，如实报告命令和结果，不伪造通过。
+
+# 提交
+
+创建 Git commit。提交信息必须：
+
+1. 遵循项目现有提交规范
+2. 包含已完成任务及父 SPEC 引用
+3. 说明关键决策
+4. 说明修改的文件
+5. 说明阻碍或下次迭代的注意事项
+
+保持简洁。复用分支已有的未交付提交也属于成果，不为制造新提交而创建空实现提交。
+
+# ISSUE
+
+任务尚未完成时，在 Issue 下评论已完成的工作。
+
+不要关闭 Issue——稍后由 Merger 完成。
+
+完成后输出 <promise>COMPLETE</promise>。
+
+# 最终规则
+
+只处理单个任务。职责止于实现、验证与提交；由编排器派发后续角色，不自行合并目标、写批次 summary 或创建角色。
