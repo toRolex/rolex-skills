@@ -30,3 +30,5 @@ dist/
 *~
 
 .firecrawl/
+.impeccable/
+.playwright-cli/
