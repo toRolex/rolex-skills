@@ -85,7 +85,7 @@ function acquireRecoveryGuard(path, branch) {
   throw new Error(`现场恢复 guard 在核实后再次被占用：${branch} (${path})`);
 }
 
-async function writerLock(common, branch, verifyAbandoned = async () => {}) {
+async function writerLock(common, branch, probe = () => {}) {
   const key = createHash('sha256').update(`${common}\0${branch}`).digest('hex').slice(0, 32);
   const path = join(tmpdir(), `afk-writer-${key}.sock`);
   const recoveryPath = `${path}.recovery`;
@@ -98,6 +98,7 @@ async function writerLock(common, branch, verifyAbandoned = async () => {}) {
           server.once('error', reject);
           server.listen(path, accept);
         });
+        probe({ branch, path, socketState: 'vacant' });
         return () => new Promise((accept, reject) => server.close(error => error ? reject(error) : accept()));
       } catch (error) {
         if (error.code !== 'EADDRINUSE') throw error;
@@ -107,10 +108,18 @@ async function writerLock(common, branch, verifyAbandoned = async () => {}) {
         catch (statError) { if (statError.code === 'ENOENT') continue; throw statError; }
         let socketState;
         try { socketState = await writerSocketState(path); }
-        catch (probeError) { throw new Error(`现场写锁状态无法确认：${branch} (${path})：${probeError.message}；保留现场，禁止并发接管`); }
-        if (socketState === 'active') throw new Error(`现场仍有活跃写者：${branch} (${path})；等待原运行结束，不并发接管`);
-        if (socketState === 'unknown') throw new Error(`现场写锁响应无法确认归属：${branch} (${path})；保留现场，禁止并发接管`);
-        await verifyAbandoned(branch);
+        catch (probeError) {
+          // unreachable 不是正向活跃证明：记录 probe 事实后继续恢复。
+          probe({ branch, path, socketState: 'unreachable', reason: probeError.message });
+          socketState = 'stale';
+        }
+        if (socketState === 'active') {
+          probe({ branch, path, socketState: 'active', active: true });
+          throw new Error(`现场仍有活跃写者：${branch} (${path})；等待原运行结束，不并发接管`);
+        }
+        // Liveness-first：只有 ownership channel 的明确 active 响应才阻止派发。
+        // stale、unreachable、未知响应和历史 PID 都作为 Recovery 观察事实，不再推测仍有 writer。
+        probe({ branch, path, socketState, active: false });
         try {
           const current = lstatSync(path);
           if (current.dev !== observed.dev || current.ino !== observed.ino) continue;
@@ -126,10 +135,46 @@ async function writerLock(common, branch, verifyAbandoned = async () => {}) {
   }
 }
 
-export async function createEngine(config, processes, event = () => {}) {
+export async function createEngine(config, processes, event = () => {}, observations) {
   const command = (name, args, cwd = config.repo, options) => processes.command(name, args, cwd, options);
   const git = (args, cwd = config.repo) => command('git', args, cwd);
   const gh = args => command('gh', args);
+  // Recovery 的完整 Git/Worktrunk 命令与 stdout/stderr 归入 engine/recovery，
+  // 使接管行为可诊断，且不冒充 provider/assistant 输出。
+  async function recoveryCommand(name, args, cwd, scope) {
+    try {
+      const stdout = await command(name, args, cwd);
+      observations?.observe('engine/recovery', 'recovery-command', scope, { command: name, args, cwd, code: 0, stdout });
+      return stdout;
+    } catch (error) {
+      observations?.observe('engine/recovery', 'recovery-command', scope, { command: name, args, cwd, error: error.message });
+      throw error;
+    }
+  }
+  const recoveryGit = (args, cwd, scope) => recoveryCommand('git', args, cwd, scope);
+  // spec 18：现场的事实集合——could not be inferred from a boolean alone。
+  // OID、commits ahead、ancestry、dirty 与 in-progress 的判定依据全部落盘。
+  const oid = async (rev, cwd) => {
+    try { return await git(['rev-parse', rev], cwd); } catch { return undefined; }
+  };
+  async function recoveryFacts(scope, branch, cwd, targetBranch = target, workspace = cwd) {
+    const facts = { branch, cwd, target: targetBranch };
+    try {
+      facts.branchOid = await oid(branch, config.repo);
+      facts.targetOid = await oid(targetBranch, config.repo);
+      // ancestry 与 commits ahead 是 merged-unverified 分类的直接依据。
+      try {
+        await recoveryGit(['merge-base', '--is-ancestor', branch, targetBranch], workspace, scope);
+        facts.ancestorOfTarget = true;
+      } catch { facts.ancestorOfTarget = false; }
+      facts.commitsAhead = Number(await recoveryGit(['rev-list', '--count', `${targetBranch}..${branch}`], workspace, scope));
+      facts.dirty = Boolean(await dirty(workspace));
+      facts.inProgress = await inProgress(workspace);
+      facts.head = await oid('HEAD', workspace);
+    } catch (error) { facts.error = error.message; }
+    observations?.observe('engine/recovery', 'recovery-facts', scope, facts);
+    return facts;
+  }
   const json = async args => JSON.parse(await gh(args));
   const pages = async endpoint => {
     const result = await json(['api', '--paginate', '--slurp', endpoint]);
@@ -177,6 +222,8 @@ export async function createEngine(config, processes, event = () => {}) {
   const releases = new Set();
   const attemptedTickets = new Set();
   const deliveredTickets = new Set();
+  // planned Attempt 与实际 spawn 的 Invocation 分别记录，供 Self-report/Gate 关联。
+  const plannedAttempts = new Map();
   const mergeQueue = [];
   let targetCwd, targetReason, pending, batch = 0, attempt = 0;
   let running = false, finished = false, quarantined = false;
@@ -188,14 +235,23 @@ export async function createEngine(config, processes, event = () => {}) {
     const match = /^afk\/issue-(\d+)$/.exec(branch);
     return Boolean(match) && event.role !== 'merger' && event.tickets.includes(Number(match[1]));
   }
-  async function verifyAbandonedWriter(branch) {
+  // 历史 writer/PID 事实只作为 Recovery 观察记录。
+  // liveness-first：不完整历史事件、历史 PID/PGID 或 EPERM 都不单独阻止派发；
+  // 只有当前 ownership channel 的明确 active 响应才阻止同 worktree 的写者。
+  async function observeAbandonedWriter(branch, scope = {}) {
     const logsRoot = join(root, '.afk', 'logs');
-    if (!existsSync(logsRoot)) return;
+    if (!existsSync(logsRoot)) {
+      observations?.observe('engine/recovery', 'recovery-writer-probe', { role: 'merger', tickets: scope.tickets, ...scope }, { branch, candidates: [], unknownIncomplete: false, note: '无历史运行日志' });
+      return;
+    }
     const candidates = new Set();
     let unknownWriter = false;
     let directories;
     try { directories = readdirSync(logsRoot, { withFileTypes: true }); }
-    catch (error) { throw new Error(`历史 writer 日志无法读取：${error.message}；现场状态无法确认`); }
+    catch (error) {
+      observations?.observe('engine/recovery', 'recovery-writer-probe', scope, { branch, error: error.message, note: '历史日志不可读；按未检测到 active writer 处理' });
+      return;
+    }
     for (const directory of directories) {
       if (!directory.isDirectory() || directory.name === config.run) continue;
       const eventsPath = join(logsRoot, directory.name, 'events.jsonl');
@@ -203,7 +259,7 @@ export async function createEngine(config, processes, event = () => {}) {
       const active = new Map();
       let lines;
       try { lines = readFileSync(eventsPath, 'utf8').split('\n'); }
-      catch (error) { throw new Error(`历史 writer 日志无法读取：${eventsPath}：${error.message}；现场状态无法确认`); }
+      catch { continue; }
       for (const line of lines) {
         if (!line) continue;
         let record;
@@ -219,17 +275,23 @@ export async function createEngine(config, processes, event = () => {}) {
         else candidates.add(pid);
       }
     }
-    if (unknownWriter) throw new Error(`历史运行已有 role-start 但缺少可核实 PID 或确认终止记录；${branch} 禁止接管`);
+    const probed = [];
     for (const pid of candidates) {
       try {
         process.kill(-pid, 0);
-        throw new Error(`历史运行候选写者的当前进程组仍存在：PID/PGID ${pid}，${branch} 禁止接管`);
+        probed.push({ pid, groupExists: true });
       } catch (error) {
-        if (error.code === 'ESRCH') continue;
-        if (error.code === 'EPERM') throw new Error(`EPERM：历史运行候选写者 PID/PGID ${pid} 无法确认终止；${branch} 保持 quarantine`);
-        throw error;
+        if (error.code === 'ESRCH') probed.push({ pid, groupExists: false });
+        else if (error.code === 'EPERM') probed.push({ pid, groupExists: 'unknown', errno: 'EPERM' });
+        else probed.push({ pid, groupExists: 'unknown', errno: error.code });
       }
     }
+    observations?.observe('engine/recovery', 'recovery-writer-probe', scope, {
+      branch,
+      historicalPids: probed,
+      unknownIncomplete: unknownWriter,
+      note: '历史 PID/PGID 与不完整事件仅作观察事实；未检测到 active ownership channel 即恢复现场',
+    });
   }
 
   async function readIssue(number) {
@@ -411,7 +473,11 @@ export async function createEngine(config, processes, event = () => {}) {
   }
   async function prepareTarget() {
     try {
-      releases.add(await writerLock(common, target, verifyAbandonedWriter));
+      releases.add(await writerLock(common, target, probe => {
+        if (probe.socketState === 'vacant') return;
+        observations?.observe('engine/recovery', 'recovery-writer-probe', { role: 'merger' }, { branch: target, ...probe });
+        void observeAbandonedWriter(target, { role: 'merger' });
+      }));
       const existing = (await trees()).find(tree => tree.branch === target);
       if (existing?.locked || existing?.prunable) throw new Error('目标 worktree 已锁定或不可用');
       if (existing) targetCwd = realpathSync(existing.cwd);
@@ -456,7 +522,7 @@ export async function createEngine(config, processes, event = () => {}) {
     const branch = `afk/issue-${number}`;
     const matchingTrees = (await trees()).filter(tree => tree.branch === branch);
     const existing = matchingTrees.length === 1 ? matchingTrees[0] : undefined;
-    const branches = (await git(['for-each-ref', '--format=%(refname:short)', `refs/heads/${branch}`])).split('\n');
+    const branches = (await recoveryCommand('git', ['for-each-ref', '--format=%(refname:short)', `refs/heads/${branch}`], config.repo, { ticket: number, tickets: [number] })).split('\n');
     const branchExists = branches.includes(branch);
     const ambiguity = matchingTrees.length > 1 ? `${branch} 存在多个 worktree，无法唯一恢复` : undefined;
     const waitingReason = ambiguity || reason;
@@ -499,8 +565,13 @@ export async function createEngine(config, processes, event = () => {}) {
     }
 
     let release;
-    try { release = await writerLock(common, branch, verifyAbandonedWriter); }
-    catch (error) {
+    try {
+      release = await writerLock(common, branch, probe => {
+        if (probe.socketState === 'vacant') return;
+        observations?.observe('engine/recovery', 'recovery-writer-probe', { ticket: number, tickets: [number] }, { branch, ...probe });
+        void observeAbandonedWriter(branch, { ticket: number, tickets: [number] });
+      });
+    } catch (error) {
       const blocked = { ...detected, state: 'waiting-writer', reason: error.message };
       recordRecovery(number, 'recovery-blocked', blocked);
       throw error;
@@ -513,7 +584,7 @@ export async function createEngine(config, processes, event = () => {}) {
         const args = ['switch', '--no-cd'];
         if (!branchExists) args.push('--create', '--base', target);
         args.push(branch);
-        await command('wt', args);
+        await recoveryCommand('wt', args, config.repo, { ticket: number, tickets: [number] });
       }
       const tree = (await trees()).find(item => item.branch === branch);
       if (!tree) throw new Error(`Worktrunk 未创建 ${branch} 的现场`);
@@ -533,8 +604,12 @@ export async function createEngine(config, processes, event = () => {}) {
         }
       }
       workspaces.set(number, workspace);
+      // 分类为 recovered / merged-unverified 的完整依据（OID、commits ahead、
+      // ancestry、dirty、in-progress）随结论一起进入 Recovery timeline。
+      const facts = await recoveryFacts({ ticket: number, tickets: [number] }, branch, workspace.cwd, target, workspace.cwd);
       const recoveryState = {
         ...detected,
+        ...facts,
         cwd: workspace.cwd,
         state: adoptedRecoveryState(existing, branchExists, workspace.mergedIntoTarget),
         dirty: taskDirty,
@@ -609,13 +684,17 @@ export async function createEngine(config, processes, event = () => {}) {
   async function runRole(role, context, onDispatch = () => {}) {
     if (processes.stopping) return { status: 'stopped', reason: '用户停止' };
     const identity = { ...context, run: config.run, attempt: ++attempt, role };
+    // planned Attempt 先于 spawn 存在；Invocation/PID 只在实际 spawn 成功后补齐。
+    const planned = { invocation: undefined };
+    plannedAttempts.set(identity.attempt, planned);
+    observations?.observe('engine', 'attempt-planned', { role, attempt: identity.attempt, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, { phase: context.mode || role, state: 'planned' });
     const logPath = join(config.logDir, `${String(attempt).padStart(5, '0')}-${role}-${context.tickets.join('-')}.stdout.log`);
     await correctWorkspace(context);
     const rendered = await prompt(role, identity);
     if (processes.stopping) return { status: 'stopped', reason: '用户停止' };
     await correctWorkspace(context);
     onDispatch();
-    const result = await processes.role(config, { ...identity, prompt: rendered }, logPath, event);
+    const result = await processes.role(config, { ...identity, prompt: rendered }, logPath, event, observations, invocation => { planned.invocation = invocation; });
     event('role-result', { role, attempt: identity.attempt, tickets: context.tickets, result });
     // Provider 层的失败/权限结果不含业务封套，
     // 不能将其解读为成功的结构化交付结果。
@@ -625,6 +704,7 @@ export async function createEngine(config, processes, event = () => {}) {
       return result;
     }
     validateCommon(result, identity);
+    observations?.observe('role/self-report', 'self-report', { role, attempt: identity.attempt, invocation: planned.invocation, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, result);
     if (role !== 'merger' && (result.ticket !== context.ticket.number || !strings(result.commits))) throw new Error('逐票结果 ticket/commits 字段无效');
     return result;
   }
@@ -639,13 +719,29 @@ export async function createEngine(config, processes, event = () => {}) {
   // sandbox.run/close 替换本机 runRole/closeWorkspace；AFK 加平铺结果与实际交付检查。
   async function pipeline(ticket, workspace) {
     const context = { ticket, tickets: [ticket.number], ...workspace, target, targetCwd, feedback: pipelineFeedback.get(ticket.number) };
-    const rejected = (role, result) => {
-      const missing = role === 'reviewer' ? result.tests?.filter(test => test.status === 'not-run') || [] : [];
-      if (result.status === 'passed' && !missing.length) return false;
-      const reason = [result.reason || result.summary, ...(result.tests || []).filter(test => test.status !== 'passed').map(test => `${test.command}：${test.summary}`), ...(result.remaining || [])].filter(Boolean).join('; ');
+    // engine 独立发布 Gate 结论，不由 UI 从 Self-report 反向猜测；
+    // 每次 Gate 都关联同一 planned Attempt 与 Invocation。
+    const gateScope = (role, result) => ({ role, attempt: result.attempt, invocation: plannedAttempts.get(result.attempt)?.invocation, ticket: ticket.number, tickets: [ticket.number] });
+    const gateAccept = (role, result) => observations?.observe('engine/gate', 'gate-accepted', gateScope(role, result), { accepted: true, reason: 'Self-report、测试与 Git deliverable 均满足 Gate 条件' });
+    const gateReject = (role, result, reason) => {
+      const scope = gateScope(role, result);
+      observations?.observe('engine/gate', 'gate-rejected', scope, { accepted: false, reason });
+      observations?.observe('engine/delivery', 'delivery-blocked', scope, { state: 'blocked', reason });
       pipelineFeedback.set(ticket.number, { role, reason, result });
+    };
+    // Self-report 与必需验证层面的拒绝原因；无拒绝时返回 undefined。
+    const selfReportReason = (role, result) => {
+      const missing = role === 'reviewer' ? result.tests?.filter(test => test.status === 'not-run') || [] : [];
+      if (result.status === 'passed' && !missing.length) return undefined;
+      const reason = [result.reason || result.summary, ...(result.tests || []).filter(test => test.status !== 'passed').map(test => `${test.command}：${test.summary}`), ...(result.remaining || [])].filter(Boolean).join('; ');
       if (result.status === 'blocked' || missing.length) blocks.set(ticket.number, missing.length ? `${role} 必需验证未执行：${reason}` : reason);
-      return result.status !== 'passed' || missing.length > 0;
+      return reason;
+    };
+    // Git deliverable 是 Gate 的独立条件：核实异常也必须归入 Gate 拒绝，
+    // 不能跳过 Gate 直接失败。
+    const deliverableFailure = async () => {
+      try { return await deliverable(workspace) ? undefined : '实现无可交付 commits/变更，或现场不一致/不干净'; }
+      catch (error) { return `交付条件无法核实：${error.message}`; }
     };
     attemptedTickets.add(ticket.number);
     let queuedForMerge = false;
@@ -660,25 +756,34 @@ export async function createEngine(config, processes, event = () => {}) {
         };
       }
       const implement = await runRole('implementer', context);
-      if (rejected('implementer', implement)) return;
-      if (!await deliverable(workspace)) throw new Error('实现无可交付 commits/变更，或现场不一致/不干净');
+      if (implement.status === 'stopped' || processes.stopping) return implement;
+      const implementReason = selfReportReason('implementer', implement) ?? await deliverableFailure();
+      if (implementReason) {
+        gateReject('implementer', implement, implementReason);
+        return;
+      }
+      const notDeliverable = !implement.commits.length ? '实现结果没有提交摘要' : undefined;
 
       // Only review if the implementer produced commits (upstream main.mts:137).
-      if (implement.commits.length > 0) {
+      if (!notDeliverable) {
         const review = await runRole('reviewer', { ...context, previous: implement });
-        if (rejected('reviewer', review)) return;
-        if (!passedTests(review)) {
-          const reason = `审查验证失败：${review.tests.filter(test => test.status === 'failed').map(test => `${test.command}：${test.summary}`).join('; ')}`;
-          pipelineFeedback.set(ticket.number, { role: 'reviewer', reason, result: review });
-          return;
-        }
+        if (review.status === 'stopped' || processes.stopping) return review;
         const inheritedGaps = implement.tests.filter(test => test.status !== 'passed');
+        let reviewReason = selfReportReason('reviewer', review);
+        // 审查验证不接受 failed：与 not-run 一样由 engine 独立拒绝。
+        if (!reviewReason && !passedTests(review)) reviewReason = `审查验证失败：${review.tests.filter(test => test.status === 'failed').map(test => `${test.command}：${test.summary}`).join('; ')}`;
         // 条件必填的审查声明，不是引擎对验收完成的独立证明。
-        if (inheritedGaps.length && (typeof review.acceptanceResolution !== 'string' || !review.acceptanceResolution.trim())) {
-          blocks.set(ticket.number, `Reviewer 未说明前序验收缺口如何解决或为何不适用：${inheritedGaps.map(test => `${test.command} (${test.status})：${test.summary}`).join('; ')}`);
+        if (!reviewReason && inheritedGaps.length && (typeof review.acceptanceResolution !== 'string' || !review.acceptanceResolution.trim())) {
+          reviewReason = `Reviewer 未说明前序验收缺口如何解决或为何不适用：${inheritedGaps.map(test => `${test.command} (${test.status})：${test.summary}`).join('; ')}`;
+          blocks.set(ticket.number, reviewReason);
+        }
+        if (!reviewReason && (!review.commits.length || !await deliverable(workspace))) reviewReason = '审查未满足 commits/现场契约';
+        if (reviewReason) {
+          gateReject('reviewer', review, reviewReason);
           return;
         }
-        if (!review.commits.length || !await deliverable(workspace)) throw new Error('审查未满足 commits/现场契约');
+        // 只有到这里才算 Gate 接受：Self-report、测试与 Git deliverable 全部独立核实通过。
+        gateAccept('reviewer', review);
         pipelineFeedback.delete(ticket.number);
         queuedForMerge = true;
         return {
@@ -687,7 +792,8 @@ export async function createEngine(config, processes, event = () => {}) {
           ticket, workspace, review,
         };
       }
-      throw new Error('实现结果没有提交摘要');
+      gateReject('implementer', implement, notDeliverable);
+      return;
     } catch (error) {
       if (unsafeTermination.test(error.message) || processes.hasUnsafeWriters) quarantined = true;
       throw error;
@@ -827,6 +933,14 @@ export async function createEngine(config, processes, event = () => {}) {
       }
       // 合并失败可接续；关闭失败逐票保留，下一轮仅关闭，绝不重跑 merge/test/summary。
       event('merge-progress', { batch: group.id, phase: group.phase, summarySubject: group.summarySubject, tickets: result.tickets });
+      // 逐票 Delivery 独立发布；共享逻辑 Merger 不合并各票交付结果，
+      // 也不能由 role-end、Self-report 或 Merger 汇总隐式替代。
+      for (const item of result.tickets) {
+        observations?.observe('engine/delivery', item.closed ? 'delivery-complete' : item.merged ? 'delivery-merged' : 'delivery-blocked', { ticket: item.ticket, tickets: [item.ticket], batch: group.id, role: 'merger' }, {
+          state: item.closed ? 'closed' : item.merged ? (item.verified ? 'verified' : 'merged-unverified') : 'blocked',
+          merged: item.merged, verified: item.verified, closed: item.closed, phase: group.phase,
+        });
+      }
     } catch (error) {
       if (unsafeTermination.test(error.message)) throw error;
       if (dispatched && !processes.stopping) await inspectMerger(group, error.message);
@@ -874,6 +988,15 @@ export async function createEngine(config, processes, event = () => {}) {
                 event('merge-deferred-target-dirty', { batch: pending.id, target, cwd: targetCwd, tickets: pending.tickets.map(item => item.ticket.number) });
                 await refresh();
                 for (let i = 0; i < 10 && !processes.stopping; i++) await delay(100);
+                continue;
+              }
+              // 某票等待 active writer 时其余独立票继续；此处定期重新做正向活跃检测，
+              // 一旦不再检测到 active writer 就自动恢复并派发，无需重新调用 skill。
+              const waitingWriter = open.filter(number => recovery.get(number)?.state === 'waiting-writer');
+              if (waitingWriter.length) {
+                for (const number of waitingWriter) blocks.delete(number);
+                event('writer-recheck', { tickets: waitingWriter });
+                for (let i = 0; i < 20 && !processes.stopping; i++) await delay(100);
                 continue;
               }
               const reasons = waitingReasons();

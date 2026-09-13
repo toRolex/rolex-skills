@@ -7,7 +7,7 @@
 独立脚本串行准备 Worktrunk 现场，再通过所选本机 CLI 并发启动角色。daemon 和角色均不依赖宿主原生子代理接口。执行 CLI 默认 claude；Pi 默认 Luna/max 意图每次 start 解析，准确选择保存于本 run 的 `selection.json`，三个角色不再重选（不保证外部 CLI/配置在运行期间被更改后的行为）；声明式发现边界、显式覆盖与简称消歧见 [模型选择](../SKILL.md#模型选择)。[默认角色权限](../SKILL.md#默认角色权限) 对齐 Sandcastle，仅影响角色 CLI 自身审批/sandbox；本机身份、保护环境变量、外层限制及权限拒绝处理不变。
 
 1. 新 run 先读取 Ticket 当前状态并分类标准现场。closed 跳过；open 且已有唯一 `afk/issue-{N}` worktree 时原地恢复；只有分支时由 Worktrunk 恢复同一分支 worktree；两者都不存在才从目标创建。`--reuse` 仅保留显式归属兼容信息，不覆盖 writer、锁定或 quarantine 判断。
-2. 恢复继承已有 commits 与 dirty 进度。writer socket 按当前连接事实核实；socket 遗留时以 recovery guard 串行接管，并从既有结构化事件取得候选 PID/PGID 后用 signal 0 重核当前进程组。活跃、未知响应或 EPERM 使本票等待／quarantine，只有拒绝连接且候选进程组均为 ESRCH 才移除遗留 socket。已成为目标祖先的分支进入 `merged-unverified`，由 Merger 继续验证和关闭。
+2. 恢复继承已有 commits 与 dirty 进度。writer socket 按 liveness-first 的正向活跃证据核实：只有 ownership channel 可连接且返回当前 AFK 标识时才认为 writer 仍在运行，该票进入 `waiting-writer`；连接拒绝时以 recovery guard 串行接管。stale/unreachable socket、未知响应、历史 PID/PGID、`EPERM` 和不完整历史事件都只作 Recovery Observation，不再单独阻止派发。`waiting-writer` 期间 run 定期重新做正向活跃检测，active writer 消失后自动恢复派发，无需重新调用 skill；其他独立 Ticket 不受影响。已成为目标祖先的分支进入 `merged-unverified`，由 Merger 继续验证和关闭。
 3. 每个 CLI 角色收到 Ticket 正文/评论、父 SPEC 上下文、目标与任务分支、绝对工作目录、前序结果及项目验证要求。角色启动前自动采集 Implementer 最近十条提交、Reviewer 相对目标的完整 diff/log；只执行可信模板命令，参数中的命令、伪标记和占位符不二次求值，命令插参安全转义。沿用指定现场，不再增加宿主隔离层。
 
 Merger 使用目标分支现场，缺少时由脚本通过 Worktrunk 创建；上批自身保留的合并进度交给 Merger 继续，无关 dirty 或其他占用等待用户。Worktrunk hooks 审批由用户在本机完成，不使用 `--yes` 自动批准。
@@ -41,5 +41,15 @@ Worktrunk 管理 worktree，Git 管理提交与合并。worktree 只隔离代码
 入口启动握手最多 120 秒，普通前置命令默认 30 秒；这些是启动/步骤期限，不是角色总时长。启动握手成功后发起会话可结束，编排器继续管理角色、接力及后续批次。用户用公开 `status --run` 看状态、`stop --run` 请求停止本次编排及全部受管角色。停止后不启动新角色；收到 `stopping` 只表示请求受理，须确认最终 `stopped` 才复用现场，控制连接失败则状态未知。
 
 日志、运行身份和控制信息不是完整持久化任务状态机；批次和旧 Reviewer 结论仍在内存中。新 run 依据当前 GitHub、Git、Worktrunk 与 writer 事实恢复代码现场，不恢复旧进程内存或历史 PID；未合并成果重新 I/R，已在目标中的成果进入验证/关闭。`status` 与 `events.jsonl` 公开逐票 `skipped-closed`、`recovered-worktree`、`recovered-branch`、`created`、`waiting-writer`、`merged-unverified` 等分类。最终区分已启动、角色完成、全部交付、等待用户；`completed` 要求范围内 Tickets 实际交付并关闭，失败 I/R 的误关票不能仅凭全 closed 掩盖；阻碍须列明。
+
+## 只读 Dashboard
+
+每个 run 拥有一个独立的只读 Dashboard companion：仅监听 `127.0.0.1`、由 OS 分配端口、使用与 control capability 分离的 per-run read token；它不参与调度，也没有 stop/retry/approve/resume 等 mutation endpoint。`start` 结果与 `status` 都返回当前 URL；`dashboard --run <绝对日志目录>` 可按 run identity 重建 companion 并复用原 read token。浏览器自动打开是 best-effort，失败不影响 run。
+
+- 核心 `events.jsonl` 继续服务调度、Recovery 与终态证据，写入失败仍使 run 可见失败。与之分离的 `observations.jsonl` 是 best-effort 旁路事实源：AFK daemon 是运行期唯一 writer 与 `seq` 分配者，provider 原始 payload 在 provider-specific 解析前写入；它不被 engine 用作调度、Recovery、Gate 或 Delivery 的依赖。
+- Recovery、Process lifecycle、provider text delta、tool-call、tool result、stdout、stderr、Self-report、Gate 与 Delivery 共享同一 run-level 单调 `seq`；SSE event ID 等于该 `seq`，重连按最后已见 ID 只补发后续记录。
+- `Attempt` 是 per-Ticket/per-Role（Merger 为 per-Batch）完整 Recovery/派发 cycle 序号，`Invocation` 是实际 spawn 的 Role CLI 全局序号；planned Attempt 在 spawn 前可见且 Invocation/PID 为空，只有 spawn 成功才分配 Invocation。Self-report 不等于 Gate，Role 退出不等于 Ticket 交付；Gate 与逐票 Delivery 由 engine 显式发布。
+- 采集与排版忠实于 provider 与进程实际发出的完整内容，不摘要、不截断、不改写、不脱敏，也不提供独立 Raw 标签页。Dashboard 故障、慢客户端、断线、journal 写入失败或导出失败都不进入 run 失败路径；完整性损失必须在 `status` 与页面显式标记 `degraded/incomplete`。
+- run 终态后 journal 冻结，companion 导出自包含 `dashboard.html` 并继续提供页面 24 小时；静态文件在 server 退出后仍可直接打开。Observation journal、read-token metadata 与最终 HTML 均为 owner-only `0600`，read token 不进入 events、Role 日志、access log 或最终 HTML。
 
 本机平台与所选 Provider 须以实际运行结果核验，不能用一个 CLI 成功代替其他 CLI 通过。

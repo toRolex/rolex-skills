@@ -42,7 +42,7 @@ async function waitFor(predicate, timeoutMs) {
 // invokeAgent keeps upstream's raw -> parse -> completion -> resetTimer order.
 // Only framework/emitter/session wiring is replaced. No business fields are
 // validated here. A timeout requests termination, never just cancels a Promise.
-async function invokeAgent(processes, config, context, onRawLine, onStderr, onProcessStart) {
+async function invokeAgent(processes, config, context, onRawLine, onStderr, onProcessStart, onProviderRaw, onProviderEvent) {
   let resultText, replyText;
   let currentReply = new BoundedTail(MAX_TAIL_CHARS);
   const accumulatedOutput = new BoundedTail(MAX_TAIL_CHARS);
@@ -60,6 +60,7 @@ async function invokeAgent(processes, config, context, onRawLine, onStderr, onPr
   try {
     const execResult = await processes.execute(printCmd.command, printCmd.args, {
       onLine: line => {
+        onProviderRaw?.(line);
         // Unlike upstream's swallowed forwarding error, failed disk logging
         // must stop this execution (D9). Still parse before propagating it.
         let forwardingError;
@@ -76,6 +77,9 @@ async function invokeAgent(processes, config, context, onRawLine, onStderr, onPr
             if (!terminalError) cancelled = false;
           }
         }
+        // 已识别事件作为附加 Observation 结构化发布；原始行已先入库，
+        // 这里只补充 UI 可以逐行增长的 typed 视图，不替代原始负载。
+        for (const parsed of parsedLine.events) onProviderEvent?.(parsed);
         for (const parsed of parsedLine.events) {
           if (parsed.type === 'text') {
             currentReply.push(parsed.text);
@@ -119,6 +123,7 @@ export class Processes {
   hasUnsafeWriters = false;
   stopRequested = false;
   failure;
+  invocation = 0;
 
   async halt(error, reason) {
     this.failure ??= error;
@@ -320,8 +325,10 @@ export class Processes {
     return result.stdout.trim();
   }
 
-  async role(config, context, logPath, event) {
+  async role(config, context, logPath, event, observations, onInvocation) {
     const started = Date.now();
+    let invocation;
+    const scope = () => ({ role: context.role, attempt: context.attempt, invocation, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) });
     let result, failure, stderrDenied = false;
     const stderrBoundary = new BoundedTail(2_048);
     try {
@@ -329,14 +336,23 @@ export class Processes {
       result = await invokeAgent(this, config, context,
         line => appendFileSync(logPath, `${line}\n`, { mode: 0o600 }),
         data => {
+          observations?.observe('process/stderr', 'stderr', scope(), data.toString());
           appendFileSync(`${logPath}.stderr`, data, { mode: 0o600 });
           stderrBoundary.push(data.toString());
           stderrDenied ||= explicitRefusal(stderrBoundary.toString());
         },
-        pid => event('role-process', {
-          role: context.role, attempt: context.attempt, tickets: context.tickets,
-          managedPid: pid, processGroup: pid, groupSource: 'spawn-detached', daemonPid: process.pid,
-        }));
+        pid => {
+          // spawn 失败时 pid 为 undefined（error 事件稍后到达）；此时不得分配或
+          // 公开 Invocation，也不消耗序号。planned Attempt 不冒充运行中的进程。
+          if (!Number.isSafeInteger(pid)) return;
+          invocation = ++this.invocation;
+          onInvocation?.(invocation);
+          const payload = { role: context.role, attempt: context.attempt, invocation, tickets: context.tickets, managedPid: pid, processGroup: pid, groupSource: 'spawn-detached', daemonPid: process.pid };
+          observations?.observe('process', 'invocation-started', scope(), payload);
+          event('role-process', payload);
+        },
+        line => observations?.observe(`provider/${config.provider}`, 'raw-payload', scope(), line),
+        parsed => observations?.observe(`provider/${config.provider}`, parsed.type === 'text' ? 'text-delta' : parsed.type, scope(), parsed));
     } catch (error) {
       failure = error;
       try { await this.halt(error, 'role-io-error'); }
@@ -344,7 +360,7 @@ export class Processes {
     }
     try {
       event('role-end', {
-        role: context.role, tickets: context.tickets, code: result?.code,
+        role: context.role, attempt: context.attempt, invocation, tickets: context.tickets, code: result?.code,
         signal: result?.signal, idle: result?.idle, grace: result?.grace,
         cancellation: result?.cancellation, terminationConfirmed: result?.terminationConfirmed,
         terminationScope: result?.terminationScope, error: failure?.message,

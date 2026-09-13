@@ -15,7 +15,7 @@ argument-hint: "[issue-number ...] [provider/model/target]"
 2. 显式 Ticket 编号转为 `--issues 3,4,5`；没有编号则省略，由脚本首次分页读取 open `ready-for-agent`，固定本次范围。用户标明的父 SPEC 传 `--spec`，仅作上下文，不实施或关闭。
 3. 用户指定目标传 `--target`，否则脚本选择已有 develop、其次 main。按下方「模型选择」确定 `--provider`、`--model`、`--effort`；项目验证要求可传 `--verify`。
 4. 从项目约定确定优先级标签，按高到低传 `--priority-labels`；没有约定就省略，全部同级按编号。本仓库目前没有现存项目优先级映射，不能把示例标签当约定。
-5. 不为正常恢复传 `--reuse`。脚本根据当前 GitHub、标准 `afk/issue-N` 分支、Worktrunk worktree 与 writer socket 事实自动分类：closed 跳过；唯一已有 worktree 原地恢复；只有分支时恢复同一分支 worktree；两者都没有才新建。`--reuse N` 仅保留显式归属兼容信息，不能绕过活跃写者、锁定、quarantine 或非标准现场边界。
+5. 不为正常恢复传 `--reuse`。脚本根据当前 GitHub、标准 `afk/issue-N` 分支、Worktrunk worktree 与 writer socket 事实自动分类：closed 跳过；唯一已有 worktree 原地恢复；只有分支时恢复同一分支 worktree；两者都没有才新建。writer 采用 liveness-first：只有明确检测到同一 worktree 的 AFK writer 仍在运行才使该票等待，stale socket、历史 PID 与不完整事件不阻止开工。`--reuse N` 仅保留显式归属兼容信息，不能绕过活跃写者、锁定、quarantine 或非标准现场边界。
 
 完成条件：目标路径、固定输入及有效模型选择明确；所需 Node >=22、Git、Worktrunk、GitHub CLI、所选执行 CLI 与授权已准备。平台为 macOS/Linux；编排器用 Node 内置模块，Pi 自动选择还读取已安装 Pi 0.85.1 的纯目录/配置校验模块，不安装依赖；缺项或 Worktrunk hooks 审批由用户完成，不自动安装、绕过外层权限或传 `--yes`。
 
@@ -48,9 +48,11 @@ node "<skill绝对路径>/scripts/afk.mjs" start --repo "<目标仓库绝对路�
 
 报告返回的运行身份、目标仓库/分支、日志目录及原样可用的 `status`、`stop` 命令。日志归目标仓库 `.afk/logs/`；说明 **已启动不等于 Tickets 已交付**，最终进展与结果由脚本记录，用户可在发起会话结束后查看。
 
-`stop` 的停止请求受理不等于角色已结束；以后续 `status` 确认最终停止，未知状态保留现场。新 run 可从当前 Git/GitHub/worktree/writer 事实恢复代码现场，但不恢复旧进程内存、历史 PID 或旧 Reviewer 结论；`status` 与 `events.jsonl` 展示逐票恢复分类和阻碍。
+同一次 `start` 还会返回当前 run 专属的只读 Dashboard：`dashboard.url`（`127.0.0.1`、OS 分配端口、独立只读 token）、`dashboard.state`、`dashboard.reopenCommand` 与完整性状态。原样把 URL 报告给用户；浏览器自动打开是 best-effort，失败不影响 run。Dashboard 只读、无 mutation endpoint，关闭页面不影响 run，重新打开同一 URL 会恢复全部历史并定位最新输出；忘记地址时用 `status` 的 `dashboard` 字段或 `dashboard --run <日志目录>` 重新获得。完整未脱敏输出只在本机页面呈现，read token 不会出现在 events、Role 日志或最终导出中。
 
-完成条件：启动身份、日志、查看与停止方式均已告知，此 skill 任务结束。
+`stop` 的停止请求受理不等于角色已结束；以后续 `status` 确认最终停止，未知状态保留现场。新 run 可从当前 Git/GitHub/worktree/writer 事实恢复代码现场，但不恢复旧进程内存、历史 PID 或旧 Reviewer 结论；`status`、`events.jsonl` 与 Dashboard 展示逐票恢复分类和阻碍。run 终态后 companion 导出自包含 `dashboard.html` 并继续提供页面 24 小时，静态文件在 server 退出后仍可直接打开。
+
+完成条件：启动身份、日志、Dashboard 地址、查看与停止方式均已告知，此 skill 任务结束。
 
 维护运行 prompt 时读 [Implementer](reference/implementer-prompt.md)、[Reviewer](reference/reviewer-prompt.md)、[Merger](reference/merger-prompt.md)：三份是固定上游的逐段中文版，仅作必要本机与 AFK 适配；不再有 common 层。启动握手前从 skill 内读取三 MD，缺失、不可读或空白使启动失败；角色启动前展开可信模板中的 Git 命令，自动注入 Implementer 最近十条提交、Reviewer 完整 diff/log，失败可见。任务参数只作单次替换的数据，命令插参安全转义；结果短协议由引擎附加，职责不在代码重复定义。
 

@@ -28,7 +28,9 @@ parent SPEC 通过原生 parent、正文 Parent 链接或用户提供的信息�
 
 任务 worktree 的 dirty 内容是待继承成果。Implementer 在原目录检查并续做，不执行 reset、stash、删除或覆盖；已有实现完整时可不新增提交，Reviewer 仍审查当前成果。恢复现场不自动视为本 run 所有，I/R 结束后保留 worktree 和分支；清理与交付分离。
 
-writer socket 可连接且返回当前 AFK 标识时，该票等待原写者；连接拒绝时先用 recovery guard 串行接管，再从结构化事件取得候选 PID/PGID，并以 signal 0 重核当前进程组。仅候选均为 ESRCH 时移除遗留 socket；活跃、未知响应、EPERM 或其他无法确认结果进入等待/quarantine。历史 PID 只作当前事实核实的候选，不直接 kill，也不创建第二现场绕过。局部 writer 阻碍不冻结其他安全 Ticket。
+writer 采用 liveness-first：只有 writer ownership channel 可连接、且返回当前 AFK 标识时，才认为该 worktree 仍有活跃写者，该票进入 `waiting-writer`；连接拒绝时先用 recovery guard 串行接管。stale/unreachable socket、未知 socket 响应、历史 PID/PGID、`EPERM` 与不完整历史事件都只作为 Recovery Observation 记录，不再单独阻止派发，也不保留 `unknown writer` 阻塞状态。历史 PID 只作观察事实，不直接 kill，也不创建第二现场绕过。`waiting-writer` 期间 run 定期重新做正向活跃检测，一旦不再检测到 active writer 就自动恢复派发，无需重新调用 skill。局部 writer 阻碍不冻结其他安全 Ticket。
+
+多个 worktree、错误仓库绑定、locked/prunable、Git conflict/merge/rebase 等非 writer 阻碍继续沿用既有语义，不因 writer 策略变化而放宽。
 
 任务分支已成为目标祖先时记为 `merged-unverified`，跳过重复实现与 merge，交 Merger 继续目标验证、summary 核实和关闭。目标 dirty 仅阻止 Merger；同一 run 的独立 I/R 继续，已审查成果留在合并队列，目标恢复 clean 后不重跑 I/R。
 

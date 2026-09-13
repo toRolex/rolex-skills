@@ -8,13 +8,16 @@
 node "<skill绝对路径>/scripts/afk.mjs" start --repo "/absolute/project" --issues 3,4,5
 node "<skill绝对路径>/scripts/afk.mjs" status --run "/absolute/project/.afk/logs/<返回的run>"
 node "<skill绝对路径>/scripts/afk.mjs" stop --run "/absolute/project/.afk/logs/<返回的run>"
+node "<skill绝对路径>/scripts/afk.mjs" dashboard --run "/absolute/project/.afk/logs/<返回的run>"
 ```
 
-只有握手返回 `started` 才报告已启动，并给出实际 run、目标、日志和控制命令。用户可以结束发起会话。启动失败则照实报告，不能说后台仍在工作；`stopping` 只代表停止请求，须确认 `stopped`，未知则保留现场。
+只有握手返回 `started` 才报告已启动，并给出实际 run、目标、日志、Dashboard 地址和控制命令。用户可以结束发起会话。启动失败则照实报告，不能说后台仍在工作；`stopping` 只代表停止请求，须确认 `stopped`，未知则保留现场。
+
+`start` 返回值中的 `dashboard` 给出当前 run 专属的只读页面：`state`、`url`、`reopenCommand` 与 `completeness`。把 `url` 原样报告给用户即可；浏览器自动打开失败不影响 run。忘记地址时用 `status` 的 `dashboard` 字段，或直接运行上面的 `dashboard --run` 重建并复用同一只读地址。页面只读、关闭后不影响 run，重新打开恢复全部历史并定位最新输出。
 
 指定执行 CLI 时加 `--provider codex` 或 `--provider pi`；默认 claude 与宿主无关。Claude/Codex 省略 `--model`/`--effort` 使用各自 CLI 本机配置；Pi 默认及简称解析见下文。角色默认权限见 [默认角色权限](SKILL.md#默认角色权限)，不改变外层权限边界。`--spec 1 --issues 2,3` 只实施 Tickets。无项目优先级约定时省略 `--priority-labels`，全部同级按编号；若项目明确规定高到低为 critical、high、low，才传 `--priority-labels critical,high,low`，这不是本仓库现有映射。
 
-新运行发现旧 `afk/issue-3` 时，先确认无旧写者及归属；只有用户明确允许继续该票旧现场才加 `--reuse 3`，不是同名自动接管。同次运行自己的失败进度则正常复用。
+新运行发现旧 `afk/issue-3` 时，先按 liveness-first 确认是否有活跃写者：只有 writer ownership channel 明确响应才使该票等待；stale socket、历史 PID 与不完整事件不阻止开工。`--reuse 3` 仅保留显式归属兼容信息，不是接管条件。同次运行自己的失败进度则正常复用。
 
 ## Pi 默认、覆盖与模型简称
 

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { Processes } from './processes.mjs';
+import { ObservationJournal } from './observations.mjs';
 import { resolveSelection } from './model-selection.mjs';
 
 const help = `AFK：独立本地 CLI 编排（Node >=22，macOS/Linux）
@@ -18,6 +19,7 @@ const help = `AFK：独立本地 CLI 编排（Node >=22，macOS/Linux）
   node afk.mjs resolve-selection --repo /absolute/repository [--provider pi] [--model API-provider/model] [--effort LEVEL]
   node afk.mjs status --run /absolute/repository/.afk/logs/RUN
   node afk.mjs stop --run /absolute/repository/.afk/logs/RUN
+  node afk.mjs dashboard --run /absolute/repository/.afk/logs/RUN
 
 默认 provider=claude，不从宿主猜测；Claude/Codex 省略模型/effort 沿用 CLI 本机配置。
 Pi 省略模型意图 luna + max；每次 start 重新查询 0.85.1 纯内置目录＋models.json。
@@ -65,6 +67,7 @@ async function request(control, action) {
 
 async function daemon(config) {
   process.umask(0o077);
+  const observations = new ObservationJournal(config.logDir, config.run);
   const processes = new Processes();
   const control = { run: config.run, pid: process.pid, socket: join(tmpdir(), `afk-${config.run}.sock`), token: randomUUID() };
   let state = 'starting', result, engine, stopPromise, logFailure;
@@ -73,6 +76,13 @@ async function daemon(config) {
     catch { /* 日志介质不可用时，仍继续受管停止。 */ }
   };
   const event = (type, data = {}) => {
+    observations.observe(type.startsWith('recovery-') || type.startsWith('workspace') ? 'engine/recovery' : 'engine', type, {
+      ...(Number.isSafeInteger(data.ticket) ? { ticket: data.ticket } : {}),
+      ...(Array.isArray(data.tickets) ? { tickets: data.tickets } : {}),
+      ...(Number.isSafeInteger(data.batch) ? { batch: data.batch } : {}),
+      ...(data.role ? { role: data.role } : {}),
+      ...(Number.isSafeInteger(data.attempt) ? { attempt: data.attempt } : {}),
+    }, data);
     try { appendFileSync(join(config.logDir, 'events.jsonl'), `${JSON.stringify({ time: new Date().toISOString(), run: config.run, type, ...data })}\n`); }
     catch (error) {
       logFailure ||= error;
@@ -131,7 +141,7 @@ async function daemon(config) {
     chmodSync(control.socket, 0o600);
     save(join(config.logDir, 'control.json'), control);
     const { createEngine } = await import('./engine.mjs');
-    engine = await createEngine(config, processes, event);
+    engine = await createEngine(config, processes, event, observations);
     if (processes.stopping) throw new Error('启动期间收到停止请求');
     state = 'running';
     const selection = config.selection;
@@ -156,6 +166,8 @@ async function daemon(config) {
   } finally {
     if (logFailure) state = 'failed';
     bestEffortEvent('finished', { state });
+    // 冻结 Observation history：落盘节流中的 state，此后 journal 不再增长。
+    observations.flush();
     if (logFailure) {
       state = 'failed';
       result = { ...result, logError: logFailure.message };
@@ -168,6 +180,74 @@ async function daemon(config) {
       try { if (existsSync(control.socket)) unlinkSync(control.socket); } catch (error) { diagnostic(error); }
     }
   }
+}
+
+const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
+const dashboardCommand = runDir => [process.execPath, fileURLToPath(import.meta.url), 'dashboard', '--run', runDir].map(quote).join(' ');
+// run identity 来自 control（live）或 result（终态），不依赖 Dashboard 元数据。
+function resolveRunIdentity(runDir, resultPath) {
+  if (existsSync(join(runDir, 'control.json'))) {
+    try { return JSON.parse(readFileSync(join(runDir, 'control.json'), 'utf8')).run; } catch {}
+  }
+  return JSON.parse(readFileSync(resultPath, 'utf8')).run;
+}
+function dashboardPublic(logDir) {
+  try {
+    const metadata = JSON.parse(readFileSync(join(logDir, 'dashboard.json'), 'utf8'));
+    const observation = existsSync(join(logDir, 'observation-state.json')) ? JSON.parse(readFileSync(join(logDir, 'observation-state.json'), 'utf8')) : { completeness: 'incomplete' };
+    return { state: metadata.state, url: `http://127.0.0.1:${metadata.port}/?token=${encodeURIComponent(metadata.token)}`, reopenCommand: dashboardCommand(logDir), finalExport: existsSync(join(logDir, 'dashboard.html')) ? join(logDir, 'dashboard.html') : undefined, completeness: observation.completeness, ...(observation.reason ? { reason: observation.reason } : {}) };
+  } catch (error) { return { state: 'unavailable', reopenCommand: dashboardCommand(logDir), completeness: 'incomplete', reason: error.message }; }
+}
+// companion 存活判定基于其自身 PID，而不是一次 HEAD 探测。
+// HEAD 会因 worker 重建的短暂空窗失败，从而误起第二个 companion，
+// 造成重复 server、dashboard.json 写竞争与孤儿进程。
+function companionAlive(logDir) {
+  let pid;
+  try { pid = JSON.parse(readFileSync(join(logDir, 'dashboard.json'), 'utf8')).pid; } catch { return false; }
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error.code === 'EPERM'; }
+}
+async function launchDashboard(logDir, run) {
+  // 重建时复用原 read token，使已公开的 URL capability 保持有效；
+  // 无既有元数据（新 run）时生成新 token。
+  let token = randomUUID();
+  try { token = JSON.parse(readFileSync(join(logDir, 'dashboard.json'), 'utf8')).token || token; } catch {}
+  const child = spawn(process.execPath, [join(fileURLToPath(new URL('.', import.meta.url)), 'dashboard-server.mjs'), logDir, run, token], { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  try {
+    await new Promise((resolveReady, reject) => {
+      const timer = setTimeout(() => reject(new Error('Dashboard 启动超时')), 5_000);
+      const finish = (error, message) => {
+        clearTimeout(timer);
+        child.removeListener('error', onError);
+        child.removeListener('exit', onExit);
+        child.removeListener('message', onMessage);
+        if (error) reject(error);
+        else resolveReady(message);
+      };
+      const onError = error => finish(error);
+      const onExit = code => finish(new Error(`Dashboard 启动退出 ${code}`));
+      const onMessage = message => finish(message?.ready ? null : new Error(`Dashboard 启动失败：${message?.error || '未知原因'}`), message);
+      child.once('error', onError);
+      child.once('exit', onExit);
+      child.once('message', onMessage);
+    });
+  } catch (error) {
+    // 启动失败不留孤儿 companion：它没有可用 URL，也不会被任何读者引用。
+    try { child.kill('SIGTERM'); } catch {}
+    throw error;
+  } finally { if (child.connected) child.disconnect(); child.unref(); }
+  const dashboard = dashboardPublic(logDir);
+  // AFK_DASHBOARD_OPEN=0 关闭浏览器自动打开（测试与无人值守环境）；
+  // opener 失败只影响打开动作，不影响 run 与 URL 可用性。
+  if (dashboard.url && process.env.AFK_DASHBOARD_OPEN !== '0') {
+    try {
+      const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+      const opened = spawn(opener, [dashboard.url], { detached: true, stdio: 'ignore' });
+      opened.unref();
+    } catch {}
+  }
+  return dashboard;
 }
 
 async function start(values) {
@@ -191,6 +271,7 @@ async function start(values) {
   };
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
   save(join(logDir, 'selection.json'), selection);
+  new ObservationJournal(logDir, run);
   const output = openSync(join(logDir, 'daemon.log'), 'a', 0o600);
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_daemon'], { cwd: repo, detached: true, stdio: ['ignore', output, output, 'ipc'] });
   closeSync(output);
@@ -222,9 +303,11 @@ async function start(values) {
     if (child.connected) child.disconnect();
     child.unref();
   }
-  const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
   const controlCommand = action => [process.execPath, fileURLToPath(import.meta.url), action, '--run', logDir].map(quote).join(' ');
-  console.log(JSON.stringify({ state: 'started', ...ready, status: controlCommand('status'), stop: controlCommand('stop') }, null, 2));
+  let dashboard;
+  try { dashboard = await launchDashboard(logDir, run); }
+  catch (error) { dashboard = { state: 'unavailable', reopenCommand: dashboardCommand(logDir), completeness: 'incomplete', reason: error.message }; }
+  console.log(JSON.stringify({ state: 'started', ...ready, dashboard, status: controlCommand('status'), stop: controlCommand('stop') }, null, 2));
 }
 
 async function main() {
@@ -237,12 +320,27 @@ async function main() {
   if (!action || ['help', '--help', '-h'].includes(action)) return console.log(help);
   if (action === 'start') return start(values);
   if (action === 'resolve-selection') return console.log(JSON.stringify(await resolveSelection(values, realpathSync(resolve(values.repo || process.cwd()))), null, 2));
-  if (!['status', 'stop'].includes(action) || !values.run) throw new Error(help);
+  if (!['status', 'stop', 'dashboard'].includes(action) || !values.run) throw new Error(help);
   const runDir = resolve(values.run);
   const resultPath = join(runDir, 'result.json');
-  if (existsSync(resultPath)) return console.log(readFileSync(resultPath, 'utf8').trim());
+  if (action === 'dashboard') {
+    const existing = dashboardPublic(runDir);
+    const run = resolveRunIdentity(runDir, resultPath);
+    // companion 仍存活即复用：worker 重建期间也返回同一 URL identity，
+    // 不重复启动第二个 server。
+    if (existing.url && companionAlive(runDir)) return console.log(JSON.stringify({ state: 'reused', run, url: existing.url, final: existsSync(resultPath) }, null, 2));
+    const dashboard = await launchDashboard(runDir, run);
+    return console.log(JSON.stringify({ state: 'started', run, url: dashboard.url, final: existsSync(resultPath) }, null, 2));
+  }
+  if (existsSync(resultPath)) {
+    const result = JSON.parse(readFileSync(resultPath, 'utf8'));
+    return console.log(JSON.stringify({ ...result, dashboard: dashboardPublic(runDir) }, null, 2));
+  }
   const control = JSON.parse(readFileSync(join(runDir, 'control.json'), 'utf8'));
-  try { console.log(JSON.stringify(await request(control, action), null, 2)); }
+  try {
+    const response = await request(control, action);
+    console.log(JSON.stringify(action === 'status' ? { ...response, dashboard: dashboardPublic(runDir) } : response, null, 2));
+  }
   catch (error) {
     if (existsSync(resultPath)) console.log(readFileSync(resultPath, 'utf8').trim());
     else throw new Error(`无法联系运行 ${control.run}：${error.message}。状态未知；保留现场，勿按 PID 盲目 kill 或恢复。`);

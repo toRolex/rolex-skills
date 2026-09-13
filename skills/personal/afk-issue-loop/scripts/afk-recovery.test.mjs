@@ -105,6 +105,14 @@ const input = JSON.parse(prompt.slice(jsonStart + 1));
 const context = input.context;
 appendFileSync(process.env.AFK_ROLE_LOG, JSON.stringify({ role: context.role, ticket: context.ticket?.number, mode: context.mode, cwd: process.cwd() }) + '\\n');
 const behavior = process.env.AFK_ROLE_BEHAVIOR || 'hang';
+// 原始 transport 负载先于 provider-specific 解析进入 Observation journal。
+// 未识别事件、完整 tool-call 参数、stdout/stderr 都必须被忠实保留。
+process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [
+  { type: 'text', text: '正在检查现场\\n完整原文 <b>不脱敏</b> & 不截断：' + 'x'.repeat(300) },
+  { type: 'tool_use', name: 'Bash', input: { command: 'git status --porcelain --untracked-files=all', otherField: '必须保留' } },
+] } }) + '\\n');
+process.stdout.write(JSON.stringify({ type: 'afk-fixture-unknown-event', subtype: 'not-recognised', payload: { nested: [1, 2, 3], text: '未知事件 <完整保留>' } }) + '\\n');
+process.stderr.write('fixture stderr：完整错误原文\\n');
 if (behavior === 'merge-verification-fails' && context.role === 'merger') {
   for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
   const result = {
@@ -152,7 +160,8 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
 if [ "\${1:-}" = '--version' ]; then printf '%s\\n' 'claude fixture'; exit 0; fi
 exec "${process.execPath}" "$AFK_FAKE_CLAUDE" "$@"`);
 
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, AFK_ROLE_LOG: roleLog, AFK_FAKE_CLAUDE: fakeClaude, AFK_ISSUE_STATE_DIR: issueStateDir };
+  // 测试不打开真实浏览器；只验证 URL 与 server 行为。
+  const env = { ...process.env, AFK_DASHBOARD_OPEN: '0', PATH: `${bin}:${process.env.PATH}`, AFK_ROLE_LOG: roleLog, AFK_FAKE_CLAUDE: fakeClaude, AFK_ISSUE_STATE_DIR: issueStateDir };
   return { root, repo, roleLog, env };
 }
 
@@ -345,7 +354,7 @@ test('recoverer 崩溃留下的 recovery guard 可按当前 PID 事实恢复', a
   }
 });
 
-test('历史 role-start 缺少 PID 与确认终止记录时拒绝接管', async () => {
+test('历史 role-start 不完整不冒充 active writer，liveness-first 继续恢复', async () => {
   const fixture = createFixture();
   let socketPath;
   try {
@@ -358,18 +367,16 @@ test('历史 role-start 缺少 PID 与确认终止记录时拒绝接管', async 
     mkdirSync(oldLog, { recursive: true });
     writeFileSync(join(oldLog, 'events.jsonl'), `${JSON.stringify({ type: 'role-start', role: 'implementer', tickets: [9] })}\n`);
 
-    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
-    await waitUntil(() => existsSync(join(started.logDir, 'result.json')), '未知历史 writer 场景未结束');
-    const result = JSON.parse(readFileSync(join(started.logDir, 'result.json'), 'utf8'));
-    assert.equal(result.recovery['9'].state, 'waiting-writer');
-    assert.equal(existsSync(fixture.roleLog), false);
+    const started = await startAndWaitForRole(fixture);
+    assert.equal(roleEntries(fixture)[0]?.role, 'implementer');
+    await stopRun(started.logDir, fixture.env);
   } finally {
     if (socketPath) rmSync(socketPath, { force: true });
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
-test('未知 writer socket 响应保持现场并拒绝接管', async () => {
+test('未知 writer socket 响应不冒充 active ownership，继续恢复', async () => {
   const fixture = createFixture();
   let server;
   let socketPath;
@@ -384,11 +391,9 @@ test('未知 writer socket 响应保持现场并拒绝接管', async () => {
       server.listen(socketPath, resolveListen);
     });
 
-    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
-    await waitUntil(() => existsSync(join(started.logDir, 'result.json')), '未知 writer 场景未结束');
-    const result = JSON.parse(readFileSync(join(started.logDir, 'result.json'), 'utf8'));
-    assert.equal(result.recovery['9'].state, 'waiting-writer');
-    assert.equal(existsSync(fixture.roleLog), false);
+    const started = await startAndWaitForRole(fixture);
+    assert.equal(roleEntries(fixture)[0]?.role, 'implementer');
+    await stopRun(started.logDir, fixture.env);
   } finally {
     if (server) await new Promise(resolveClose => server.close(resolveClose));
     if (socketPath) rmSync(socketPath, { force: true });
@@ -444,7 +449,7 @@ test('原现场有活跃写者时该票等待，其他安全票继续', async ()
   }
 });
 
-test('旧 daemon 异常退出但角色仍存活时新 run 不接管', async () => {
+test('旧 daemon ownership channel 消失后不凭历史 PID 阻止新 run', async () => {
   const fixture = createFixture();
   let oldRun;
   let newRun;
@@ -466,11 +471,16 @@ test('旧 daemon 异常退出但角色仍存活时新 run 不接管', async () =
     }, '旧 daemon 未退出');
     writeFileSync(join(oldRun.logDir, 'events.jsonl'), `${JSON.stringify({ type: 'role-end', role: 'implementer', tickets: [9], terminationConfirmed: false })}\n`, { flag: 'a' });
 
+    // liveness-first：没有明确 active ownership channel 响应时，
+    // 历史 PID/PGID 与不完整事件只作为 Recovery 观察事实，不阻止接管。
     newRun = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
-    await waitUntil(() => existsSync(join(newRun.logDir, 'result.json')), '新 run 未形成等待结果');
-    const result = JSON.parse(readFileSync(join(newRun.logDir, 'result.json'), 'utf8'));
-    assert.equal(result.recovery['9'].state, 'waiting-writer');
-    assert.equal(roleEntries(fixture).filter(entry => entry.ticket === 9).length, 1);
+    await waitUntil(
+      () => roleEntries(fixture).filter(entry => entry.ticket === 9).length >= 2 || existsSync(join(newRun.logDir, 'result.json')),
+      '新 run 未在 ownership channel 消失后接管并派发',
+    );
+    assert.equal(roleEntries(fixture).filter(entry => entry.ticket === 9).length, 2);
+    const status = JSON.parse(command(process.execPath, [script, 'status', '--run', newRun.logDir], { env: fixture.env }));
+    assert.notEqual(status.recovery['9'].state, 'waiting-writer');
   } finally {
     await stopRun(newRun?.logDir, fixture.env);
     if (rolePid) {
@@ -506,9 +516,14 @@ test('目标 dirty 时保留已审查队列，恢复 clean 后不重跑 I/R 直�
     assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer']);
 
     competingRun = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
-    await waitUntil(() => existsSync(join(competingRun.logDir, 'result.json')), '排队期间的竞争 run 未结束');
-    const competingResult = JSON.parse(readFileSync(join(competingRun.logDir, 'result.json'), 'utf8'));
-    assert.equal(competingResult.recovery['9'].state, 'waiting-writer');
+    // liveness-first：active writer 仍在运行时该票保持 waiting-writer，
+    // 竞争 run 保持存活并定期重新做正向活跃检测，直到原 run 结束。
+    await waitUntil(() => {
+      try {
+        const status = JSON.parse(command(process.execPath, [script, 'status', '--run', competingRun.logDir], { env: fixture.env }));
+        return status.recovery?.['9']?.state === 'waiting-writer';
+      } catch { return false; }
+    }, 'active writer 未使竞争 run 进入 waiting-writer', 15_000);
     assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer']);
 
     rmSync(targetDirty);
@@ -554,6 +569,37 @@ test('已合并但目标验证失败时保持 Issue open', async () => {
     }, 'Merger 验证失败结果未记录');
     assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'open');
     assert.equal(roleEntries(fixture).some(entry => entry.mode === 'close'), false);
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('公开 start/status 提供 localhost 只读 Dashboard，页面关闭不影响 run', async () => {
+  const fixture = createFixture();
+  let runDir;
+  try {
+    const started = await startAndWaitForRole(fixture);
+    runDir = started.logDir;
+    assert.equal(started.dashboard.state, 'available');
+    assert.match(started.dashboard.url, /^http:\/\/127\.0\.0\.1:\d+\/?\?token=[^&]+$/);
+    assert.match(started.dashboard.reopenCommand, /['"]dashboard['"] ['"]--run['"]/);
+    assert.equal(started.dashboard.url.includes(JSON.parse(readFileSync(join(runDir, 'control.json'), 'utf8')).token), false);
+
+    const response = await fetch(started.dashboard.url);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+    const html = await response.text();
+    assert.match(html, /Ticket Kanban/);
+    assert.match(html, /Output Inspector/);
+    assert.doesNotMatch(html, /https?:\/\/(?!127\.0\.0\.1)/);
+
+    const status = JSON.parse(command(process.execPath, [script, 'status', '--run', runDir], { env: fixture.env }));
+    assert.equal(status.dashboard.url, started.dashboard.url);
+    assert.equal(status.dashboard.completeness, 'complete');
+    assert.equal(existsSync(join(runDir, 'observations.jsonl')), true);
+    assert.equal((await import('node:fs')).statSync(join(runDir, 'observations.jsonl')).mode & 0o777, 0o600);
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
