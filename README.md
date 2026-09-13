@@ -179,11 +179,21 @@ npx skills@latest add toRolex/rolex-skills
 
 ### 方式 C：Git 克隆（贡献者）
 
+直接链接到 Claude Code 与 Agent Skills 标准目录：
+
 ```bash
 git clone https://github.com/toRolex/rolex-skills
 cd rolex-skills
 bash scripts/link-skills.sh
 ```
+
+如果使用 Skills Manager，将其中央目录作为目标：
+
+```bash
+bash scripts/link-skills.sh --replace-existing "$HOME/.config/.skills-manager/skills"
+```
+
+`--replace-existing` 会把中央目录中与仓库 skill 同名的实体副本替换为软链接；省略此参数时，脚本遇到实体冲突会安全退出。传入目标后只写这些目录；也可一次传入多个目录。每个 skill 都是指向当前仓库的软链接，之后 `git pull` 即可同步更新。
 
 然后运行 `/setup-rolex-skills`。
 

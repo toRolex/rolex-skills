@@ -1,6 +1,6 @@
 ---
 name: pre-implement
-description: 在计划或讨论结束、开始实际交付任务时调用：新建并维护 implementation notes，逐步记录实现决策；偏离 plan、spec 时记录 Deviations。
+description: 在计划或讨论结束、开始实际交付多步骤任务时调用：新建并维护 implementation notes，逐步记录实现决策；偏离 plan、spec 时记录 Deviations。
 ---
 
 新建并维护当前任务的 <task-slug>-implementation-notes.md（或 .html），保存在仓库已有的此类笔记的位置；匹配现有约定，如果没有，放在合理的位置并说明。已有 notes 属于其他任务时，另起文件。

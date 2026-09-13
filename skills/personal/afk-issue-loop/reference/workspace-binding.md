@@ -4,7 +4,7 @@
 
 ## 分派
 
-独立脚本串行准备 Worktrunk 现场，再通过所选本机 CLI 并发启动角色。daemon 和角色均不依赖宿主原生子代理接口。Provider 默认 claude，模型及 effort 省略时沿用该 CLI 本机配置；显式配置与权限按用户输入传递。
+独立脚本串行准备 Worktrunk 现场，再通过所选本机 CLI 并发启动角色。daemon 和角色均不依赖宿主原生子代理接口。执行 CLI 默认 claude；Pi 默认 Luna/max 意图每次 start 解析，准确选择保存于本 run 的 `selection.json`，三个角色不再重选（不保证外部 CLI/配置在运行期间被更改后的行为）；声明式发现边界、显式覆盖与简称消歧见 [模型选择](../SKILL.md#模型选择)。[默认角色权限](../SKILL.md#默认角色权限) 对齐 Sandcastle，仅影响角色 CLI 自身审批/sandbox；本机身份、保护环境变量、外层限制及权限拒绝处理不变。
 
 1. 新 run 先读取 Ticket 当前状态并分类标准现场。closed 跳过；open 且已有唯一 `afk/issue-{N}` worktree 时原地恢复；只有分支时由 Worktrunk 恢复同一分支 worktree；两者都不存在才从目标创建。`--reuse` 仅保留显式归属兼容信息，不覆盖 writer、锁定或 quarantine 判断。
 2. 恢复继承已有 commits 与 dirty 进度。writer socket 按当前连接事实核实；socket 遗留时以 recovery guard 串行接管，并从既有结构化事件取得候选 PID/PGID 后用 signal 0 重核当前进程组。活跃、未知响应或 EPERM 使本票等待／quarantine，只有拒绝连接且候选进程组均为 ESRCH 才移除遗留 socket。已成为目标祖先的分支进入 `merged-unverified`，由 Merger 继续验证和关闭。

@@ -1,5 +1,7 @@
 # AFK 源码来源与分发边界
 
+> 后续变更：[ADR 0006](../adr/0006-afk-permission-model-defaults.md) 恢复三 CLI 上游默认权限行为，并将 Pi 默认设为 Luna/max。下文「移除 bypass/默认模型」「省略沿用本机配置」记录 #8 提取时的适配，不再描述这些默认的现状；来源及历史验收事实保留，当前配置见 [模型与权限规则](../../skills/personal/afk-issue-loop/SKILL.md#模型选择)。
+
 现行规格：[SPEC #8](https://github.com/toRolex/rolex-skills/issues/8)。旧实现的完整差异与失败记录保留在[源码审计](afk-sandcastle-source-audit.md)；本文件描述本轮源码切片与必要适配，不把历史通过当作当前验收。
 
 ## 固定来源与许可

@@ -835,7 +835,7 @@ export async function createEngine(config, processes, event = () => {}) {
     }
   }
 
-  await refresh();
+  // 握手只等待前置检查及固定范围；逐票上下文读取留在可观察、可取消的运行阶段。
   event('scope', { repository, target, tickets: [...scope], specs: [...specs], waiting: Object.fromEntries(waitingReasons()) });
   return {
     describe: () => ({ repository, repo: root, target, targetCwd, tickets: [...scope], specs: [...specs], batch, pending: pending && { phase: pending.phase, tickets: pending.tickets.map(item => item.ticket.number) }, queued: mergeQueue.map(group => ({ batch: group.id, tickets: group.tickets.map(item => item.ticket.number) })), recovery: Object.fromEntries(recovery), waiting: Object.fromEntries(waitingReasons()), deliveryFailures: Object.fromEntries(deliveryFailures), targetBlocked: targetReason, quarantined }),
@@ -843,12 +843,15 @@ export async function createEngine(config, processes, event = () => {}) {
       if (running || finished) throw new Error('Engine 实例只允许运行一次；新 run 由当前 Git/GitHub 事实重新恢复');
       running = true;
       try {
+        await refresh();
+        if (processes.stopping) return { state: 'stopped', tickets: [...scope], batches: batch };
         const initialReasons = waitingReasons(false);
         for (const number of scope) {
           const ticket = tickets.get(number);
           if (ticket?.state === 'open') await observeRecovery(ticket, initialReasons.get(number));
         }
         event('recovery-plan', { tickets: Object.fromEntries(recovery) });
+        event('context-ready', { tickets: [...scope], waiting: Object.fromEntries(waitingReasons()) });
         await prepareTarget();
         while (!processes.stopping) {
           const open = [...scope].filter(number => tickets.get(number)?.state !== 'closed');

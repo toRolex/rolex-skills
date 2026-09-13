@@ -30,7 +30,7 @@ Skills 按 bucket 文件夹组织在 `skills/` 下：
 
 [`ask-rolex`](./skills/engineering/ask-rolex/SKILL.md) 是路由器，映射所有用户可调用的 skill 及其相互关系。当你添加、重命名、删除或更改用户可调用 skill 在流程中的位置时，重新阅读 `ask-rolex` 的 `SKILL.md` 并更新它，使地图保持准确。
 
-要将所有 skill（重新）链接到本地 harness skill 目录（`~/.claude/skills`、`~/.agents/skills`），运行 `scripts/link-skills.sh`。每个条目是指向此仓库的符号链接，因此 `git pull` 可以保持已安装的 skill 最新；在添加、删除或重命名 skill 后重新运行该脚本。
+要将所有 skill（重新）链接到本地 harness skill 目录，运行 `scripts/link-skills.sh`。无参数时目标为 `~/.claude/skills` 与 `~/.agents/skills`；传入目录参数时仅链接到指定位置。Skills Manager 中央目录已有实体副本时，使用 `scripts/link-skills.sh --replace-existing "$HOME/.config/.skills-manager/skills"` 将同名副本替换为仓库软链接；省略该选项时遇到实体冲突会退出。每个链接指向此仓库，因此 `git pull` 可以保持已安装的 skill 最新；在添加、删除或重命名 skill 后重新运行该脚本。
 
 ## Agent skills
 

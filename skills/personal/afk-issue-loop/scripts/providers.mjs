@@ -224,7 +224,8 @@ const parseCodexStreamLine = (line)=>{
 };
 
 // AgentProvider.ts:637-665,782-825,1190-1236: three provider methods.
-// D2/D9: session/UI and permission wiring removed; omitted model stays local.
+// Session/UI wiring removed; permission defaults match upstream (ADR 0006).
+// AFK start resolves model/effort defaults before reaching this adapter.
 // stdin/flag construction remains upstream; Claude duplicate -p - omitted.
 const pi = (model, options) => ({
   name: "pi",
@@ -255,7 +256,7 @@ const codex = (model, options) => ({
       ? ` -c ${shellEscape(`model_reasoning_effort="${options.effort}"`)}`
       : "";
 
-    const base = "codex exec";
+    const base = "codex exec --dangerously-bypass-approvals-and-sandbox";
     return {
       command: `${base} --json${modelFlag}${effortFlag}`,
       stdin: prompt,
@@ -275,7 +276,7 @@ const claudeCode = (model, options) => ({
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
 
     return {
-      command: `claude --print --verbose --output-format stream-json${modelFlag}${effortFlag}`,
+      command: `claude --print --dangerously-skip-permissions --verbose --output-format stream-json${modelFlag}${effortFlag}`,
       stdin: prompt,
     };
   },

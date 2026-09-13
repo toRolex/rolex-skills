@@ -1,5 +1,7 @@
 # AFK 回归 Sandcastle 源码提取与原版中文角色
 
+> 「不恢复危险 bypass」由用户后续明确要求的 [ADR 0006](0006-afk-permission-model-defaults.md) 局部替代；身份、外层权限和其余边界不变，下文保留当时决策。
+
 依据 [SPEC #8](https://github.com/toRolex/rolex-skills/issues/8)，以 Sandcastle 固定 commit `e99f832f26dc9d245c019a9ddd19fa5dee792427` 的实际源码及三份角色模板为底稿，直接复制必要函数、保留业务控制流，只替换本机环境与框架接线。此前仅少量 helper 提取、重排角色与额外交付证明增加了对照维护成本；选择函数级提取而非继续重写，也不把 Sandcastle 或其他包变成运行依赖。
 
 ## 决定与替代范围

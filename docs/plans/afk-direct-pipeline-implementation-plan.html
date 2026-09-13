@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AFK 直接开工流水线 · 实施计划</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,-apple-system,"PingFang SC",sans-serif;color:#202723;background:#f6f5f0;line-height:1.75}
+body{margin:0}main{max-width:960px;margin:auto;padding:48px 24px 80px}header{border-bottom:3px solid #254e3b;padding-bottom:24px;margin-bottom:32px}h1{font-size:clamp(1.8rem,5vw,2.8rem);line-height:1.25;margin:12px 0}h2{margin-top:44px;font-size:1.5rem}h3{margin-top:0;font-size:1.15rem}a{color:#205940;text-underline-offset:3px}a:focus-visible{outline:3px solid #205940;outline-offset:4px}.meta{color:#525e55;font-size:.9rem}.lead{font-size:1.12rem}.decision{background:#fff;border:1px solid #cdd5cb;border-left:4px solid #356b4e;padding:22px;margin:18px 0;break-inside:avoid}.label{font-size:.85rem;color:#365c45;font-weight:700}.warning{background:#fff4df;border-left:4px solid #896124;padding:16px 20px}code{font-family:ui-monospace,SFMono-Regular,monospace;font-size:.9em;overflow-wrap:anywhere}pre{white-space:pre-wrap;background:#e9eee6;padding:20px;border-radius:4px}li{margin:6px 0}nav ul{display:flex;gap:12px 24px;flex-wrap:wrap;list-style:none;padding:0}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;background:#fff;font-size:.95rem}th,td{text-align:left;vertical-align:top;border:1px solid #d4d9d0;padding:12px}th{background:#e9eee6}footer{border-top:1px solid #bdc9be;margin-top:40px;padding-top:16px;color:#525e55}@media print{body{background:white}main{max-width:none;padding:0}nav{display:none}a{color:inherit}.decision{box-shadow:none}h2,h3{break-after:avoid}}
+</style>
+</head>
+<body><main>
+<header>
+<p class="meta">历史实施草案 · 2026-09-12 · 尚未实施</p>
+<p class="warning"><strong>设计已更新：</strong>用户已确认批内并行实现→审查、批末单 Merger、更新依赖后开始下一批。请以<a href="afk-batch-pipeline-spec.md">批次流水线 spec</a>为准；下文逐 Ticket 流式合并及未确认接口保留为历史草案，不再作为当前执行方案。</p>
+<h1>AFK：从触发直接进入 Ticket 交付</h1>
+<p class="lead">保留依赖驱动、有限并行和流式合并；删除独立 Planner、独立能力探测、通用握手框架和本次运行内的无限恢复。</p>
+<p>成功不是“探测通过”，而是<strong>首批子代理直接并行实现就绪 Tickets，在可用槽位内一次补满</strong>。必要的输入读取与现场检查仍然存在，但不预演整个运行平台。</p>
+<nav aria-label="计划目录"><ul><li><a href="#decisions">优先审阅的决策</a></li><li><a href="#flow">目标执行流程</a></li><li><a href="#acceptance">验收标准</a></li><li><a href="#implementation">实施顺序</a></li><li><a href="#evidence">依据与边界</a></li></ul></nav>
+</header>
+<section id="decisions">
+<h2>01 / 优先审阅的决策</h2>
+<p><strong>已经确认：</strong>允许删除多余协议、合并重复文档；删除 Planner，直接读取原生依赖；失败 Ticket 本次跳过，下次调用再试。以下是落实这些决定所需的推荐方案，并非已经获得确认的实现细节。</p>
+<article class="decision"><p class="label">D1 · 依赖读取与启动</p><h3>控制者加载依赖；首批并行派发多个 Implementer</h3>
+<p><strong>推荐：</strong>用小型确定性读取器获取指定 Tickets、开放 blocker 闭包、资格及原生关系，返回可调度快照。读取与结构校验合为一条路径，避免 LLM 建图后再重复整图 live 查询。控制者只消费简短结果，角色自行读取 Issue 正文与代码材料。</p>
+<p><strong>理由：</strong><code>/to-tickets</code> 已承担拆票与依赖设计；AFK 只负责执行既定关系。保留分页、循环依赖与输入资格检查，不推断新边、不改票。</p>
+<p><strong>取舍：</strong>允许一个专用的小脚本，不引入新的常驻调度服务或通用 adapter 框架。初始读取每项关系一次；派发前只局部刷新候选 Ticket 的资格与 blocker 状态，不反复验收整图。出现新增依赖时暂停该候选并更新相关关系。</p>
+<p><strong>执行范围建议：</strong>沿用现有规则：显式输入及其开放、符合资格的 blocker 都属于可执行集合；派发前展示简短范围摘要，不重新要求逐票确认。如果希望编号范围外的 blocker 仅用于阻塞判断、绝不自动执行，请否决这一点。</p>
+<p>输入无法完整读取就明确报告，不能把失败当成“没有工作”。只有正文依赖的旧票不静默当成无依赖，也不凭正文重新推断整个图。</p>
+</article>
+<article class="decision"><p class="label">D2 · 流水线与正常启动</p><h3>三角色交付，四 Ticket 在途，唯一串行合并</h3>
+<p><strong>推荐：</strong>Implementer → Reviewer → Merger；首批把没有未满足依赖的 Tickets 按可用容量一起派发，每 Ticket 一个 Implementer，最多四个在途，不先派一个等待结果后再派其余。之后有空槽立即补位。</p>
+<p><strong>合并触发仍待审阅：</strong>当前草案为单 Ticket 审查验收后进入串行合并队列；用户指定的上游参照已修正为 <code>parallel-planner-with-review</code>。该模板每 Ticket 的 implement → review 串接，各 Ticket 并发；等本批全部管线 settled 后，筛选正常返回且提交非空的结果，再启动一个 Merger 处理全部入选分支。批次合并还是流式合并尚未决定，本文后续的逐 Ticket 合并与即时补位均为待审草案。</p>
+<p><strong>上游筛选边界：</strong>Reviewer 可直接修正并提交，并非 approve/reject 审核器。正常返回且有 commit 不等于已验证审查通过；实现、审查或 sandbox close 抛错都会排除该 Ticket。Merger 在一次调用内逐分支合并，关闭实际合入的 Issues；模板不独立验证其返回结果。采纳其结构不代表照搬这些较宽松的验收条件。</p>
+<p>使用当前 harness 的原生委派、状态及通知能力。只在调用所需接口时查对应说明，不枚举或演练全部能力。若宿主要求单一顶层 workflow，它承载完整业务循环，而非一个结束即退出的 probe。</p>
+<p><strong>理由：</strong>保留相对于 Sandcastle 批次等待的优化，又不要求每次调用重新证明平台可用。所有角色任务直接携带业务参数，不先启动“等待 TASK”的空角色。</p>
+<p><strong>边界：</strong>关键工具实际缺失或拒绝授权时明确停在受影响操作；不擅自安装、不绕过权限、不偷偷更换载体。</p>
+</article>
+<article class="decision"><p class="label">D3 · 失败与执行状态</p><h3>本次跳过与安全退出分开表达</h3>
+<p><strong>推荐：</strong>快照升级为 v2，执行状态为 <code>pending / dispatched / skipped / done</code>；阶段保留 <code>implement / review / merge</code>。增加 <code>slot_held</code>，把执行结果与容量分开；删除 <code>recovering</code> 的本次恢复语义。失败记录只保存 Ticket、阶段、原因、现场、有效成果与退出证据。</p>
+<p>失败立即标记 <code>skipped</code>，本次不再调度；旧写入者尚未确认退出时 <code>slot_held=true</code>，确认退出并持久化证据后才释放。pending/done 不占槽，dispatched 占槽，skipped 按退出事实占槽。下游不会因为 blocker 被跳过而解锁；未启动的下游保持 pending，不伪造失败。</p>
+<p><strong>等待有界：</strong>实际失败后请求停止，使用宿主已有的有限退出等待；无现成边界时默认最多等待 60 秒。到界仍未知则持久化占用，冻结相关现场，不重复停止/探测。其他可推进任务继续；没有可推进工作时结束本次控制循环并报告未确认写入者，不释放其槽，也不宣称其已退出。正常长任务不适用这条失败后的停止期限。</p>
+<p><strong>理由：</strong>跳过是调度决定，不是进程已经退出。不能用状态精简换来两个写入者。下一次调用重新判断任务资格，历史 <code>skipped</code> 不永久封禁 Ticket。</p>
+<p><strong>共同现场失败：</strong>若 Merger 在目标分支留下冲突或未知写入者，冻结该合并现场，停止后续合并；安全的独立实现/审查可继续到容量上限。耗尽可推进工作后输出真实阻塞状态，不宣称整批完成。</p>
+<p><strong>重试范围：</strong>正常实现中的测试修正仍是当前任务的一部分；角色报告失败、异常终止或进入明确失败分支后，本次不再启动替代角色。取消失败后的自动模型升级；保留用户明确指定的可用模型。</p>
+</article>
+<article class="decision"><p class="label">D4 · 合并结果与清理所有权</p><h3>Merger 完成即返回；控制者记录结果后清理现场</h3>
+<p><strong>推荐：</strong>Merger 负责合并、测试、summary 与关闭 Ticket，然后返回精确版本证据并退出，保留 branch/worktree。控制者核实证据、角色与写入子进程退出、目标分支安全可用，再原子登记 <code>done/merged</code> 及待清理事实；随后执行已授权的 Worktrunk 机械清理。</p>
+<p><strong>有意调整完成边界：</strong>经过核验的交付与现场回收分开。安全的待删除 worktree 不阻塞下游或占用 Ticket 槽；清理失败只记 <code>cleanup_pending</code>，不撤销已验证交付、不重派 Implementer。下次调用核对成果后只处理获授权收尾；若目标分支有冲突或未知写入者，则尚不满足上述完成门，不能解锁下游。</p>
+<p>关闭 Issue 但尚未完成控制者验收，不等于本次已交付；再次调用时必须结合旧记录核对，不能仅按 CLOSED 抹掉未完成验收或清理责任。落盘失败时不删除现场。</p>
+<p><strong>旧设计中的 ACK：</strong>Merger 合并后先发消息询问控制者“结果是否已经保存，可以删 worktree 吗”，收到确认后才清理并结束。新建议取消这段中途对话：Merger 返回结果并结束，控制者保存结果后自行清理。这与等待其他 Ticket 完成无关。</p>
+<p><strong>理由：</strong>通过职责顺序消除“Merger 等确认、控制者等完成”的双向通信依赖。只提供最终结果通知的子代理也能完成正常流程。控制者不接手代码实现、冲突修复或业务测试修正。</p>
+<p><strong>代价：</strong>控制者新增明确、窄范围的机械收尾职责。若此职责边界不接受，则必须保留额外的清理委派；不推荐恢复通用消息总线。</p>
+</article>
+<article class="decision"><p class="label">D5 · 下次调用与旧记录</p><h3>重新选择任务，不自动复活旧阶段</h3>
+<p><strong>推荐：</strong>保留一个版本化的薄运行快照及失败记录，不构建通用恢复引擎。下次调用重读 Issue 与依赖，并核对相关 branch/worktree 的已有成果和旧写入者。历史记录只帮助判断，不自动跳过审查或授权写入。</p>
+<p>同次运行的上下文续接沿用 run_id，不能借续接重试 skipped；用户下一次 AFK 调用才建立新 run_id。旧版 v1 的 <code>recovering</code>、模型升级、peer 握手与 dispatch 记录只读核对并保留，不原地机械迁移为可执行 v2 状态。</p>
+<p>相关现场有未确认写入者时保留并报告；安全的失败现场保留给下一次明确尝试，不强制清空、重置或删除用户改动。未完成 merge、已关闭但未验收以及待清理现场分别核对，不把所有残留都重新交给 Implementer。保留原始基线，不以当前 HEAD 掩盖已有修改。</p>
+<p><strong>理由：</strong>避免“重新调用”变成原恢复引擎的别名，也避免静默迁移把残留状态误当成干净起点。未涉及的旧记录不阻止独立 Ticket 开工。</p>
+</article>
+<p class="warning"><strong>审阅方式：</strong>请对 D1–D5 分别确认或指出异议；例如“D1、D2、D3、D5 同意；D4 不让控制者清理”。未审阅前不开始重构。被否决的决策先更新本计划。</p>
+</section>
+<section id="flow"><h2>02 / 目标执行流程</h2>
+<pre><code>用户触发
+  → 读取真实 Issues / 原生依赖 / 必要现场信息
+  → 选择就绪 Ticket，直接派 Implementer（最多四个在途）
+  → 单 Ticket 实现完成 → Reviewer
+  → 审查通过 → 唯一串行 Merger
+  → 结果返回 → 验收、退出与安全目标核验 → 落盘 done → 补位
+  → 已授权现场回收（失败单独记录，不撤销已验证交付）
+
+任一交付阶段失败（不含已交付后的机械回收）
+  → skipped，记录原因与现场；退出未知仍占槽
+  → 确认旧写入者退出 → 持久化证据 / 释放槽
+  → 其他独立 Ticket 继续；下游等待
+
+无可推进工作
+  → 区分全部完成、部分跳过、依赖阻塞、等待安全退出
+  → 给出简短结果，不轮询一个注定不能推进的循环</code></pre>
+<p>四槽是 Ticket 容量，不是四个同时运行的角色。失败现场尚未安全结束时不释放容量。正常路径不读故障恢复手册；只读 Issue/依赖不是“无意义探测”，完整平台自检才是要删除的前置负担。</p>
+</section>
+<section id="acceptance"><h2>03 / 验收：先验证能开工，再谈文档完整</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">场景</th><th scope="col">通过标准</th><th scope="col">验证层</th></tr></thead><tbody>
+<tr><td>无旧现场、A/B 独立就绪</td><td>首批直接启动 A/B 的 Implementer，不等 A 完成才启动 B；四个以上就绪时按四槽上限补满。无 Planner、probe-only workflow、IDENTIFY/TASK 往返</td><td>执行 trace；静态检查只能辅助</td></tr>
+<tr><td>A 阻塞 B，C 独立</td><td>A/C 可启动；A 完整交付前 B 不启动；A 失败本次只跳过 A，B 等待，C 继续</td><td>确定性依赖与状态测试 + 运行 trace</td></tr>
+<tr><td>四个在途，其中一个失败</td><td>本次不重派；退出未知时不出现第五个 Ticket；退出确认后允许安全补位</td><td>槽计数与调度场景测试</td></tr>
+<tr><td>审查先后完成</td><td>先通过的 Ticket 即进入串行合并，不等待全部 Implementer/Reviewer</td><td>事件顺序 trace</td></tr>
+<tr><td>子代理只有最终结果</td><td>Merger 可正常返回；结果落盘前不清理；没有等 ACK 的死锁</td><td>集成场景与现场证据</td></tr>
+<tr><td>下次调用重遇 skipped / 旧 recovering</td><td>可重新评估任务，但不盲复活旧写入者、不覆盖脏现场、不自动信任旧审查结果</td><td>旧记录 fixture 与现场测试</td></tr>
+<tr><td>接口错误、依赖环、权限拒绝</td><td>原因明确；不当成空列表、完成或无依赖，不通过换载体绕过</td><td>脚本错误路径测试</td></tr>
+<tr><td>快照后新增 blocker</td><td>候选派发前的局部刷新发现阻塞，不依赖旧快照强行派发</td><td>GitHub 响应序列 fixture</td></tr>
+<tr><td>失败后永远无法确认退出</td><td>在有限等待后保留占用并报告；没有可推进工作时返回，不无限探测</td><td>故障注入 + trace</td></tr>
+<tr><td>合并验收成功、清理失败、再次调用</td><td>不撤销 done、不重做实现；保留 cleanup_pending，核实后仅做获授权收尾</td><td>清理动作 stub + 独立现场</td></tr>
+</tbody></table></div>
+<p><strong>必须分开报告：</strong>脚本测试、静态文档检查、真实 harness 冒烟。原有 73 个脚本测试不证明模型能从入口推进到业务。历史 Pi 日志可作为反例，不伪装为修复后的执行重放。</p>
+<p><strong>真实验证边界：</strong>在经授权的独立测试仓库与测试 Tickets 中验证，不恢复用户当前 Pi 会话、不使用其生产 Issue 做自动实验。若没有可运行环境，明确标为未验证，不宣布跨 harness 已通过。</p>
+</section>
+<section id="implementation"><h2>04 / 实施顺序与机械性整理</h2>
+<ol>
+<li><strong>冻结基线。</strong>保存本次任务的变更边界，保留现有未提交改动；新建独立 implementation notes。锁定根因反例与状态场景，不把全文关键字断言当作行为回归测试。</li>
+<li><strong>依赖与状态先落地。</strong>实现单次读取的依赖快照路径，调整状态校验与槽计数；为 skipped、等待退出、旧记录及错误响应编写测试，再替换 Planner 入口。</li>
+<li><strong>改短主流程。</strong>重写 SKILL 正常路径，直接业务分派；同步三角色职责和模板，去掉 probe、所有角色通用身份握手、双向 durable ack 与失败自动升级。</li>
+<li><strong>按需披露异常。</strong>将失败记录、相关现场判断和手动再次调用的说明收敛到一处；保留最小权限与单写者边界，不保留原无限恢复引擎的空壳。</li>
+<li><strong>整理引用。</strong>删除不再使用的 Planner 模板与通信协议文件前检查内容与全部引用；合并 REFERENCE、现场绑定和示例的重复规则。同步 router、README、领域词汇与相关脚本注释；不新增另一份供应商接口对照。</li>
+<li><strong>处理历史约定。</strong>保留旧 ADR 的历史事实，对与新失败策略冲突的决定注明被新决定取代；在实际状态/兼容性取舍确需长期解释时写一份精简 ADR，不为每处删文档建立 ADR。</li>
+<li><strong>验收与审阅。</strong>运行脚本测试、格式和链接检查，再执行获授权的真实行为验证；分别报告结果与未覆盖项。没有明确请求不提交或推送。</li>
+</ol>
+<h3>文件影响清单</h3>
+<ul>
+<li><code>skills/personal/afk-issue-loop/SKILL.md</code>、<code>REFERENCE.md</code>、<code>EXAMPLES.md</code>：改入口、v2 状态、部分完成终止和异常分支。</li>
+<li><code>reference/planner-prompt.md</code>：迁出机械关系读取规则后删除；<code>reference/peer-messaging.md</code>：移除通用协议，保留必要原生任务关联的短说明；<code>reference/workspace-binding.md</code>：收敛到目标现场与载体按需操作。</li>
+<li><code>reference/implementer-prompt.md</code>、<code>reviewer-prompt.md</code>、<code>merger-prompt.md</code>：直接业务任务、失败返回、清理职责调整。保留 Reviewer 当前可在同一 worktree 修正并测试的职责，不偷偷改成纯意见审查。</li>
+<li><code>scripts/validate-plan.sh</code>、<code>dispatched-count.sh</code>、<code>tests.sh</code>：同步 v2、slot_held、skipped、done_source 和旧版拒绝路径；删除 tests 对 Planner 文档示例的依赖。新增 <code>scripts/read-tickets.sh</code>（建议名称）承接分页与依赖读取，复用现有 Bash/jq 工具链。</li>
+<li>为确定性就绪判断与收尾门建立窄测试入口，测试实际使用的逻辑，不另写只在测试里运行的“理想调度器”。当前没有可执行调度/清理门；若未实现对应入口，就只报告真实 trace 验证，不声称已有单测覆盖它们。禁止借此建立跨 harness runtime。</li>
+<li><code>skills/engineering/ask-rolex/SKILL.md</code>、<code>docs/personal/afk-issue-loop.md</code>：删除无限恢复/模型升级宣传；同步根 README、personal bucket README 与 CONTEXT 的必要介绍。保留 AFK skill 名称及插件目录注册，不因删除 Planner 移除插件入口。</li>
+<li><code>docs/adr/0001-*</code>、<code>0002-*</code>、<code>0003-*</code>：新增一份聚焦“直接调度、失败本次跳过、v2 状态与清理边界”的 ADR，并标注取代范围。保留主窗口预算、原生依赖与现场保护；取代四角色、无限恢复、旧槽公式及“完成通知即退出”等冲突断言，不重写历史正文。</li>
+</ul>
+<p>上述文件为当前工作树只读核实的影响面；目录注册不变。实施前仍检查当时的 diff，保留其他任务改动。以上各项是计划，不代表已修改执行代码。</p>
+</section>
+<section id="evidence"><h2>05 / 依据与非目标</h2>
+<ul>
+<li><a href="../../CONTEXT.md">当前领域词汇表</a>已确认三角色、就绪 Ticket、本次跳过与再次尝试。</li>
+<li>Git 历史：<code>9351dbd</code> 业务扫描后分派；<code>41e2408</code> 引入四角色；<code>fdd94f8</code> 引入流式合并；当前未提交的通用能力门扩大了正常启动负担。</li>
+<li>Pi session <code>01a0912c-9a0f-7621-afbf-ecb7f582a092</code>：探测 child 成功，唯一顶层 workflow 随后返回，Planner 未启动；这不是已证实的插件能力不足。</li>
+<li><a href="https://github.com/mattpocock/sandcastle/blob/e99f832f26dc9d245c019a9ddd19fa5dee792427/src/templates/parallel-planner-with-review/main.mts#L114-L221">Sandcastle parallel-planner-with-review</a>是用户指定参照：每 Ticket 实现→审查，各管线并发，allSettled 后单 Merger 合并本批入选分支。合并触发方案仍待确认；不再用无 Reviewer 的 parallel-planner 模板推论。</li>
+</ul>
+<p><strong>非目标：</strong>重写 to-tickets 的拆票策略、开发新的 agent runtime、自动安装 Pi 插件、迁移用户正在运行的会话、删除残留业务现场、承诺未经实测的所有 harness 兼容性。</p>
+</section>
+<footer>此文档是供审阅的 implementation plan，不是批准记录、已完成清单或执行时必须全文加载的 skill 参考。</footer>
+</main></body></html>

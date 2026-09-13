@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>AFK Agent 输出监控 · 原型</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      --ink: #101923;
+      --muted: #526171;
+      --quiet: #667482;
+      --paper: #edf1f3;
+      --panel: #f8fafb;
+      --white: #ffffff;
+      --line: #c8d1d8;
+      --line-strong: #94a5b2;
+      --navy: #102a42;
+      --navy-2: #183a55;
+      --blue: #176b87;
+      --cyan: #0099aa;
+      --green: #087f5b;
+      --amber: #8a4500;
+      --red: #b42318;
+      --purple: #6f42c1;
+      --focus: #005fcc;
+      --console: #0d1b27;
+      --console-2: #132535;
+      --console-line: #294154;
+      --console-text: #dbe8ef;
+      --console-muted: #91a9b9;
+      --shadow: 0 16px 40px rgba(0, 0, 0, .13);
+      --radius: 7px;
+      --dock-height: 350px;
+      --mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+      --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--paper); }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: var(--sans);
+      line-height: 1.45;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; }
+    ::selection { color: var(--white); background: var(--blue); }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+    * { scrollbar-color: #6d8393 #dfe6ea; scrollbar-width: thin; }
+    .output-viewport { scrollbar-color: #58758a var(--console); }
+
+    .skip-link {
+      position: fixed;
+      z-index: 100;
+      top: 10px;
+      left: 10px;
+      padding: 9px 12px;
+      color: var(--white);
+      background: var(--navy);
+      transform: translateY(-160%);
+    }
+    .skip-link:focus { transform: none; }
+
+    .prototype-flag {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      padding: 5px 16px;
+      color: #173850;
+      background: #c5edf1;
+      border-bottom: 1px solid #75cbd4;
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: .08em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .topbar {
+      color: var(--white);
+      background: var(--navy);
+      border-bottom: 4px solid var(--cyan);
+    }
+    .topbar-inner {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.1fr) minmax(440px, 2fr) auto;
+      gap: 20px;
+      align-items: center;
+      max-width: 1760px;
+      margin: 0 auto;
+      padding: 17px 24px;
+    }
+    .brand-row { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      flex: 0 0 38px;
+      width: 38px;
+      height: 38px;
+      color: #98eef4;
+      border: 1px solid #73d4dc;
+      font: 900 13px var(--mono);
+    }
+    h1 { margin: 0; font-size: 20px; line-height: 1.1; letter-spacing: -.02em; }
+    .run-id { margin-top: 5px; color: #c0d4e3; font: 12px/1.2 var(--mono); }
+
+    .run-strip {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(76px, 1fr));
+      border: 1px solid rgba(255,255,255,.22);
+    }
+    .run-fact { min-width: 0; padding: 8px 10px; border-right: 1px solid rgba(255,255,255,.18); }
+    .run-fact:last-child { border-right: 0; }
+    .run-fact span { display: block; color: #a9bfd1; font-size: 9px; font-weight: 850; letter-spacing: .08em; }
+    .run-fact strong { display: block; overflow: hidden; margin-top: 3px; font: 750 11px/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+
+    .connection {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      justify-self: end;
+      min-width: max-content;
+      padding: 7px 10px;
+      border: 1px solid rgba(255,255,255,.25);
+      font: 750 11px var(--mono);
+    }
+    .connection-dot { width: 8px; height: 8px; background: #56d6a3; border-radius: 50%; }
+    .connection[data-state="live"] .connection-dot { animation: signal-pulse 1.7s ease-out infinite; }
+    .connection[data-state="stale"] .connection-dot { background: #ffbf69; }
+    .connection[data-state="final"] .connection-dot { background: #8cc8ff; }
+    @keyframes signal-pulse { 50% { opacity: .58; transform: scale(.82); } }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 18px;
+      max-width: 1760px;
+      margin: 0 auto;
+      padding: 11px 24px;
+      background: rgba(255,255,255,.94);
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+    .search-wrap { position: relative; flex: 1 1 270px; max-width: 430px; }
+    .search-wrap svg { position: absolute; top: 50%; left: 10px; width: 17px; color: var(--quiet); transform: translateY(-50%); }
+    .search {
+      width: 100%;
+      min-height: 38px;
+      padding: 8px 10px 8px 35px;
+      color: var(--ink);
+      background: var(--white);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      caret-color: var(--blue);
+    }
+    .filters { display: flex; flex-wrap: wrap; gap: 6px; }
+    .filter, .view-button, .dock-size-button {
+      min-height: 34px;
+      padding: 6px 10px;
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .filter:hover, .dock-size-button:hover { border-color: var(--blue); }
+    .filter[aria-pressed="true"] { color: var(--white); background: var(--navy); border-color: var(--navy); }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-left: auto; color: var(--muted); font-size: 11px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .legend-mark { width: 9px; height: 9px; border: 2px solid currentColor; }
+
+    main { max-width: 1760px; margin: 0 auto; padding: 16px 24px 96px; }
+    .notice {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      color: #613400;
+      background: #fff0d2;
+      border: 1px solid #e3b96b;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .notice strong { white-space: nowrap; }
+    .surface-title { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
+    .surface-title h2 { margin: 0; font-size: 14px; letter-spacing: .02em; }
+    .surface-title p { margin: 0; color: var(--muted); font-size: 11px; text-align: right; }
+
+    .panel { min-width: 0; background: rgba(248,250,251,.97); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+    .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+    .panel-heading h2, .panel-heading h3 { margin: 0; font-size: 12px; letter-spacing: .02em; }
+    .panel-heading small { color: var(--muted); font-size: 10px; }
+
+    .layout-b1, .layout-b3 { display: grid; gap: 14px; }
+    .layout-b2 { display: grid; grid-template-columns: minmax(650px, 1fr) minmax(380px, 500px); gap: 14px; align-items: start; }
+    .layout-b1 .kanban-scroll { max-height: 38vh; }
+    .layout-b1 .output-monitor { position: sticky; z-index: 8; bottom: 70px; height: var(--dock-height); }
+    .layout-b2 .kanban-scroll { max-height: calc(100vh - 260px); }
+    .layout-b2 .output-monitor { position: sticky; top: 14px; height: calc(100vh - 86px); min-height: 590px; }
+    .layout-b3 { grid-template-rows: minmax(230px, 29vh) minmax(540px, 1fr); }
+    .layout-b3 .kanban-shell, .layout-b3 .kanban-scroll { min-height: 0; height: 100%; }
+    .layout-b3 .output-monitor { min-height: 570px; }
+
+    .kanban-shell { overflow: hidden; }
+    .kanban-heading-copy { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .kanban-heading-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kanban-scroll { overflow: auto; }
+    .lane-head, .ticket-lane { display: grid; grid-template-columns: 108px repeat(3, minmax(235px, 1fr)); min-width: 850px; }
+    .lane-head { position: sticky; z-index: 4; top: 0; color: #eaf5fb; background: #29445d; font-size: 9px; font-weight: 900; letter-spacing: .08em; }
+    .lane-head > div, .ticket-lane > div { min-width: 0; padding: 9px 10px; border-right: 1px solid var(--line); }
+    .lane-head > div { border-right-color: #49637a; }
+    .lane-head > div:last-child, .ticket-lane > div:last-child { border-right: 0; }
+    .ticket-lane { border-bottom: 1px solid var(--line); }
+    .ticket-lane:last-child { border-bottom: 0; }
+    .lane-ticket { display: flex; flex-direction: column; justify-content: center; color: var(--navy); background: #dfe8ed; }
+    .lane-ticket strong { font: 900 16px var(--mono); }
+    .lane-ticket small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .lane-cell { min-height: 104px; background: rgba(255,255,255,.5); }
+    .lane-agent {
+      width: 100%;
+      min-height: 84px;
+      padding: 9px;
+      color: var(--ink);
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .lane-agent:hover { border-color: var(--blue); background: #f4fbfc; }
+    .lane-agent[aria-pressed="true"] { border-color: var(--cyan); background: #e5f5f7; box-shadow: inset 0 0 0 2px rgba(0,153,170,.22); }
+    .lane-agent[aria-pressed="true"]::after { content: "SELECTED"; display: block; margin-top: 7px; color: var(--blue); font: 900 8px var(--mono); letter-spacing: .12em; }
+    .agent-top { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
+    .agent-top strong { font-size: 11px; }
+    .agent-summary { display: -webkit-box; overflow: hidden; margin: 7px 0 0; color: var(--muted); font-size: 10px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .agent-signals { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-width: max-content;
+      padding: 3px 5px;
+      border: 1px solid currentColor;
+      border-radius: 3px;
+      font: 750 8px/1.15 var(--mono);
+    }
+    .status::before { content: ""; width: 5px; height: 5px; background: currentColor; }
+    .tone-live, .tone-accepted, .tone-complete { color: var(--green); background: #e8f6f0; }
+    .tone-observed, .tone-validating, .tone-review { color: var(--blue); background: #e5f3f7; }
+    .tone-waiting, .tone-pending, .tone-queued { color: var(--amber); background: #fff2dd; }
+    .tone-rejected, .tone-blocked { color: var(--red); background: #ffebe8; }
+    .tone-stale, .tone-unknown { color: #6b5b78; background: #f0eaf5; }
+    .tone-neutral { color: #536273; background: #edf1f3; }
+    .time { font: 700 9px var(--mono); white-space: nowrap; }
+    .empty-stage { display: grid; place-items: center; min-height: 84px; padding: 8px; color: var(--quiet); border: 1px dashed var(--line-strong); font-size: 10px; text-align: center; }
+
+    .output-monitor {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      overflow: hidden;
+      color: var(--console-text);
+      background: var(--console);
+      border: 1px solid #385267;
+      border-radius: var(--radius);
+      box-shadow: 0 18px 44px rgba(7, 18, 27, .25);
+    }
+    .dock-grip { display: none; height: 13px; place-items: center; background: #172a39; border-bottom: 1px solid var(--console-line); }
+    .layout-b1 .dock-grip { display: grid; cursor: row-resize; }
+    .dock-grip::before { content: ""; width: 64px; height: 3px; background: #648096; border-radius: 999px; }
+    .monitor-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      padding: 11px 13px;
+      background: var(--console-2);
+      border-bottom: 1px solid var(--console-line);
+    }
+    .monitor-identity { min-width: 0; }
+    .monitor-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .monitor-title-row h2 { margin: 0; color: #f4f9fc; font-size: 15px; letter-spacing: -.01em; }
+    .monitor-identity p { overflow: hidden; margin: 5px 0 0; color: #adc0cd; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .monitor-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 7px;
+      border: 1px solid currentColor;
+      border-radius: 3px;
+      font: 850 9px var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .monitor-state::before { content: ""; width: 6px; height: 6px; background: currentColor; }
+    .monitor-state[data-state="live"] { color: #63dda9; }
+    .monitor-state[data-state="final"] { color: #8cc8ff; }
+    .monitor-state[data-state="stale"] { color: #ffbf69; }
+    .monitor-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 6px; }
+    .view-button, .dock-size-button { min-height: 30px; padding: 4px 8px; color: #d7e5ed; background: #172c3c; border-color: #496478; font: 750 9px var(--mono); }
+    .view-button:hover, .dock-size-button:hover { background: #234259; }
+    .view-button[aria-pressed="true"], .dock-size-button[aria-pressed="true"] { color: #091822; background: #8fdde5; border-color: #8fdde5; }
+    .dock-size-controls { display: flex; gap: 4px; }
+
+    .monitor-facts {
+      display: grid;
+      grid-template-columns: repeat(9, minmax(72px, 1fr));
+      background: #10202d;
+      border-bottom: 1px solid var(--console-line);
+    }
+    .monitor-fact { min-width: 0; padding: 7px 9px; border-right: 1px solid var(--console-line); }
+    .monitor-fact:last-child { border-right: 0; }
+    .layout-b2 .monitor-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .layout-b2 .monitor-fact { border-bottom: 1px solid var(--console-line); }
+    .layout-b2 .monitor-fact:nth-child(3n) { border-right: 0; }
+    .layout-b2 .monitor-fact:nth-last-child(-n+3) { border-bottom: 0; }
+    .monitor-fact span { display: block; color: var(--console-muted); font-size: 8px; font-weight: 850; letter-spacing: .08em; }
+    .monitor-fact strong { display: block; overflow: hidden; margin-top: 3px; color: #edf6fa; font: 750 9px/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+
+    .monitor-body { display: grid; min-height: 0; }
+    .monitor-body.has-context { grid-template-columns: minmax(0, 1fr) 278px; }
+    .output-viewport { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; background: var(--console); }
+    .output-list { margin: 0; padding: 0; list-style: none; }
+    .output-line {
+      display: grid;
+      grid-template-columns: 54px 82px 112px minmax(0, 1fr);
+      min-width: 0;
+      border-bottom: 1px solid rgba(66, 92, 111, .55);
+      font-family: var(--mono);
+    }
+    .output-line:last-child { border-bottom: 0; }
+    .output-line:hover { background: #122534; }
+    .line-number, .line-time, .source-cell, .output-copy { min-width: 0; padding: 8px 9px; }
+    .line-number { color: #678398; background: #0a1721; text-align: right; user-select: none; }
+    .line-time { color: #91a9b9; }
+    .source-cell { border-right: 1px solid rgba(66, 92, 111, .55); border-left: 1px solid rgba(66, 92, 111, .55); }
+    .source-type { display: inline-block; color: #cde4ee; font-size: 8px; font-weight: 850; letter-spacing: .05em; }
+    .output-line[data-source="tool-call"] .source-type { color: #8dd9e2; }
+    .output-line[data-source="tool-result"] .source-type { color: #90d9b8; }
+    .output-line[data-source="stderr-error"] .source-type { color: #ff9e97; }
+    .output-line[data-source="gate"] .source-type { color: #ffd08d; }
+    .output-line[data-source="system-process"] .source-type { color: #c6b4ed; }
+    .output-copy { color: var(--console-text); }
+    .output-text { margin: 0; font: 10px/1.58 var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; }
+    .redacted-mark { display: inline-block; margin-top: 5px; padding: 1px 4px; color: #f1c98e; border: 1px solid #85673d; font: 750 7px var(--mono); letter-spacing: .08em; }
+    .output-empty { padding: 34px 18px; color: var(--console-muted); text-align: center; }
+
+    .monitor-context { min-width: 0; overflow: auto; background: #10202d; border-left: 1px solid var(--console-line); }
+    .context-section { padding: 12px; border-bottom: 1px solid var(--console-line); }
+    .context-section:last-child { border-bottom: 0; }
+    .context-section h3 { margin: 0 0 9px; color: #f1f7fa; font-size: 10px; letter-spacing: .05em; }
+    .context-grid { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--console-line); border-left: 1px solid var(--console-line); }
+    .context-fact { min-width: 0; padding: 8px; border-right: 1px solid var(--console-line); border-bottom: 1px solid var(--console-line); }
+    .context-fact span { display: block; color: var(--console-muted); font-size: 8px; }
+    .context-fact strong { display: block; margin-top: 3px; color: #e7f1f6; font: 750 9px/1.35 var(--mono); overflow-wrap: anywhere; }
+    .source-key { display: grid; grid-template-columns: 96px 1fr; gap: 6px 8px; color: #b8cad5; font-size: 9px; }
+    .source-key code { color: #e4f1f6; font-family: var(--mono); }
+    .semantic-boundary { margin: 0; color: #b7cad5; font-size: 9px; line-height: 1.55; }
+
+    .empty { padding: 56px 24px; color: var(--muted); text-align: center; }
+    .empty strong { display: block; color: var(--ink); font-size: 18px; }
+
+    .switcher {
+      position: fixed;
+      z-index: 50;
+      bottom: 16px;
+      left: 50%;
+      display: grid;
+      grid-template-columns: 40px minmax(190px, 1fr) 40px;
+      align-items: center;
+      width: min(390px, calc(100vw - 20px));
+      overflow: hidden;
+      color: var(--white);
+      background: #091621;
+      border: 1px solid #7992a5;
+      border-radius: 999px;
+      box-shadow: 0 12px 34px rgba(7, 18, 27, .34);
+      transform: translateX(-50%);
+    }
+    .switcher button { height: 40px; color: var(--white); background: transparent; border: 0; cursor: pointer; }
+    .switcher button:hover { background: #23435e; }
+    .switcher-label { min-width: 0; padding: 0 12px; overflow: hidden; font: 750 10px var(--mono); text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+    @media (max-width: 1180px) {
+      .topbar-inner { grid-template-columns: 1fr auto; }
+      .run-strip { grid-column: 1 / -1; grid-row: 2; }
+      .layout-b2 { grid-template-columns: minmax(560px, 1fr) minmax(340px, 420px); }
+      .monitor-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .monitor-fact { border-bottom: 1px solid var(--console-line); }
+      .monitor-fact:nth-child(3n) { border-right: 0; }
+      .monitor-fact:nth-last-child(-n+3) { border-bottom: 0; }
+    }
+
+    @media (max-width: 980px) {
+      .layout-b2 { grid-template-columns: 1fr; }
+      .layout-b2 .kanban-scroll { max-height: 43vh; }
+      .layout-b2 .output-monitor { position: static; height: 590px; min-height: 0; }
+      .layout-b3 { grid-template-rows: minmax(250px, 36vh) auto; }
+      .monitor-body.has-context { grid-template-columns: minmax(0, 1fr) 240px; }
+    }
+
+    @media (max-width: 720px) {
+      .topbar-inner, main { padding-right: 13px; padding-left: 13px; }
+      .toolbar { padding: 10px 13px; }
+      .run-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .run-fact { border-bottom: 1px solid rgba(255,255,255,.18); }
+      .run-fact:nth-child(2n) { border-right: 0; }
+      .run-fact:last-child { grid-column: 1 / -1; border-bottom: 0; }
+      .legend { width: 100%; margin-left: 0; }
+      .surface-title { align-items: start; flex-direction: column; gap: 4px; }
+      .surface-title p { text-align: left; }
+      .notice { grid-template-columns: 1fr; gap: 3px; }
+      .notice strong { white-space: normal; }
+
+      .layout-b1 .kanban-scroll, .layout-b2 .kanban-scroll { max-height: none; }
+      .layout-b1 .output-monitor, .layout-b2 .output-monitor { position: static; height: auto; min-height: 630px; }
+      .layout-b3 { display: flex; flex-direction: column; }
+      .layout-b3 .kanban-shell, .layout-b3 .kanban-scroll { height: auto; }
+      .layout-b3 .output-monitor { min-height: 720px; }
+
+      .lane-head { display: none; }
+      .ticket-lane { display: grid; grid-template-columns: 1fr; min-width: 0; margin: 0 8px 10px; border: 1px solid var(--line); }
+      .ticket-lane:first-child { margin-top: 8px; }
+      .ticket-lane > div { border-right: 0; }
+      .lane-ticket { min-height: 52px; padding: 9px 11px; }
+      .lane-cell { position: relative; min-height: 0; padding-top: 27px !important; }
+      .lane-cell::before { content: attr(data-stage); position: absolute; top: 7px; left: 10px; color: var(--quiet); font-size: 8px; font-weight: 900; letter-spacing: .07em; }
+      .lane-agent, .empty-stage { min-height: 76px; }
+
+      .monitor-header { grid-template-columns: 1fr; }
+      .monitor-actions { justify-content: start; }
+      .monitor-identity p { white-space: normal; }
+      .monitor-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .monitor-fact, .monitor-fact:nth-child(3n) { border-right: 1px solid var(--console-line); border-bottom: 1px solid var(--console-line); }
+      .monitor-fact:nth-child(2n) { border-right: 0; }
+      .monitor-fact:last-child { grid-column: 1 / -1; border-right: 0; border-bottom: 0; }
+      .monitor-body.has-context { grid-template-columns: 1fr; }
+      .monitor-context { max-height: none; border-top: 1px solid var(--console-line); border-left: 0; }
+      .output-line { grid-template-columns: 48px minmax(0, 1fr); }
+      .line-number { grid-row: 1 / span 2; }
+      .line-time, .source-cell { padding: 7px 8px 2px; }
+      .line-time { color: #a7bac6; }
+      .source-cell { border: 0; padding-top: 2px; padding-bottom: 5px; }
+      .output-copy { grid-column: 2; padding: 1px 8px 9px; }
+    }
+
+    @media (max-width: 420px) {
+      .topbar-inner { grid-template-columns: 1fr; gap: 13px; }
+      .connection { grid-row: 2; justify-self: start; min-width: 0; }
+      .run-strip { grid-row: 3; }
+      .prototype-flag { padding-inline: 8px; font-size: 9px; }
+      .toolbar { gap: 9px; }
+      .filters { width: 100%; }
+      .filter { flex: 1 1 calc(50% - 4px); }
+      .legend { gap: 7px 10px; }
+      main { padding-top: 12px; }
+      .monitor-actions { display: grid; grid-template-columns: 1fr; width: 100%; }
+      .dock-size-controls { display: grid; grid-template-columns: repeat(3, 1fr); }
+      .view-button, .dock-size-button { width: 100%; }
+      .source-key { grid-template-columns: 84px 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+
+    @media print {
+      body { background: white; }
+      .toolbar, .switcher, .skip-link { display: none; }
+      main { max-width: none; padding: 12px; }
+      .panel, .output-monitor { position: static !important; height: auto !important; box-shadow: none; break-inside: avoid; }
+      .layout-b1, .layout-b2, .layout-b3 { display: block; }
+      .output-monitor { margin-top: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <!--
+  THROWAWAY PROTOTYPE — 保留 Ticket Kanban 作为唯一 base，通过 ?variant=B1|B2|B3 比较 Agent output monitor。
+  用户已选中 B2；?variant=B 与无参数地址均映射到 B2。
+  THESIS: 先在工单流水线选中 Agent，再持续读取带序号、时间、来源、脱敏标记和 tail 状态的中间输出。
+  FORM: B1 Bottom Output Dock、B2 Split Output Inspector、B3 Output Workbench。
+  -->
+  <a class="skip-link" href="#content">跳到主要内容</a>
+  <div class="prototype-flag">模拟演示 · 不连接、不修改、不停止真实 AFK run</div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true">AFK</div>
+        <div>
+          <h1>Agent 输出监控</h1>
+          <div class="run-id" id="run-id">演示 · 正在连接</div>
+        </div>
+      </div>
+      <div class="run-strip" id="run-strip" aria-label="运行概览"></div>
+      <div class="connection" id="connection" data-state="live" role="status" aria-live="polite">
+        <span class="connection-dot" aria-hidden="true"></span>
+        <span id="connection-label">SSE 模拟连接 · 正常</span>
+      </div>
+    </div>
+  </header>
+
+  <nav class="toolbar" aria-label="Agent 筛选与搜索">
+    <label class="search-wrap">
+      <span class="sr-only">搜索工单、角色、状态或输出内容</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input class="search" id="search" type="search" placeholder="搜索工单、角色、状态、输出…" autocomplete="off">
+    </label>
+    <div class="filters" id="filters" aria-label="按 Role 筛选"></div>
+    <div class="legend" aria-label="状态语义">
+      <span class="legend-item" style="color:var(--green)"><i class="legend-mark" aria-hidden="true"></i>live / 已接受</span>
+      <span class="legend-item" style="color:var(--amber)"><i class="legend-mark" aria-hidden="true"></i>等待 Gate</span>
+      <span class="legend-item" style="color:var(--red)"><i class="legend-mark" aria-hidden="true"></i>stderr / 已拒绝</span>
+      <span class="legend-item" style="color:var(--purple)"><i class="legend-mark" aria-hidden="true"></i>stale / 未知</span>
+    </div>
+  </nav>
+
+  <main id="content" tabindex="-1">
+    <div class="notice">
+      <strong>完成语义</strong>
+      <span>process alive、assistant text、tool-call、tool result 只证明观察到中间输出；业务完成只由独立 Gate 与 delivery 状态表达。</span>
+    </div>
+    <div class="surface-title">
+      <h2 id="variant-title">B2 · 右侧 Output Inspector</h2>
+      <p id="run-summary">选择 Kanban Agent，右侧输出监控同步切换</p>
+    </div>
+    <div id="app" aria-busy="true"></div>
+    <div class="sr-only" id="stream-announcer" aria-live="polite" aria-atomic="true"></div>
+  </main>
+
+  <div class="switcher" aria-label="原型方案切换器">
+    <button id="prev-variant" type="button" aria-label="上一个方案">←</button>
+    <div class="switcher-label" id="switcher-label">B2 · 右侧 Output Inspector</div>
+    <button id="next-variant" type="button" aria-label="下一个方案">→</button>
+  </div>
+
+  <script>
+    window.__AFK_STATIC_SNAPSHOT__ = null;
+
+    const variants = {
+      B1: { name: "底部 Output Dock", description: "完整 Ticket Kanban + 底部可调整 Output Dock" },
+      B2: { name: "右侧 Output Inspector", description: "Ticket Kanban 主区 + 右侧持续可见 Output Inspector" },
+      B3: { name: "Output Workbench 聚焦模式", description: "压缩 Ticket Kanban + 宽屏已选 Agent 聚焦工作台" },
+    };
+    const dockSizes = {
+      small: { label: "紧凑", height: "270px" },
+      medium: { label: "标准", height: "350px" },
+      large: { label: "加高", height: "470px" },
+    };
+    const roleOptions = ["All", "Implementer", "Reviewer", "Merger"];
+    const roleLabels = { All: "全部", Implementer: "Implementer", Reviewer: "Reviewer", Merger: "Merger" };
+    const stateLabels = {
+      "process-created": "进程已创建",
+      observing: "输出中",
+      "role-result-observed": "已观察到角色结果",
+      ended: "角色已结束",
+      stale: "stale / 未知",
+      waiting: "等待中",
+      "terminated-confirmed": "终止已确认",
+    };
+    const selfReportLabels = { passed: "通过", failed: "失败", none: "—" };
+    const deliveryLabels = {
+      implementing: "实现中",
+      reviewing: "审查中",
+      "review-queued": "等待 Reviewer",
+      "merge-queued": "等待 Merger",
+      merging: "合并中",
+      complete: "已交付",
+      blocked: "已阻塞",
+      unknown: "未知",
+      "waiting-for-reviews": "等待 Reviewer",
+    };
+    const gateLabels = {
+      pending: "待判定",
+      validating: "验证中",
+      accepted: "已接受",
+      rejected: "已拒绝",
+      unknown: "未知",
+      "not-applicable": "不适用",
+    };
+    const runStateLabels = {
+      running: "运行中",
+      "finished-with-blockers": "结束但存在阻塞",
+      finished: "已结束",
+      failed: "失败",
+    };
+    const sourceLabels = {
+      "assistant-text": "assistant text",
+      "tool-call": "tool-call",
+      "tool-result": "tool result",
+      "system-process": "system/process",
+      "stderr-error": "stderr/error",
+      gate: "Gate",
+    };
+
+    let snapshot = window.__AFK_STATIC_SNAPSHOT__ || createSyntheticSnapshot();
+    let selectedKey = "18:implementer:2";
+    let selectedRole = "All";
+    let searchTerm = "";
+    let connectionState = window.__AFK_STATIC_SNAPSHOT__ ? "final" : "live";
+    let followTail = true;
+    let dockSize = "medium";
+    let demoStep = 0;
+    let demoTimer = null;
+    let relativeTimer = null;
+
+    const app = document.querySelector("#app");
+    const search = document.querySelector("#search");
+    const filters = document.querySelector("#filters");
+
+    renderFilters();
+    render();
+
+    if (!window.__AFK_STATIC_SNAPSHOT__) {
+      demoTimer = window.setInterval(advanceSyntheticDemo, 2300);
+      relativeTimer = window.setInterval(updateRelativeTimes, 1000);
+    }
+
+    search.addEventListener("input", (event) => {
+      searchTerm = event.target.value.trim().toLowerCase();
+      render();
+    });
+
+    document.querySelector("#prev-variant").addEventListener("click", () => cycleVariant(-1));
+    document.querySelector("#next-variant").addEventListener("click", () => cycleVariant(1));
+    window.addEventListener("popstate", render);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = event.target;
+      if (target.closest("input, textarea, button, a, select, [contenteditable='true'], [role='log']")) return;
+      cycleVariant(event.key === "ArrowLeft" ? -1 : 1);
+    });
+
+    app.addEventListener("click", (event) => {
+      const followButton = event.target.closest("[data-follow-toggle]");
+      if (followButton) {
+        followTail = !followTail;
+        render();
+        return;
+      }
+
+      const dockButton = event.target.closest("[data-dock-size]");
+      if (dockButton) {
+        dockSize = dockButton.dataset.dockSize;
+        render();
+        return;
+      }
+
+      const trigger = event.target.closest("[data-agent-key]");
+      if (!trigger) return;
+      selectedKey = trigger.dataset.agentKey;
+      render();
+      const heading = document.querySelector("#output-heading");
+      heading?.focus({ preventScroll: true });
+      document.querySelector(".output-monitor")?.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+    });
+
+    function render() {
+      const viewState = captureViewState();
+      const variant = currentVariant();
+      const agents = filteredAgents();
+      const selected = agents.find((agent) => agent.key === selectedKey) || agents[0] || null;
+      selectedKey = selected?.key || "";
+
+      document.documentElement.style.setProperty("--dock-height", dockHeight());
+      document.querySelector("#variant-title").textContent = `${variant} · ${variants[variant].name}`;
+      document.querySelector("#switcher-label").textContent = `${variant} · ${variants[variant].name}`;
+      document.querySelector("#run-summary").textContent = `${variants[variant].description} · ${snapshot.run.agents.length} 个 Agent · ${snapshot.run.summary}`;
+      document.querySelector("#run-id").textContent = `${snapshot.run.id} · 输出序号 ${snapshot.sequence}`;
+      document.querySelector("#run-strip").innerHTML = renderRunStrip(snapshot.run);
+      renderConnection();
+
+      if (!agents.length) {
+        app.innerHTML = `<section class="panel empty"><strong>没有匹配的 Agent</strong><p>调整 Role 筛选或搜索条件。</p></section>`;
+      } else {
+        app.innerHTML = renderVariant(variant, agents, selected);
+      }
+      app.setAttribute("aria-busy", "false");
+      restoreFocus(viewState.focus);
+
+      window.requestAnimationFrame(() => {
+        const viewport = document.querySelector(".output-viewport");
+        if (!viewport) return;
+        viewport.scrollTop = followTail ? viewport.scrollHeight : viewState.outputScrollTop;
+      });
+    }
+
+    function captureViewState() {
+      const active = document.activeElement;
+      const viewport = document.querySelector(".output-viewport");
+      let focus = null;
+      if (active && app.contains(active)) {
+        if (active.dataset.agentKey) focus = { type: "agent", value: active.dataset.agentKey };
+        else if (active.dataset.dockSize) focus = { type: "dock-size", value: active.dataset.dockSize };
+        else if (active.matches("[data-follow-toggle]")) focus = { type: "follow" };
+        else if (active.id === "output-heading") focus = { type: "heading" };
+        else if (active.matches(".output-viewport")) focus = { type: "output" };
+      }
+      return { focus, outputScrollTop: viewport?.scrollTop || 0 };
+    }
+
+    function restoreFocus(token) {
+      if (!token) return;
+      let target = null;
+      if (token.type === "agent") target = [...document.querySelectorAll("[data-agent-key]")].find((node) => node.dataset.agentKey === token.value);
+      else if (token.type === "dock-size") target = [...document.querySelectorAll("[data-dock-size]")].find((node) => node.dataset.dockSize === token.value);
+      else if (token.type === "follow") target = document.querySelector("[data-follow-toggle]");
+      else if (token.type === "heading") target = document.querySelector("#output-heading");
+      else if (token.type === "output") target = document.querySelector(".output-viewport");
+      target?.focus({ preventScroll: true });
+    }
+
+    function renderVariant(variant, agents, selected) {
+      const board = renderKanban(agents, selected, variant);
+      const monitor = renderOutputMonitor(selected, variant);
+      if (variant === "B2") return `<div class="layout-b2">${board}${monitor}</div>`;
+      if (variant === "B3") return `<div class="layout-b3">${board}${monitor}</div>`;
+      return `<div class="layout-b1">${board}${monitor}</div>`;
+    }
+
+    function renderKanban(agents, selected, variant) {
+      const allAgents = snapshot.run.agents;
+      const visibleKeys = new Set(agents.map((agent) => agent.key));
+      const tickets = [...new Set(allAgents.filter((agent) => visibleKeys.has(agent.key)).map((agent) => String(agent.ticket)))];
+      return `
+        <section class="panel kanban-shell" aria-labelledby="kanban-heading">
+          <div class="panel-heading">
+            <div class="kanban-heading-copy"><h2 id="kanban-heading">Ticket Kanban</h2><small>Implementer → Reviewer → Merger / 交付</small></div>
+            <small>${tickets.length} 条可见工单 · ${variant}</small>
+          </div>
+          <div class="kanban-scroll" role="table" aria-label="按工单划分的 Agent 交付流水线">
+            <div class="lane-head" role="row">
+              <div role="columnheader">工单</div><div role="columnheader">Implementer</div><div role="columnheader">Reviewer</div><div role="columnheader">Merger / 交付</div>
+            </div>
+            ${tickets.map((ticket) => {
+              const implementer = allAgents.find((agent) => String(agent.ticket) === ticket && agent.role === "Implementer");
+              const reviewer = allAgents.find((agent) => String(agent.ticket) === ticket && agent.role === "Reviewer");
+              const merger = allAgents.find((agent) => String(agent.ticket) === ticket && agent.role === "Merger");
+              return `<div class="ticket-lane" role="row" aria-label="工单 #${esc(ticket)}">
+                <div class="lane-ticket" role="rowheader"><strong>#${esc(ticket)}</strong><small>${esc(stageSummary(implementer, reviewer, merger))}</small></div>
+                <div class="lane-cell" role="cell" data-stage="Implementer">${renderLaneAgent(implementer, visibleKeys.has(implementer?.key), ticket)}</div>
+                <div class="lane-cell" role="cell" data-stage="Reviewer">${renderLaneAgent(reviewer, visibleKeys.has(reviewer?.key), ticket)}</div>
+                <div class="lane-cell" role="cell" data-stage="Merger / 交付">${renderDeliveryCell(reviewer, merger, visibleKeys, ticket)}</div>
+              </div>`;
+            }).join("")}
+          </div>
+        </section>`;
+    }
+
+    function renderLaneAgent(agent, visible, ticket) {
+      if (!agent) return `<div class="empty-stage">尚未派发</div>`;
+      if (!visible) return `<div class="empty-stage">已被当前筛选隐藏</div>`;
+      const title = `${roleLabel(agent.role)} · 第 ${agent.attempt} 次`;
+      return `<button class="lane-agent" type="button" data-agent-key="${esc(agent.key)}" aria-label="工单 #${esc(ticket)}，${esc(title)}，选择后监控输出" aria-pressed="${agent.key === selectedKey}" aria-controls="output-monitor">
+        <span class="agent-top"><strong>${esc(title)}</strong><span class="time relative-time" data-time="${esc(agent.lastOutputAt || "")}">${esc(relativeTime(agent.lastOutputAt))}</span></span>
+        <span class="agent-summary">${esc(agent.summary)}</span>
+        ${renderAgentSignals(agent)}
+      </button>`;
+    }
+
+    function renderDeliveryCell(reviewer, merger, visibleKeys, ticket) {
+      if (merger) return renderLaneAgent(merger, visibleKeys.has(merger.key), ticket);
+      if (reviewer?.gate === "rejected") return `<div class="empty-stage">Gate 已拒绝 · 不进入 Merger</div>`;
+      if (reviewer?.gate === "accepted") return `<div class="empty-stage">等待 Merger 派发</div>`;
+      return `<div class="empty-stage">等待 Reviewer Gate</div>`;
+    }
+
+    function renderOutputMonitor(agent, variant) {
+      if (!agent) return "";
+      const state = monitorState(agent);
+      const latest = agent.outputs.at(-1) || null;
+      const context = variant === "B3" ? renderWorkbenchContext(agent) : "";
+      const dockControls = variant === "B1" ? `<div class="dock-size-controls" aria-label="Output Dock 高度">
+        ${Object.entries(dockSizes).map(([size, option]) => `<button class="dock-size-button" type="button" data-dock-size="${esc(size)}" aria-pressed="${dockSize === size}">${esc(option.label)}</button>`).join("")}
+      </div>` : "";
+      return `
+        <section class="output-monitor" id="output-monitor" aria-labelledby="output-heading">
+          <div class="dock-grip" aria-hidden="true"></div>
+          <header class="monitor-header">
+            <div class="monitor-identity">
+              <div class="monitor-title-row">
+                <h2 id="output-heading" tabindex="-1">${esc(ticketText(agent.ticket))} · ${esc(roleLabel(agent.role))}</h2>
+                <span class="monitor-state" data-state="${esc(state)}">${esc(state)}</span>
+              </div>
+              <p>已选 Agent · ${esc(agent.provider)} / ${esc(agent.model)} · ${esc(agent.summary)}</p>
+            </div>
+            <div class="monitor-actions">
+              ${dockControls}
+              <button class="view-button" type="button" data-follow-toggle aria-pressed="${followTail}">自动 follow-tail</button>
+            </div>
+          </header>
+          <div class="monitor-facts" aria-label="已选 Agent 输出概览">
+            ${monitorFact("已选 Agent", `${ticketText(agent.ticket)} / ${roleLabel(agent.role)}`)}
+            ${monitorFact("观测状态", `${state} · ${stateLabels[agent.state] || agent.state}`)}
+            ${monitorFact("角色自报", selfReportLabels[agent.selfReport] || agent.selfReport)}
+            ${monitorFact("Gate", gateLabels[agent.gate] || agent.gate)}
+            ${monitorFact("交付状态", deliveryLabels[agent.delivery] || agent.delivery)}
+            ${monitorFact("最近输出", latest ? `${clockTime(latest.time)} · ${relativeTime(latest.time)}` : "—")}
+            ${monitorFact("输出条数", `${agent.outputs.length} 条`)}
+            ${monitorFact("Attempt / PID", `#${agent.attempt} / ${agent.pid ? `PID ${agent.pid}` : "无"}`)}
+            ${monitorFact("视图", followTail ? "FOLLOW-TAIL" : "PAUSED")}
+          </div>
+          <div class="monitor-body${context ? " has-context" : ""}">
+            <div class="output-viewport" tabindex="0" role="log" aria-label="${esc(ticketText(agent.ticket))} ${esc(roleLabel(agent.role))} 中间输出" aria-live="off">
+              ${renderOutputLines(agent.outputs)}
+            </div>
+            ${context}
+          </div>
+        </section>`;
+    }
+
+    function renderOutputLines(outputs) {
+      if (!outputs.length) return `<div class="output-empty">尚未观察到输出；不据此推断 Agent 卡死。</div>`;
+      return `<ol class="output-list">${outputs.map((output) => `
+        <li class="output-line" data-source="${esc(output.source)}">
+          <span class="line-number" aria-label="输出行 ${esc(output.seq)}">#${esc(String(output.seq).padStart(4, "0"))}</span>
+          <time class="line-time" datetime="${esc(output.time)}">${esc(clockTime(output.time))}</time>
+          <span class="source-cell"><span class="source-type">${esc(sourceLabels[output.source] || output.source)}</span></span>
+          <div class="output-copy"><p class="output-text">${esc(output.text)}</p>${output.redacted ? `<span class="redacted-mark">REDACTED</span>` : ""}</div>
+        </li>`).join("")}</ol>`;
+    }
+
+    function renderWorkbenchContext(agent) {
+      const lastGate = [...agent.outputs].reverse().find((output) => output.source === "gate");
+      return `<aside class="monitor-context" aria-label="已选 Agent 上下文">
+        <section class="context-section">
+          <h3>Agent 状态分层</h3>
+          <div class="context-grid">
+            ${contextFact("观测状态", stateLabels[agent.state] || agent.state)}
+            ${contextFact("角色自报", selfReportLabels[agent.selfReport] || agent.selfReport)}
+            ${contextFact("Gate", gateLabels[agent.gate] || agent.gate)}
+            ${contextFact("交付状态", deliveryLabels[agent.delivery] || agent.delivery)}
+          </div>
+        </section>
+        <section class="context-section">
+          <h3>最近 Gate 证据</h3>
+          <p class="semantic-boundary">${esc(lastGate?.text || "尚无 Gate 事件；tool-call 或进程存活不等于完成。")}</p>
+        </section>
+        <section class="context-section">
+          <h3>Source 类型</h3>
+          <div class="source-key">
+            ${Object.entries(sourceLabels).map(([key, label]) => `<code>${esc(label)}</code><span>${esc(sourceMeaning(key))}</span>`).join("")}
+          </div>
+        </section>
+        <section class="context-section">
+          <h3>只读边界</h3>
+          <p class="semantic-boundary">没有 stop、retry、approve、resume。秘密、完整参数、环境变量、提示词与绝对路径均使用占位脱敏。</p>
+        </section>
+      </aside>`;
+    }
+
+    function renderRunStrip(run) {
+      return [
+        ["代码仓库", run.repository],
+        ["目标分支", run.target],
+        ["当前批次", `第 ${run.batch} 批`],
+        ["provider / model", `${run.provider} / ${run.model}`],
+        ["运行状态", runStateLabels[run.state] || run.state],
+      ].map(([label, value]) => `<div class="run-fact"><span>${esc(label)}</span><strong title="${esc(value)}">${esc(value)}</strong></div>`).join("");
+    }
+
+    function renderConnection() {
+      const node = document.querySelector("#connection");
+      const label = document.querySelector("#connection-label");
+      node.dataset.state = connectionState;
+      if (connectionState === "final") label.textContent = "final · synthetic stream 已冻结";
+      else if (connectionState === "stale") label.textContent = "stale · 状态未知";
+      else label.textContent = "SSE 模拟连接 · live";
+    }
+
+    function renderFilters() {
+      filters.innerHTML = roleOptions.map((role) => `<button class="filter" type="button" data-role="${esc(role)}" aria-pressed="${role === selectedRole}">${esc(roleLabel(role))}</button>`).join("");
+      filters.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-role]");
+        if (!button) return;
+        selectedRole = button.dataset.role;
+        for (const item of filters.querySelectorAll("[data-role]")) item.setAttribute("aria-pressed", String(item.dataset.role === selectedRole));
+        render();
+      });
+    }
+
+    function filteredAgents() {
+      return snapshot.run.agents.filter((agent) => {
+        const matchesRole = selectedRole === "All" || agent.role === selectedRole;
+        const outputText = agent.outputs.map((output) => `${output.source} ${output.text}`).join(" ");
+        const haystack = `${agent.ticket} ${agent.role} ${roleLabel(agent.role)} ${agent.state} ${stateLabels[agent.state] || ""} ${agent.selfReport} ${agent.gate} ${gateLabels[agent.gate] || ""} ${agent.delivery} ${deliveryLabels[agent.delivery] || ""} ${agent.summary} ${outputText}`.toLowerCase();
+        return matchesRole && (!searchTerm || haystack.includes(searchTerm));
+      });
+    }
+
+    function currentVariant() {
+      const value = new URLSearchParams(location.search).get("variant")?.toUpperCase();
+      if (value === "B") return "B2";
+      return variants[value] ? value : "B2";
+    }
+
+    function cycleVariant(direction) {
+      const keys = Object.keys(variants);
+      const currentIndex = keys.indexOf(currentVariant());
+      const next = keys[(currentIndex + direction + keys.length) % keys.length];
+      const url = new URL(location.href);
+      url.searchParams.set("variant", next);
+      history.replaceState(null, "", url);
+      render();
+    }
+
+    function advanceSyntheticDemo() {
+      if (demoStep >= 8) return;
+      demoStep += 1;
+      const implementer = snapshot.run.agents.find((agent) => agent.key === "18:implementer:2");
+      const reviewer = snapshot.run.agents.find((agent) => agent.key === "12:reviewer:1");
+      const merger = snapshot.run.agents.find((agent) => agent.key === "24:merger:1");
+      const now = new Date().toISOString();
+
+      if (demoStep === 1) addOutput(implementer, now, "assistant-text", "Reasoning 摘要：状态投影仍把 observed tool-call 与 delivery 混在同一分支；先收窄读取范围。", true);
+      if (demoStep === 2) addOutput(implementer, now, "tool-call", "Read · [REDACTED_REPO]/skills/personal/afk-issue-loop/scripts/[REDACTED_FILE] · lines 420-560", true);
+      if (demoStep === 3) addOutput(implementer, now, "tool-result", "stdout: Read 141 lines. 找到 Gate verdict 与 process event 的独立字段。", false);
+      if (demoStep === 4) addOutput(implementer, now, "tool-call", "Bash · npm test -- --runInBand [REDACTED_ARGS]", true);
+      if (demoStep === 5) {
+        addOutput(implementer, now, "stderr-error", "stderr: npm ERR! Missing script: \"test\"。这不是业务失败；改用仓库声明的 check 命令。", false);
+        implementer.summary = "测试入口不匹配；已记录 stderr，继续使用仓库声明的验证命令。";
+      }
+      if (demoStep === 6) {
+        addOutput(implementer, now, "tool-call", "Bash · npm run check -- [REDACTED_ARGS] && git diff --check", true);
+        addOutput(implementer, now, "tool-result", "stdout: check passed\nstdout: git diff --check passed", false);
+        implementer.state = "role-result-observed";
+        implementer.selfReport = "passed";
+        implementer.gate = "validating";
+        implementer.delivery = "review-queued";
+        implementer.summary = "角色自报通过；等待独立 Reviewer Gate。";
+      }
+      if (demoStep === 7) {
+        addOutput(reviewer, now, "assistant-text", "Review 摘要：tool-call 与 process alive 未被计入完成条件；错误路径保留 stderr 证据。", true);
+        addOutput(reviewer, now, "gate", "Gate accepted：结构约束与验证证据满足；允许进入 Merger。", false);
+        reviewer.state = "ended";
+        reviewer.selfReport = "passed";
+        reviewer.gate = "accepted";
+        reviewer.delivery = "merge-queued";
+      }
+      if (demoStep === 8) {
+        addOutput(merger, now, "tool-call", "Bash · git diff --check && git status --short", false);
+        addOutput(merger, now, "tool-result", "stdout: clean validation result；交付范围仅含已接受工单。", false);
+        addOutput(merger, now, "gate", "Delivery Gate accepted；退出码 0 与受管终止范围已确认。", false);
+        merger.state = "terminated-confirmed";
+        merger.selfReport = "passed";
+        merger.gate = "accepted";
+        merger.delivery = "complete";
+        merger.pid = null;
+        merger.summary = "Merger 已结束；Gate 与 delivery 均有独立证据。";
+        snapshot.run.state = "finished-with-blockers";
+        snapshot.run.summary = "模拟输出流已结束并冻结 · 1 个 Gate 已拒绝";
+        connectionState = "final";
+        window.clearInterval(demoTimer);
+        window.clearInterval(relativeTimer);
+        demoTimer = null;
+        relativeTimer = null;
+      }
+
+      snapshot.observedAt = now;
+      render();
+    }
+
+    function addOutput(agent, time, source, text, redacted) {
+      snapshot.sequence += 1;
+      agent.lastOutputAt = time;
+      agent.outputs.push({ seq: snapshot.sequence, time, source, text, redacted });
+      if (followTail && agent.key === selectedKey) {
+        document.querySelector("#stream-announcer").textContent = `${ticketText(agent.ticket)} ${roleLabel(agent.role)} 新增 ${sourceLabels[source] || source}，输出行 ${snapshot.sequence}`;
+      }
+    }
+
+    function createSyntheticSnapshot() {
+      const ago = (seconds) => new Date(Date.now() - seconds * 1000).toISOString();
+      const output = (seq, seconds, source, text, redacted = false) => ({ seq, time: ago(seconds), source, text, redacted });
+      return {
+        sequence: 52,
+        observedAt: new Date().toISOString(),
+        run: {
+          id: "demo-7fb47062",
+          repository: "toRolex/Research-OS-Studio",
+          target: "main",
+          provider: "claude",
+          model: "opus",
+          batch: 4,
+          state: "running",
+          summary: "1 个 Gate 已拒绝 · 1 个 stale",
+          agents: [
+            {
+              key: "12:implementer:1", ticket: 12, role: "Implementer", attempt: 1, provider: "claude", model: "sonnet", state: "role-result-observed", selfReport: "passed", gate: "accepted", delivery: "review-queued", pid: 91302, lastOutputAt: ago(31), summary: "实现证据已提交，等待 Reviewer 输出。",
+              outputs: [
+                output(1, 92, "system-process", "provider=claude · managed process created · PID 91302", false),
+                output(2, 78, "assistant-text", "Reasoning 摘要：先定位状态投影与 Gate 判定的边界，再做最小修改。", true),
+                output(3, 63, "tool-call", "Read · [REDACTED_REPO]/scripts/[REDACTED_FILE] · lines 180-320", true),
+                output(4, 61, "tool-result", "stdout: Read 141 lines；未发现把 PID 直接映射为 complete 的分支。", false),
+                output(5, 45, "tool-call", "Bash · git diff -- [REDACTED_PATH]", true),
+                output(6, 43, "tool-result", "stdout: 18 insertions, 7 deletions；完整 diff 已脱敏。", true),
+                output(7, 31, "gate", "Implementer Gate accepted；仍需独立 Reviewer。", false),
+              ],
+            },
+            {
+              key: "12:reviewer:1", ticket: 12, role: "Reviewer", attempt: 1, provider: "claude", model: "opus", state: "observing", selfReport: "none", gate: "pending", delivery: "reviewing", pid: 91472, lastOutputAt: ago(7), summary: "正在审查 git diff 与测试证据。",
+              outputs: [
+                output(8, 38, "system-process", "provider=claude · Reviewer process created · PID 91472", false),
+                output(9, 27, "tool-call", "Bash · git diff --check && git diff --stat", false),
+                output(10, 24, "tool-result", "stdout: git diff --check passed\nstdout: 3 files changed", false),
+                output(11, 15, "assistant-text", "Review 摘要：继续确认筛选后 已选 Agent 不会停留在不可见项。", true),
+                output(12, 7, "tool-call", "Bash · npm run check -- [REDACTED_ARGS]", true),
+              ],
+            },
+            {
+              key: "17:implementer:1", ticket: 17, role: "Implementer", attempt: 1, provider: "claude", model: "sonnet", state: "ended", selfReport: "passed", gate: "accepted", delivery: "review-queued", pid: null, lastOutputAt: ago(82), summary: "实现结束；等待 Reviewer Gate。",
+              outputs: [
+                output(13, 132, "system-process", "managed process created · PID [REDACTED]", true),
+                output(14, 101, "tool-call", "Bash · npm run test:unit", false),
+                output(15, 96, "tool-result", "stdout: 24 tests passed", false),
+                output(16, 82, "assistant-text", "实现摘要：状态映射已更新；未把进程退出当作交付完成。", true),
+              ],
+            },
+            {
+              key: "17:reviewer:1", ticket: 17, role: "Reviewer", attempt: 1, provider: "claude", model: "opus", state: "ended", selfReport: "passed", gate: "rejected", delivery: "blocked", pid: null, lastOutputAt: ago(42), summary: "Reviewer 自报通过，但必需测试未运行；Gate 已拒绝。",
+              outputs: [
+                output(17, 84, "tool-call", "Bash · npm run test:integration", false),
+                output(18, 79, "stderr-error", "stderr: npm ERR! Missing script: \"test:integration\"", false),
+                output(19, 58, "assistant-text", "Review 摘要：不能把缺失的必需测试解释为 not applicable。", true),
+                output(20, 44, "assistant-text", "角色自报：passed；此结果尚未构成交付事实。", false),
+                output(21, 42, "gate", "Gate 已拒绝：必需测试没有成功执行记录。", false),
+              ],
+            },
+            {
+              key: "18:implementer:2", ticket: 18, role: "Implementer", attempt: 2, provider: "claude", model: "opus", state: "observing", selfReport: "none", gate: "pending", delivery: "implementing", pid: 91441, lastOutputAt: ago(4), summary: "正在分离 observed output、Gate verdict 与 delivery 状态。",
+              outputs: [
+                output(22, 52, "system-process", "provider=claude · managed process created · PID 91441", false),
+                output(23, 41, "assistant-text", "Reasoning 摘要：先读当前 projection；不从 tool-call 推导业务完成。", true),
+                output(24, 36, "assistant-text", "继续检查筛选与 已选 Agent 的一致性，避免详情停留在被过滤项。", true),
+                output(25, 28, "tool-call", "Read · [REDACTED_REPO]/skills/personal/afk-issue-loop/scripts/[REDACTED_FILE]", true),
+                output(26, 25, "tool-result", "stdout: Read 214 lines；定位到 selectedKey fallback。", false),
+                output(27, 16, "tool-call", "Bash · git diff -- [REDACTED_PATH]", true),
+                output(28, 12, "tool-result", "stdout: diff inspected；完整参数与路径已隐藏。", true),
+                output(29, 4, "assistant-text", "准备运行仓库声明的验证命令；当前仍为 live，不标记 complete。", true),
+              ],
+            },
+            {
+              key: "24:implementer:1", ticket: 24, role: "Implementer", attempt: 1, provider: "claude", model: "sonnet", state: "ended", selfReport: "passed", gate: "accepted", delivery: "review-queued", pid: null, lastOutputAt: ago(142), summary: "实现与本地检查已完成。",
+              outputs: [
+                output(30, 190, "tool-call", "Read · [REDACTED_REPO]/index.html", true),
+                output(31, 174, "assistant-text", "实现摘要：保持 Ticket Kanban，不引入事件账本主体。", true),
+                output(32, 148, "tool-call", "Bash · git diff --check", false),
+                output(33, 142, "tool-result", "stdout: git diff --check passed", false),
+              ],
+            },
+            {
+              key: "24:reviewer:1", ticket: 24, role: "Reviewer", attempt: 1, provider: "claude", model: "opus", state: "ended", selfReport: "passed", gate: "accepted", delivery: "merge-queued", pid: null, lastOutputAt: ago(96), summary: "Gate accepted；等待 Merger。",
+              outputs: [
+                output(34, 128, "tool-call", "Bash · git diff --check && npm run check", false),
+                output(35, 116, "tool-result", "stdout: all declared checks passed", false),
+                output(36, 103, "assistant-text", "Review 摘要：完成语义没有依赖 PID 或单次 tool-call。", true),
+                output(37, 96, "gate", "Gate accepted：实现与证据满足工单约束。", false),
+              ],
+            },
+            {
+              key: "24:merger:1", ticket: 24, role: "Merger", attempt: 1, provider: "claude", model: "sonnet", state: "process-created", selfReport: "none", gate: "pending", delivery: "merging", pid: 91604, lastOutputAt: ago(18), summary: "Merger 已创建；尚无业务完成证据。",
+              outputs: [
+                output(38, 45, "system-process", "provider=claude · Merger process created · PID 91604", false),
+                output(39, 31, "assistant-text", "Merge 摘要：只处理 Gate accepted 的工单；blocked 工单保持隔离。", true),
+                output(40, 18, "tool-call", "Bash · git status --short && git diff --check", false),
+              ],
+            },
+            {
+              key: "31:implementer:1", ticket: 31, role: "Implementer", attempt: 1, provider: "claude", model: "sonnet", state: "stale", selfReport: "none", gate: "unknown", delivery: "unknown", pid: 91118, lastOutputAt: ago(248), summary: "长时间无新输出；仅标记 stale / unknown，不推断卡死。",
+              outputs: [
+                output(41, 314, "system-process", "managed process created · PID 91118", false),
+                output(42, 289, "assistant-text", "Reasoning 摘要：正在核对边界条件…", true),
+                output(43, 262, "tool-call", "Read · [REDACTED_REPO]/[REDACTED_FILE]", true),
+                output(44, 248, "tool-result", "stdout: partial read result；随后未再观察到输出。", true),
+              ],
+            },
+          ],
+        },
+      };
+    }
+
+    function updateRelativeTimes() {
+      for (const node of document.querySelectorAll(".relative-time")) node.textContent = relativeTime(node.dataset.time || null);
+    }
+
+    function renderAgentSignals(agent) {
+      return `<span class="agent-signals">
+        ${statusPill(stateLabels[agent.state] || agent.state, toneFor(agent.state))}
+        ${statusPill(`Gate ${gateLabels[agent.gate] || agent.gate}`, toneFor(agent.gate))}
+        ${statusPill(deliveryLabels[agent.delivery] || agent.delivery, toneFor(agent.delivery))}
+      </span>`;
+    }
+
+    function monitorFact(label, value) {
+      return `<div class="monitor-fact"><span>${esc(label)}</span><strong title="${esc(value)}">${esc(value)}</strong></div>`;
+    }
+
+    function contextFact(label, value) {
+      return `<div class="context-fact"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`;
+    }
+
+    function statusPill(label, tone) {
+      return `<span class="status tone-${esc(tone)}">${esc(label)}</span>`;
+    }
+
+    function monitorState(agent) {
+      if (agent.state === "stale") return "stale";
+      if (connectionState === "final") return "final";
+      return "live";
+    }
+
+    function toneFor(value) {
+      if (["accepted", "complete", "terminated-confirmed"].includes(value)) return "accepted";
+      if (["observing", "role-result-observed", "reviewing", "validating"].includes(value)) return "observed";
+      if (["pending", "waiting", "review-queued", "merge-queued", "waiting-for-reviews", "process-created", "merging"].includes(value)) return "waiting";
+      if (["rejected", "blocked"].includes(value)) return "rejected";
+      if (["stale", "unknown"].includes(value)) return "stale";
+      return "neutral";
+    }
+
+    function stageSummary(implementer, reviewer, merger) {
+      if (merger?.delivery === "complete") return "已交付";
+      if (merger) return "Merger 执行中";
+      if (reviewer?.gate === "accepted") return "可进入 Merger";
+      if (reviewer?.gate === "rejected") return "Gate 已拒绝";
+      if (reviewer) return "Reviewer 审查中";
+      if (implementer?.selfReport === "passed") return "等待 Reviewer";
+      return implementer ? "Implementer 执行中" : "尚未开始";
+    }
+
+    function sourceMeaning(source) {
+      if (source === "assistant-text") return "连续文本 / reasoning 摘要";
+      if (source === "tool-call") return "工具名与脱敏命令";
+      if (source === "tool-result") return "stdout / 结果摘要";
+      if (source === "system-process") return "provider、PID、进程事实";
+      if (source === "stderr-error") return "stderr 或错误证据";
+      return "独立 Gate 判定";
+    }
+
+    function dockHeight() {
+      return dockSizes[dockSize]?.height || dockSizes.medium.height;
+    }
+
+    function ticketText(ticket) {
+      return typeof ticket === "number" ? `#${ticket}` : String(ticket);
+    }
+
+    function roleLabel(role) {
+      return roleLabels[role] || role;
+    }
+
+    function relativeTime(value) {
+      if (!value) return "—";
+      const seconds = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 1000));
+      if (seconds < 5) return "刚刚";
+      if (seconds < 60) return `${seconds} 秒前`;
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return `${minutes} 分钟前`;
+      return `${Math.floor(minutes / 60)} 小时前`;
+    }
+
+    function clockTime(value) {
+      if (!value) return "—";
+      return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value));
+    }
+
+    function reducedMotion() {
+      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+    }
+  </script>
+</body>
+</html>

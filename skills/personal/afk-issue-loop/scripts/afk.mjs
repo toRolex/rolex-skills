@@ -8,16 +8,29 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { Processes } from './processes.mjs';
+import { resolveSelection } from './model-selection.mjs';
 
 const help = `AFK：独立本地 CLI 编排（Node >=22，macOS/Linux）
   node afk.mjs start --repo /absolute/repository [--issues 1,2] [--spec 7]
       [--target develop] [--provider claude|codex|pi] [--model MODEL]
       [--effort LEVEL] [--verify '项目验证命令'] [--priority-labels critical,high,low]
       [--reuse 1,2]
+  node afk.mjs resolve-selection --repo /absolute/repository [--provider pi] [--model API-provider/model] [--effort LEVEL]
   node afk.mjs status --run /absolute/repository/.afk/logs/RUN
   node afk.mjs stop --run /absolute/repository/.afk/logs/RUN
 
-默认 provider=claude；模型/effort 省略则沿用该 CLI 本机配置，不从宿主猜测。
+默认 provider=claude，不从宿主猜测；Claude/Codex 省略模型/effort 沿用 CLI 本机配置。
+Pi 省略模型意图 luna + max；每次 start 重新查询 0.85.1 纯内置目录＋models.json。
+luna 匹配 ID 内完整 token（首尾或 . _ / - 分隔，忽略大小写），唯一且 effort 能力明确才启动。
+扩展/包动态来源、未知版本、读取/配置失败、无匹配/歧义或未知/不支持 effort 均失败，不换模型。
+只验证声明式注册元数据，不读取 auth、不执行配置命令/扩展、不证明认证可用。
+显式 Pi --model 必须完整 API-provider/model，跳过自动验证；--effort 优先。
+其他显式 Pi 模型省略 effort 不补 max；仅显式旧 cliproxy/gpt-5.6-luna 保留省略补 max 的覆盖语义。
+resolve-selection 是相同只读解析路径；start 再查最新目录并保存 selection.json，同 run 三角色固定。
+其他 CLI 的 --model 接受准确 ID/CLI 别名；自然语言由 skill 启动者理解。
+角色默认权限同 Sandcastle：Claude --dangerously-skip-permissions，
+Codex exec --dangerously-bypass-approvals-and-sandbox；Pi 不加权限 flag。
+仅作用于角色 CLI，不改本机权限配置、不删除保护环境变量、不绕过外层 sandbox。
 默认 scope=首次完整分页的 open ready-for-agent，目标 develop 优先否则 main。
 --spec 仅提供上下文，不实现或关闭。无 priority-labels 时全部同级按编号。
 唯一标准 afk/issue-N 现场默认按当前 Git/worktree/writer 事实恢复；--reuse 仅保留显式归属兼容信息，不能绕过活跃写者、锁定或 quarantine。
@@ -106,7 +119,7 @@ async function daemon(config) {
           return socket.end(JSON.stringify({ run: config.run, state: 'stopping', note: '已请求停止；status 确认最终 stopped 后才可复用现场' }));
         }
         if (message.action !== 'status') return socket.end(JSON.stringify({ error: '未知控制动作' }));
-        socket.end(JSON.stringify({ run: config.run, state, result, ...engine?.describe() }));
+        socket.end(JSON.stringify({ run: config.run, state, result, ...engine?.describe(), ...config.selection }));
       } catch (error) { socket.end(JSON.stringify({ error: error.message })); }
     });
   });
@@ -121,8 +134,9 @@ async function daemon(config) {
     engine = await createEngine(config, processes, event);
     if (processes.stopping) throw new Error('启动期间收到停止请求');
     state = 'running';
-    event('started', { ...engine.describe(), provider: config.provider, logDir: config.logDir });
-    announce({ ready: true, run: config.run, logDir: config.logDir, ...engine.describe() });
+    const selection = config.selection;
+    event('started', { ...engine.describe(), ...selection, logDir: config.logDir });
+    announce({ ready: true, run: config.run, logDir: config.logDir, ...selection, ...engine.describe() });
     result = await engine.run();
     if (stopPromise) await stopPromise;
     if (processes.hasUnsafeWriters) throw new Error('角色终止未确认，现场写锁保留；不能报告已停止');
@@ -147,7 +161,7 @@ async function daemon(config) {
       result = { ...result, logError: logFailure.message };
       try { await stop(false); } catch (error) { diagnostic(error); }
     }
-    try { save(join(config.logDir, 'result.json'), { ...engine?.describe(), ...result, run: config.run, state, finished: new Date().toISOString() }); }
+    try { save(join(config.logDir, 'result.json'), { ...engine?.describe(), ...result, ...config.selection, run: config.run, state, finished: new Date().toISOString() }); }
     catch (error) { diagnostic(error); }
     finally {
       server.close();
@@ -160,22 +174,23 @@ async function start(values) {
   if (process.platform === 'win32') throw new Error('本运行时仅支持 macOS/Linux POSIX 进程组');
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('需要 Node >=22');
   const repo = realpathSync(resolve(values.repo || process.cwd()));
-  const provider = values.provider || 'claude';
-  if (!['claude', 'codex', 'pi'].includes(provider)) throw new Error('provider 必须为 claude、codex 或 pi');
+  const selection = await resolveSelection(values, repo);
+  const { provider, model, effort } = selection;
   const run = randomUUID();
   const logDir = join(repo, '.afk', 'logs', run);
   const config = {
-    repo, provider, run, logDir,
+    repo, provider, run, logDir, selection,
     issues: numbers(values.issues),
     specs: numbers(values.spec),
     reuse: numbers(values.reuse),
     target: values.target,
-    model: values.model,
-    effort: values.effort,
+    model: model ?? undefined,
+    effort: effort ?? undefined,
     verify: values.verify,
     priorityLabels: values['priority-labels']?.split(',').filter(Boolean) || [],
   };
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
+  save(join(logDir, 'selection.json'), selection);
   const output = openSync(join(logDir, 'daemon.log'), 'a', 0o600);
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_daemon'], { cwd: repo, detached: true, stdio: ['ignore', output, output, 'ipc'] });
   closeSync(output);
@@ -221,6 +236,7 @@ async function main() {
   const { values } = parseArgs({ args: process.argv.slice(3), options: Object.fromEntries(['repo', 'issues', 'spec', 'target', 'provider', 'model', 'effort', 'verify', 'priority-labels', 'reuse', 'run'].map(name => [name, { type: 'string' }])) });
   if (!action || ['help', '--help', '-h'].includes(action)) return console.log(help);
   if (action === 'start') return start(values);
+  if (action === 'resolve-selection') return console.log(JSON.stringify(await resolveSelection(values, realpathSync(resolve(values.repo || process.cwd()))), null, 2));
   if (!['status', 'stop'].includes(action) || !values.run) throw new Error(help);
   const runDir = resolve(values.run);
   const resultPath = join(runDir, 'result.json');
