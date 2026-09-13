@@ -16,14 +16,14 @@
 
 1. 运行 `git merge <branch> --no-edit`，普通合并，不 squash；已合入的分支核实后沿用
 2. 出现合并冲突时，阅读双方代码并选择正确解决方案
-3. 合并及冲突处理后，运行项目实际类型检查和测试，验证一切正常：{{VALIDATION_COMMANDS}}。没有自动测试时，按原项目约定执行具体可说明的检查，如实报告命令和结果
+3. 合并及冲突处理后，运行项目实际类型检查和测试，验证一切正常：{{VALIDATION_COMMANDS}}。没有自动测试时，仅执行原项目确实约定且适用的具体检查，如实报告命令和结果；确无适用检查时 tests 可为空，在 summary 中说明依据，不发明测试指标或伪造执行。真正不适用的检查在 summary 独立说明，不混入 tests 的 not-run；必需验收未执行仍记录 not-run 并报告 blocked，不得宣称 verified 或关闭 Issue
 4. 测试失败时，先修复当前问题再继续下一个分支；无法完成则保留现场，不以 reset/abort 掩盖失败成果
 
 全部分支合并且目标验证通过后，创建一个总结合并的 commit。本批仅一个中文 Conventional Commit summary，可用空提交承载；此前已完成则沿用，不重复创建。
 
 # 关闭 ISSUE
 
-对每个已合并、验证通过且已包含在本批 summary 中的分支，使用以下命令关闭对应 Issue，并留下实际交付与验证说明：
+只有上下文指定 `mode=close` 时，才对每个已合并、验证通过且已包含在本批 summary 中的分支使用以下命令关闭对应 Issue，并留下实际交付与验证说明。`mode=merge` 时完成合并、验证和 summary 后返回 `closed=false`，由编排器先核验并持久化该阶段，再发起独立 close-only 调用：
 
 `{{CLOSE_TASK_COMMAND}}`
 

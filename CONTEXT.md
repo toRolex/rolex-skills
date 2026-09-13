@@ -69,3 +69,13 @@ _Avoid_: 角色总时限
 
 **全阻塞停止**:
 剩余 Tickets 均被阻塞，且已无在途工作或可推进交付时结束本次运行；不同于全部交付。
+
+**恢复现场**:
+开放 Ticket 已存在的标准 `afk/issue-N` 分支和／或 Worktrunk worktree；其 commits 与 dirty 进度属于可继承交付事实，不等于本 run 所有。
+
+**恢复分类**:
+新 run 根据当前 GitHub、Git、Worktrunk 与 writer 事实为 Ticket 标记的下一步，如跳过、恢复 worktree、恢复分支、创建、等待或继续验证关闭。
+
+**merged-unverified**:
+任务分支提交已成为目标分支祖先，但本次仍需完成目标验证、summary 核实和 Issue 关闭的恢复状态。
+_Avoid_: 已交付、已完成

@@ -15,7 +15,7 @@ argument-hint: "[issue-number ...] [provider/model/target]"
 2. 显式 Ticket 编号转为 `--issues 3,4,5`；没有编号则省略，由脚本首次分页读取 open `ready-for-agent`，固定本次范围。用户标明的父 SPEC 传 `--spec`，仅作上下文，不实施或关闭。
 3. 用户指定目标传 `--target`，否则脚本选择已有 develop、其次 main。用户指定执行 CLI 传 `--provider claude|codex|pi`，默认 **claude**，不按调用宿主猜。`--model`、`--effort` 仅在用户明确指定时传入，省略沿用所选 CLI 本机配置。项目验证要求可传 `--verify`。
 4. 从项目约定确定优先级标签，按高到低传 `--priority-labels`；没有约定就省略，全部同级按编号。本仓库目前没有现存项目优先级映射，不能把示例标签当约定。
-5. 只有用户明确确认旧 `afk/issue-N` 分支及现场属于对应票、允许继续时才传 `--reuse N`；同名本身不是接管许可。归属未知保留并报告。
+5. 不为正常恢复传 `--reuse`。脚本根据当前 GitHub、标准 `afk/issue-N` 分支、Worktrunk worktree 与 writer socket 事实自动分类：closed 跳过；唯一已有 worktree 原地恢复；只有分支时恢复同一分支 worktree；两者都没有才新建。`--reuse N` 仅保留显式归属兼容信息，不能绕过活跃写者、锁定、quarantine 或非标准现场边界。
 
 完成条件：目标路径、固定输入及显式选项明确；所需 Node >=22、Git、Worktrunk、GitHub CLI、所选执行 CLI 与授权已准备。平台为 macOS/Linux，运行组件仅用 Node 内置模块，无运行时包下载；缺项或 Worktrunk hooks 审批由用户完成，不自动安装、绕过权限或传 `--yes`。
 
@@ -35,7 +35,7 @@ node "<skill绝对路径>/scripts/afk.mjs" start --repo "<目标仓库绝对路�
 
 报告返回的运行身份、目标仓库/分支、日志目录及原样可用的 `status`、`stop` 命令。日志归目标仓库 `.afk/logs/`；说明 **已启动不等于 Tickets 已交付**，最终进展与结果由脚本记录，用户可在发起会话结束后查看。
 
-`stop` 的停止请求受理不等于角色已结束；以后续 `status` 确认最终停止，未知状态保留现场。独立运行不承诺关机或重启恢复。
+`stop` 的停止请求受理不等于角色已结束；以后续 `status` 确认最终停止，未知状态保留现场。新 run 可从当前 Git/GitHub/worktree/writer 事实恢复代码现场，但不恢复旧进程内存、历史 PID 或旧 Reviewer 结论；`status` 与 `events.jsonl` 展示逐票恢复分类和阻碍。
 
 完成条件：启动身份、日志、查看与停止方式均已告知，此 skill 任务结束。
 

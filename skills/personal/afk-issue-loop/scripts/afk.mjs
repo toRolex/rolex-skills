@@ -20,9 +20,10 @@ const help = `AFK：独立本地 CLI 编排（Node >=22，macOS/Linux）
 默认 provider=claude；模型/effort 省略则沿用该 CLI 本机配置，不从宿主猜测。
 默认 scope=首次完整分页的 open ready-for-agent，目标 develop 优先否则 main。
 --spec 仅提供上下文，不实现或关闭。无 priority-labels 时全部同级按编号。
---reuse 显式确认相应 afk/issue-N 分支及现场属于该票，可继续已有 dirty 进度。
-启动成功只表示运行已启动。最终结果见 status 和 events.jsonl；不自动 push/PR。
-不支持系统重启恢复。worktree 隔离代码，不隔离系统权限。`;
+唯一标准 afk/issue-N 现场默认按当前 Git/worktree/writer 事实恢复；--reuse 仅保留显式归属兼容信息，不能绕过活跃写者、锁定或 quarantine。
+恢复保留已有 commits 与 dirty 修改；已合入目标的分支跳过重复 merge，继续验证和关闭。
+启动成功只表示运行已启动。恢复分类、阻碍和最终结果见 status/events.jsonl；不自动 push/PR。
+支持进程退出后的 Git 现场恢复，不恢复旧进程内存或历史 PID。worktree 隔离代码，不隔离系统权限。`;
 
 function save(path, data) {
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
@@ -146,7 +147,7 @@ async function daemon(config) {
       result = { ...result, logError: logFailure.message };
       try { await stop(false); } catch (error) { diagnostic(error); }
     }
-    try { save(join(config.logDir, 'result.json'), { ...result, run: config.run, state, finished: new Date().toISOString() }); }
+    try { save(join(config.logDir, 'result.json'), { ...engine?.describe(), ...result, run: config.run, state, finished: new Date().toISOString() }); }
     catch (error) { diagnostic(error); }
     finally {
       server.close();
