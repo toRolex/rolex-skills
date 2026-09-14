@@ -740,6 +740,40 @@ test('text delta 与 tool-call 以 typed Observation 逐条发布，可逐行重
   }
 });
 
+test('run 现场被移除后 companion 自行退出，不留下无主进程', async () => {
+  const fixture = createFixture();
+  let runDir;
+  let pid;
+  try {
+    addBranchCommit(fixture, 9);
+    const started = await startRun(fixture);
+    runDir = started.logDir;
+    pid = JSON.parse(readFileSync(join(runDir, 'dashboard.json'), 'utf8')).pid;
+    assert.doesNotThrow(() => process.kill(pid, 0), 'companion 应当存活');
+
+    // 保留期设得很长时，日志目录消失仍必须让 companion 自毁；
+    // 否则 run 现场已消失，只会留下无主进程。
+    fixture.env.AFK_DASHBOARD_RETENTION_MS = '600000';
+    // 先停止仍持有现场的 AFK daemon，再移除整个 run 现场。
+    const daemonPid = JSON.parse(readFileSync(join(runDir, 'control.json'), 'utf8')).pid;
+    try { process.kill(daemonPid, 'SIGTERM'); } catch {}
+    await waitUntil(() => {
+      try { process.kill(daemonPid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
+    }, 'AFK daemon 未在停止后退出');
+    // daemon 退出与最后几次日志写入之间仍有竞态，重试直到目录真正移除。
+    for (let i = 0; i < 40; i++) {
+      try { rmSync(runDir, { recursive: true, force: true }); break; }
+      catch (error) { if (error.code !== 'ENOTEMPTY') throw error; await delay(100); }
+    }
+    await waitUntil(() => {
+      try { process.kill(pid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
+    }, '日志目录消失后 companion 未退出', 15_000);
+  } finally {
+    if (pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('companion 存活时 reopen 不重复启动第二个 server', async () => {
   const fixture = createFixture();
   let runDir;

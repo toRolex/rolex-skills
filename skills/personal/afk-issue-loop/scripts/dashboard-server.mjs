@@ -77,7 +77,14 @@ function beginRetention() {
 }
 const port = await freePort().catch(() => 0);
 startWorker();
-process.on('SIGTERM', () => { stopped = true; try { worker?.kill('SIGTERM'); } catch {} process.exit(0); });
-process.on('SIGINT', () => { stopped = true; try { worker?.kill('SIGTERM'); } catch {} process.exit(0); });
+const shutdown = () => { stopped = true; try { worker?.kill('SIGTERM'); } catch {} process.exit(0); };
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 // 终态已存在时（reopen 场景）直接进入保留期判定。
 if (existsSync(resultPath)) beginRetention();
+// 日志目录消失（run 现场被移除）时 companion 没有可服务的对象：
+// 继续等待 retention 只会留下无主进程。周期检查必须保持引用。
+const liveness = setInterval(() => {
+  if (!existsSync(logDir)) shutdown();
+  else if (existsSync(resultPath)) beginRetention();
+}, 1_000);
