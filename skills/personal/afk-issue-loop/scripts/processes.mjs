@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import { buildInvocation, parseLine, explicitRefusal } from './providers.mjs';
+import { buildInvocation, parseLine, explicitRefusal, roleSelection } from './providers.mjs';
 import { BoundedTail, MAX_TAIL_CHARS } from './bounded-tail.mjs';
 import { findLastTagContent, unwrapFences } from './structured-output.mjs';
 
@@ -42,7 +42,9 @@ async function waitFor(predicate, timeoutMs) {
 // invokeAgent keeps upstream's raw -> parse -> completion -> resetTimer order.
 // Only framework/emitter/session wiring is replaced. No business fields are
 // validated here. A timeout requests termination, never just cancels a Promise.
-async function invokeAgent(processes, config, context, onRawLine, onStderr, onProcessStart, onProviderRaw, onProviderEvent) {
+// provider/model/effort 来自该次调用所属 Role 的冻结配置（roleSelection），
+// 不是 run 级单值——不同 harness 的 stream-json 格式完全不同（ADR 0008）。
+async function invokeAgent(processes, selection, context, onRawLine, onStderr, onProcessStart, onProviderRaw, onProviderEvent) {
   let resultText, replyText;
   let currentReply = new BoundedTail(MAX_TAIL_CHARS);
   const accumulatedOutput = new BoundedTail(MAX_TAIL_CHARS);
@@ -56,7 +58,7 @@ async function invokeAgent(processes, config, context, onRawLine, onStderr, onPr
       processes.terminate(entry, completionDetected ? 'grace' : 'idle').catch(entry.fail);
     }, completionDetected ? COMPLETION_MS : IDLE_MS);
   };
-  const printCmd = buildInvocation({ ...config, prompt: context.prompt, cwd: context.cwd });
+  const printCmd = buildInvocation({ ...selection, prompt: context.prompt, cwd: context.cwd });
   try {
     const execResult = await processes.execute(printCmd.command, printCmd.args, {
       onLine: line => {
@@ -65,7 +67,7 @@ async function invokeAgent(processes, config, context, onRawLine, onStderr, onPr
         // must stop this execution (D9). Still parse before propagating it.
         let forwardingError;
         try { onRawLine(line); } catch (error) { forwardingError = error; }
-        const parsedLine = parseLine(config.provider, line);
+        const parsedLine = parseLine(selection.provider, line);
         // A newer complete reply/start invalidates old finals. Completion
         // scanning remains cumulative, but business extraction never is.
         if (parsedLine.replyStart || parsedLine.replyText !== undefined) {
@@ -327,13 +329,16 @@ export class Processes {
 
   async role(config, context, logPath, event, observations, onInvocation) {
     const started = Date.now();
+    // 该 Role 本 Run 固定使用的 harness/模型/effort；观测标签与流解析器都用它，
+    // 不用 run 级单值，使混 harness 的 Dashboard 与排障不误导（ADR 0008）。
+    const selection = roleSelection(config, context.role);
     let invocation;
     const scope = () => ({ role: context.role, attempt: context.attempt, invocation, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) });
     let result, failure, stderrDenied = false;
     const stderrBoundary = new BoundedTail(2_048);
     try {
-      event('role-start', { role: context.role, tickets: context.tickets, log: logPath });
-      result = await invokeAgent(this, config, context,
+      event('role-start', { role: context.role, tickets: context.tickets, log: logPath, provider: selection.provider, model: selection.model, effort: selection.effort });
+      result = await invokeAgent(this, selection, context,
         line => appendFileSync(logPath, `${line}\n`, { mode: 0o600 }),
         data => {
           observations?.observe('process/stderr', 'stderr', scope(), data.toString());
@@ -347,12 +352,12 @@ export class Processes {
           if (!Number.isSafeInteger(pid)) return;
           invocation = ++this.invocation;
           onInvocation?.(invocation);
-          const payload = { role: context.role, attempt: context.attempt, invocation, tickets: context.tickets, managedPid: pid, processGroup: pid, groupSource: 'spawn-detached', daemonPid: process.pid };
+          const payload = { role: context.role, attempt: context.attempt, invocation, tickets: context.tickets, managedPid: pid, processGroup: pid, groupSource: 'spawn-detached', daemonPid: process.pid, provider: selection.provider, model: selection.model, effort: selection.effort };
           observations?.observe('process', 'invocation-started', scope(), payload);
           event('role-process', payload);
         },
-        line => observations?.observe(`provider/${config.provider}`, 'raw-payload', scope(), line),
-        parsed => observations?.observe(`provider/${config.provider}`, parsed.type === 'text' ? 'text-delta' : parsed.type, scope(), parsed));
+        line => observations?.observe(`provider/${selection.provider}`, 'raw-payload', scope(), line),
+        parsed => observations?.observe(`provider/${selection.provider}`, parsed.type === 'text' ? 'text-delta' : parsed.type, scope(), parsed));
     } catch (error) {
       failure = error;
       try { await this.halt(error, 'role-io-error'); }

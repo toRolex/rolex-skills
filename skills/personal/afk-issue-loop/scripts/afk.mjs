@@ -9,26 +9,41 @@ import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { Processes } from './processes.mjs';
 import { ObservationJournal } from './observations.mjs';
-import { resolveSelection } from './model-selection.mjs';
+import { resolveSelection, ROLES } from './model-selection.mjs';
 
+// Role 前缀 flag 的唯一来源：新增角色只需改 model-selection.mjs 的 ROLES。
+const roleFlags = ROLES.flatMap(role => ['provider', 'model', 'effort'].map(field => `${role}-${field}`));
 const help = `AFK：独立本地 CLI 编排（Node >=22，macOS/Linux）
   node afk.mjs start --repo /absolute/repository [--issues 1,2] [--spec 7]
       [--target develop] [--provider claude|codex|pi] [--model MODEL]
-      [--effort LEVEL] [--verify '项目验证命令'] [--priority-labels critical,high,low]
-      [--reuse 1,2]
+      [--effort LEVEL] [--implementer-provider P] [--implementer-model M]
+      [--implementer-effort L] [--reviewer-provider P] [--reviewer-model M]
+      [--reviewer-effort L] [--merger-provider P] [--merger-model M]
+      [--merger-effort L] [--verify '项目验证命令']
+      [--priority-labels critical,high,low] [--reuse 1,2]
   node afk.mjs resolve-selection --repo /absolute/repository [--provider pi] [--model API-provider/model] [--effort LEVEL]
+      [--implementer-provider P] [--implementer-model M] [--implementer-effort L]
+      [--reviewer-provider P] [--reviewer-model M] [--reviewer-effort L]
+      [--merger-provider P] [--merger-model M] [--merger-effort L]
   node afk.mjs status --run /absolute/repository/.afk/logs/RUN
   node afk.mjs stop --run /absolute/repository/.afk/logs/RUN
   node afk.mjs dashboard --run /absolute/repository/.afk/logs/RUN
 
 默认 provider=claude，不从宿主猜测；Claude/Codex 省略模型/effort 沿用 CLI 本机配置。
+顶层 --provider/--model/--effort 是 Run 默认值；--<role>-* 按 Role 覆盖对应字段。
+逐字段继承：只写 --reviewer-model opus 时该 Role 的 provider/effort 仍继承顶层默认。
+不指定任何 Role 前缀时三角色完全相同，与升级前行为一致。
+缺省 Role 只跟随顶层默认，不跟随其他已指定 Role（保护 Reviewer 独立性）。
+每个 Role 的最终配置在 start 时解析一次并冻结进 selection.json，恢复时不重解析。
+公共 effort 契约取三家交集 low/high/max；各家更多档位仍按该 harness 实际支持面校验。
 Pi 省略模型意图 luna + max；每次 start 重新查询 0.85.1 纯内置目录＋models.json。
 luna 匹配 ID 内完整 token（首尾或 . _ / - 分隔，忽略大小写），唯一且 effort 能力明确才启动。
 扩展/包动态来源、未知版本、读取/配置失败、无匹配/歧义或未知/不支持 effort 均失败，不换模型。
 只验证声明式注册元数据，不读取 auth、不执行配置命令/扩展、不证明认证可用。
-显式 Pi --model 必须完整 API-provider/model，跳过自动验证；--effort 优先。
+显式 Pi --model 必须完整 API-provider/model；与 luna 同样按注册元数据校验 effort。
 其他显式 Pi 模型省略 effort 不补 max；仅显式旧 cliproxy/gpt-5.6-luna 保留省略补 max 的覆盖语义。
-resolve-selection 是相同只读解析路径；start 再查最新目录并保存 selection.json，同 run 三角色固定。
+Codex effort 表以本机 codex debug models 的 supported_reasoning_levels 为准（含 max，不含 none/minimal）。
+resolve-selection 是相同只读解析路径；start 再查最新目录并保存 selection.json，逐角色固定。
 其他 CLI 的 --model 接受准确 ID/CLI 别名；自然语言由 skill 启动者理解。
 角色默认权限同 Sandcastle：Claude --dangerously-skip-permissions，
 Codex exec --dangerously-bypass-approvals-and-sandbox；Pi 不加权限 flag。
@@ -42,6 +57,40 @@ Codex exec --dangerously-bypass-approvals-and-sandbox；Pi 不加权限 flag。
 
 function save(path, data) {
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+}
+
+// 逐角色展示最终配置，使用户在派发前看清每一格：来源区分「我显式指定的」
+// 与「被默认/继承的」，能力结论区分「已验证」与「未验证」（ADR 0008）。
+// 省略模型/effort 沿用既有措辞「CLI 本机配置」，null 不等于已探测。
+const sourceLabel = {
+  'cli-config-or-explicit': '显式指定',
+  'role-inherited-default': '继承顶层默认',
+  'pi-declarative-intent': 'Pi 意图解析（luna）',
+  // Pi 的显式完整模型不走自动发现，但 effort 仍走声明式能力校验；
+  // 来源措辞只否定「认证」，能力结论由 capability 字段单独给出。
+  'explicit-unverified': '显式指定（认证未验证）',
+};
+// Pi 的「未验证」有两种来源：能力校验给出了具体理由，或能力校验根本没跑。
+// 两者都必须显式可见，不能合并成一句含糊的「未验证」。
+function capabilityLabel(entry) {
+  if (entry.capabilityVerified === true) return entry.authenticationVerified === false && entry.selectionIntent ? '能力已验证；认证未验证' : '能力已验证';
+  if (entry.capabilityNote) return `能力未验证：${entry.capabilityNote}`;
+  if (entry.provider === 'pi') return '能力未验证（未做声明式元数据校验）';
+  return '按 CLI 本机能力；未做模型级能力校验';
+}
+function selectionDisplay(selection) {
+  const roles = {};
+  for (const role of ROLES) {
+    const entry = selection.roles[role];
+    roles[role] = {
+      harness: entry.provider,
+      model: entry.model ?? 'CLI 本机配置',
+      effort: entry.effort ?? 'CLI 本机配置',
+      source: sourceLabel[entry.selectionSource] || entry.selectionSource,
+      capability: capabilityLabel(entry),
+    };
+  }
+  return roles;
 }
 
 function numbers(value) {
@@ -294,11 +343,13 @@ async function start(values) {
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error('需要 Node >=22');
   const repo = realpathSync(resolve(values.repo || process.cwd()));
   const selection = await resolveSelection(values, repo);
-  const { provider, model, effort } = selection;
+  const { provider, model, effort, roles } = selection;
   const run = randomUUID();
   const logDir = join(repo, '.afk', 'logs', run);
   const config = {
-    repo, provider, run, logDir, selection,
+    // 顶层 provider/model/effort 保留为 Run 默认（向后兼容的单份读取方）；
+    // roles 是逐角色冻结配置，角色启动只读它，不在启动时重选。
+    repo, provider, run, logDir, selection, roles,
     issues: numbers(values.issues),
     specs: numbers(values.spec),
     reuse: numbers(values.reuse),
@@ -346,7 +397,7 @@ async function start(values) {
   let dashboard;
   try { dashboard = await launchDashboard(logDir, run); }
   catch (error) { dashboard = { state: 'unavailable', reopenCommand: dashboardCommand(logDir), completeness: 'incomplete', reason: error.message }; }
-  console.log(JSON.stringify({ state: 'started', ...ready, dashboard, status: controlCommand('status'), stop: controlCommand('stop') }, null, 2));
+  console.log(JSON.stringify({ state: 'started', ...ready, roles: selectionDisplay(selection), dashboard, status: controlCommand('status'), stop: controlCommand('stop') }, null, 2));
 }
 
 async function main() {
@@ -355,10 +406,15 @@ async function main() {
     process.once('message', config => daemon(config).catch(error => { console.error(error); process.exitCode = 1; }));
     return;
   }
-  const { values } = parseArgs({ args: process.argv.slice(3), options: Object.fromEntries(['repo', 'issues', 'spec', 'target', 'provider', 'model', 'effort', 'verify', 'priority-labels', 'reuse', 'run'].map(name => [name, { type: 'string' }])) });
+  const { values } = parseArgs({ args: process.argv.slice(3), options: Object.fromEntries(['repo', 'issues', 'spec', 'target', 'provider', 'model', 'effort', 'verify', 'priority-labels', 'reuse', 'run', ...roleFlags].map(name => [name, { type: 'string' }])) });
   if (!action || ['help', '--help', '-h'].includes(action)) return console.log(help);
   if (action === 'start') return start(values);
-  if (action === 'resolve-selection') return console.log(JSON.stringify(await resolveSelection(values, realpathSync(resolve(values.repo || process.cwd()))), null, 2));
+  if (action === 'resolve-selection') {
+    // 与 start 同一展示路径：`roles` 保留机器可读的原始映射，`display` 逐角色
+    // 列出 harness/模型/effort/来源/能力结论，使只读预览也能看清每一格。
+    const selection = await resolveSelection(values, realpathSync(resolve(values.repo || process.cwd())));
+    return console.log(JSON.stringify({ ...selection, display: selectionDisplay(selection) }, null, 2));
+  }
   if (!['status', 'stop', 'dashboard'].includes(action) || !values.run) throw new Error(help);
   const runDir = resolve(values.run);
   const resultPath = join(runDir, 'result.json');

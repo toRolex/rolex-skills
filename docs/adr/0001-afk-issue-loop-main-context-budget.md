@@ -1,5 +1,7 @@
 # afk-issue-loop 主窗口预算改造
 
+> **「动态模型选择：拒绝」的替代范围见 [ADR 0008](0008-afk-per-role-execution-selection.md)。** 该拒绝针对的是**编排器自行按 Ticket 难度择模**——这一点仍然有效，ADR 0008 不替代它。ADR 0008 允许的是**用户显式按角色指定** harness/模型（配置由用户表达、编排器只翻译与校验），不引入任何自动择模。不得以本文反对用户 per-Role 指定。
+
 > **现行优先级：以 [SPEC #8](https://github.com/toRolex/rolex-skills/issues/8) / [ADR 0005](0005-afk-sandcastle-source-reuse.md) 为准。** 以下所有“仍有效”等状态均属当时历史；主会话调度与模板自加载已由独立 CLI、启动前读取三 MD 及动态 Git 注入替代。本文历史决定不重写。
 
 > **历史决策，现行替代范围见 [Issue #7](https://github.com/toRolex/rolex-skills/issues/7) / [ADR 0004](0004-afk-local-cli-orchestrator.md)。** 以下旧状态与正文仅记录当时结论。主会话原生调度、plan 落盘/恢复、固定 sonnet、载体确认、通知驱动和仅 completion signal 汇报均不再适用；现行为 skill 启动独立脚本、CLI 角色与引擎结构化结果，不要求主窗口持续在线。

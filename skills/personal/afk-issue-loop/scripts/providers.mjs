@@ -285,13 +285,36 @@ const claudeCode = (model, options) => ({
   },
 });
 
+// harness 级 effort 档位表。Codex 表以本机 `codex debug models` 的
+// supported_reasoning_levels 为准：不含 none/minimal，含 max（旧表已腐坏）。
 const EFFORTS = {
   claude: ['low', 'medium', 'high', 'xhigh', 'max'],
-  codex: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+  codex: ['low', 'medium', 'high', 'xhigh', 'max'],
   pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
 };
 function checkProvider(provider) {
   if (!Object.hasOwn(EFFORTS, provider)) throw new Error(`不支持的 provider：${String(provider)}`);
+}
+// harness 级合法档位是校验用事实，也是调用方（模型选择）复用的唯一来源。
+export const effortsFor = provider => {
+  checkProvider(provider);
+  return [...EFFORTS[provider]];
+};
+
+// Role Selection：每个 Role 使用 start 时冻结进 selection.json 的那份配置，
+// 不在角色启动时重选（ADR 0008）。缺少 roles 的旧 config 回退顶层默认。
+// null 表示「沿用 CLI 本机配置」，不能与 undefined（未提供）混同。
+export function roleSelection(config, role) {
+  const selected = config.roles?.[role];
+  const pick = (field, fallback) => {
+    const value = selected && Object.hasOwn(selected, field) ? selected[field] : fallback;
+    return value ?? undefined;
+  };
+  return {
+    provider: pick('provider', config.provider),
+    model: pick('model', config.model),
+    effort: pick('effort', config.effort),
+  };
 }
 export function buildInvocation({ provider, model, effort, prompt, cwd }) {
   checkProvider(provider);

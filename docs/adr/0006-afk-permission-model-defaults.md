@@ -1,5 +1,7 @@
 # AFK 默认角色权限对齐 Sandcastle，Pi 默认 Luna/max
 
+> Pi 模型/effort 的省略默认与「同 run 三角色固定」另由 [ADR 0008](0008-afk-per-role-execution-selection.md) 局部替代：现为**每角色各自固定**，且显式 Pi 模型同样走声明式能力校验。下文「三角色固定」「显式跳过自动验证」等表述按 ADR 0008 阅读；权限默认与 luna 意图解析本身不变。
+
 依据用户明确要求，恢复 Sandcastle 的角色 CLI 默认：Claude `--dangerously-skip-permissions`、Codex `exec --dangerously-bypass-approvals-and-sandbox`，Pi 不加权限 flag，以满足无人值守执行。权限决策仅替代 [ADR 0005](0005-afk-sandcastle-source-reuse.md) 的「不恢复危险 bypass」部分；不更换身份、不改本机/全局权限、不删除保护环境变量、不绕过外层 sandbox。角色仍可能被外层限制拒绝，拒绝后等待用户；worktree 不是安全沙箱，默认放权只适用于可信目标与任务。
 
 执行 CLI 默认仍 Claude。仅替代 [ADR 0004](0004-afk-local-cli-orchestrator.md) 中 Pi 的「省略模型沿用本机配置」：Pi 省略模型采用 `luna + max` 选择意图，而非固定 `cliproxy/gpt-5.6-luna`。每次 start 查询最新声明式注册目录，按模型 ID 的完整 luna token 唯一匹配、确认 effort 能力后保存准确 provider/model/effort；同 run 三角色固定，不在角色启动时重选。完整显式模型优先、跳过自动发现，标记未自动验证；其他显式模型省略 effort 不补 max，仅显式旧 `cliproxy/gpt-5.6-luna` 保留补 max 的既有覆盖语义。其他 CLI 默认与权限不变。

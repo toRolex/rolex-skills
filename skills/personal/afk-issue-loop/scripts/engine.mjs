@@ -9,7 +9,8 @@ import { realpathSync, existsSync, lstatSync, readFileSync, readlinkSync, readdi
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
-import { buildInvocation } from './providers.mjs';
+import { buildInvocation, roleSelection } from './providers.mjs';
+import { ROLES } from './model-selection.mjs';
 import { loadTemplates, renderPrompt } from './prompts.mjs';
 
 const permission = /permission denied|permission.*denied|not permitted|unauthorized|forbidden|HTTP 40[13]|requires? approval|cannot prompt for approval|权限拒绝|未经授权/i;
@@ -209,8 +210,13 @@ export async function createEngine(config, processes, event = () => {}, observat
   // 启动握手不等待角色，也不在确认启动前派角色。
   // 模板随 skill 安装；在握手及任何外部命令前加载本运行的固定快照。
   const templates = loadTemplates();
-  buildInvocation({ ...config, cwd: config.repo, prompt: '启动参数校验，不执行角色' });
-  for (const executable of ['git', 'wt', 'gh', config.provider]) await command(executable, ['--version']);
+  // 启动期校验覆盖本次 Run 实际用到的全部 Role 配置组合（去重后的 harness），
+  // 不只校验顶层那一组：否则混 harness 时会拖到某个角色启动才发现缺 CLI。
+  // provider 名同时就是该 harness 的可执行文件名（claude/codex/pi）。
+  const selections = Object.fromEntries(ROLES.map(role => [role, roleSelection(config, role)]));
+  for (const selection of Object.values(selections)) buildInvocation({ ...selection, cwd: config.repo, prompt: '启动参数校验，不执行角色' });
+  const harnesses = [...new Set([...ROLES.map(role => selections[role].provider), config.provider])].filter(Boolean);
+  for (const executable of ['git', 'wt', 'gh', ...harnesses]) await command(executable, ['--version']);
   await gh(['auth', 'status']);
   const root = realpathSync(await git(['rev-parse', '--show-toplevel']));
   if (root !== realpathSync(config.repo)) throw new Error('--repo 必须为目标仓库 worktree 根目录');
@@ -301,6 +307,10 @@ export async function createEngine(config, processes, event = () => {}, observat
         let record;
         try { record = JSON.parse(line); } catch { continue; }
         if (!writerEventMatches(record, branch)) continue;
+        // 这个 key 只用于「同一 Role 是否还有未确认终止的写者」的配对，不是
+        // 配置查找表——它**有意**不含 provider：每个角色的 harness 由
+        // selection.json 冻结并按角色取（ADR 0008），写者存活判断与用哪个
+        // harness 无关，把 provider 并进来只会让 key 随配置漂移。
         const key = `${record.role}:${record.tickets.join(',')}`;
         if (record.type === 'role-start') active.set(key, null);
         if (record.type === 'role-process' && Number.isSafeInteger(record.managedPid)) active.set(key, record.managedPid);

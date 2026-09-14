@@ -19,6 +19,41 @@ node "<skill绝对路径>/scripts/afk.mjs" dashboard --run "/absolute/project/.a
 
 新运行发现旧 `afk/issue-3` 时，先按 liveness-first 确认是否有活跃写者：只有 writer ownership channel 明确响应才使该票等待；stale socket、历史 PID 与不完整事件不阻止开工。`--reuse 3` 仅保留显式归属兼容信息，不是接管条件。同次运行自己的失败进度则正常复用。
 
+## 按角色指定 harness 与模型
+
+顶层 `--provider` / `--model` / `--effort` 是 Run 默认值；`--<role>-provider` / `--<role>-model` / `--<role>-effort`（role 为 `implementer` / `reviewer` / `merger`）为该角色覆盖对应字段，其余字段逐字段继承顶层。
+
+```sh
+# 三角色混 harness：实现放在便宜的模型，Gate 判断交给更强的模型，
+# 不可逆的合并/关票留在已验收过的 Claude 上
+node "<skill绝对路径>/scripts/afk.mjs" start --repo "/absolute/project" --issues 3,4,5 \
+  --implementer-provider pi --implementer-model cliproxy/deepseek-v4.1-flash --implementer-effort high \
+  --reviewer-provider claude --reviewer-model opus --reviewer-effort high \
+  --merger-provider claude --merger-model sonnet --merger-effort max
+
+# 同一 harness 内做成本分层：只写要覆盖的字段，其余继承顶层
+node "<skill绝对路径>/scripts/afk.mjs" start --repo "/absolute/project" --issues 3 \
+  --provider claude --model sonnet --effort medium --reviewer-model opus
+
+# 只给某个角色换 provider，模型/effort 走该 harness 的 CLI 本机配置
+node "<skill绝对路径>/scripts/afk.mjs" start --repo "/absolute/project" --issues 3 \
+  --reviewer-provider pi
+
+# 先只读预览每一格的最终配置与来源，再决定是否启动
+node "<skill绝对路径>/scripts/afk.mjs" resolve-selection --repo "/absolute/project" \
+  --reviewer-model opus --merger-effort max
+```
+
+- **逐字段继承**：`--reviewer-model opus` 只换 Reviewer 的模型，它的 provider 与 effort 仍跟随顶层。
+- **缺省角色只跟随顶层默认**，不跟随其他已指定角色。只指定 Implementer 时 Reviewer 不会被拉到同源模型——否则 Reviewer 会系统性认可同源输出的盲区，而 Gate 完全依赖它的判读。
+- **完全不写角色前缀**时三角色完全相同，与升级前行为一致。
+- **effort 交集**：公共承诺 `low` / `high` / `max`。各家还有更多档位（Claude 五档、Pi 七档、Codex 五档），按该 harness 实际支持面校验；不支持就在启动期失败并列出合法值。
+- **Pi 的档位按模型不同**，不能按 harness 记：`cliproxy/deepseek-v4.1-flash` 仅支持 `low` / `high` / `max`；`cliproxy/gpt-5.6-luna` 支持 `low` / `medium` / `high` / `xhigh` / `max`。Pi 遇到模型不支持的档位会**静默降级且不报错**，所以显式 Pi 模型同样按声明式元数据做能力校验，不做自动验证时也会显式标注未验证。
+- **Codex 档位表**以本机 `codex debug models` 的 `supported_reasoning_levels` 为准：`low` / `medium` / `high` / `xhigh` / `max`。`none` / `minimal` 不被 CLI 支持，会被拒绝。
+- `start` 与 `resolve-selection` 都**逐角色**列出 harness / 模型 / effort / 来源 / 能力是否已验证；`start` 返回的 `roles` 字段可直接展示给用户。
+- 启动期检查本次 Run 用到的**全部** harness 可执行文件（去重后）；缺任一 CLI 都启动即失败，不拖到该角色启动才暴露。
+- 每个角色的最终配置在 `start` 时解析一次并冻结进 `selection.json`；daemon 崩溃恢复后仍用同一份，不重新解析。
+
 ## Pi 默认、覆盖与模型简称
 
 ```sh
@@ -42,9 +77,10 @@ node "<skill绝对路径>/scripts/afk.mjs" start --repo "/absolute/project" --is
 - 注册目录没有 Luna、配置读取失败、max 能力未知/不支持，或存在扩展/包动态来源：脚本自动选择失败，询问准确显式选择，不静默换模型或跳过动态来源。仅说 `pi` 仍走同一默认解析。
 - 声明式列表从 `current/gpt-5.7-luna` 改为唯一 `newprovider/gpt-5.8-luna`：下一次 start 采用新准确值；新增第二个 Luna 则失败；本次已经启动的三个角色仍用保存的旧值。
 - 显式 `--model cliproxy/gpt-5.6-luna` 未给 effort：保留旧覆盖语义，补 max；显式其他模型不补。显式完整选择标记未自动验证，可在动态来源存在时使用，但不是认证或后端能力成功的承诺。
+- 自动路径因动态来源 fail-closed 时，显式 per-Role 指定仍可开工：自动选择的失败不得丢掉用户写下的按角色配置。
 - Ticket 正文是「修复 luna max 文案」但启动时没有模型选择：正文原样留给角色，执行 CLI 仍默认 Claude。
 
-启动前展示例如「CLI=pi；API provider=current；model=gpt-5.7-luna；effort=max；声明式注册唯一、认证未验证；Pi 不加权限 flag」。最终以 start 返回值为准；`selection.json` 与 status 保存本次选择及来源。`null` 表示沿用 CLI 本机配置，不代表已探测该配置的最终模型。
+启动前展示例如「CLI=pi；API provider=current；model=gpt-5.7-luna；effort=max；声明式注册唯一、认证未验证；Pi 不加权限 flag」。有角色前缀时逐角色展示，例如「Implementer: harness=pi / model=cliproxy/deepseek-v4.1-flash / effort=high / 来源=显式指定（认证未验证）；Reviewer: harness=claude / model=sonnet / effort=medium / 来源=继承顶层默认」。`resolve-selection` 的 `display` 字段与 `start` 返回的 `roles` 字段就是这份逐角色视图；机器可读的原始枚举值在 `roles`。最终以 start 返回值为准；`selection.json` 保存每个角色自己的选择及来源，顶层扁平三字段与 `default` 键是同一份 Run 默认值。`null` 表示沿用 CLI 本机配置，不代表已探测该配置的最终模型。
 
 ## 固定批次与接力
 

@@ -23,6 +23,10 @@ _Avoid_: 当前主 agent、Planner、控制者
 **角色**:
 Implementer、Reviewer、Merger 三种交付职责单元；依赖读取与就绪判断属于编排器的调度职责。
 
+**Role Selection**:
+一次 Run 内每个角色各自冻结的一份 `{provider, model, effort, selectionSource}`；在 `start` 时解析一次并写入 `selection.json` 的 `roles`，角色启动与 daemon 恢复都不重选。`selectionSource` 区分用户显式指定、继承顶层默认与 Pi 意图解析。
+_Avoid_: 统一执行配置、逐角色重选
+
 **载体**:
 角色所使用的独立本机 CLI，与调用 skill 的宿主相区分；载体不改变角色职责。
 

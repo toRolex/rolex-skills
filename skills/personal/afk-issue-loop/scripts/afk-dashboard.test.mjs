@@ -22,7 +22,9 @@ function writeExecutable(path, body) {
 
 // 公开 CLI fixture：GitHub、Worktrunk、provider、browser opener 均为受控 adapter。
 // 不调用真实 GitHub、不启动真实模型、不打开真实浏览器、不操作真实用户仓库。
-function createFixture() {
+// omit：不写出该 harness 的受控可执行文件，用于断言启动期可执行检查确实
+// 覆盖了全部被用到的 harness。claude 是角色执行载体，正常用例必须保留。
+function createFixture({ omit = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'afk-dashboard-'));
   const repo = join(root, 'repo');
   const bin = join(root, 'bin');
@@ -143,10 +145,21 @@ emit({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-
   writeExecutable(join(bin, 'claude'), `
 if [ "\${1:-}" = '--version' ]; then printf '%s\\n' 'claude fixture'; exit 0; fi
 exec "${process.execPath}" "$AFK_FAKE_CLAUDE" "$@"`);
+  // 混 harness 的启动期可执行检查可被外部断言：受控 harness 记录每次调用
+  // （含 --version 探针）。它们只是可执行文件占位，不冒充真实 harness 语义。
+  for (const provider of ['pi', 'codex']) {
+    if (omit.includes(provider)) continue;
+    writeExecutable(join(bin, provider), `
+printf '%s %s\\n' '${provider}' "$*" >> "$AFK_PROVIDER_LOG"
+if [ "\${1:-}" = '--version' ]; then printf '%s\\n' '${provider} fixture'; exit 0; fi
+printf '%s\\n' '${provider} fixture 占位输出，不模仿真实 harness 语义'
+exit 0`);
+  }
 
   const env = {
     ...process.env,
     AFK_DASHBOARD_OPEN: '0',
+    AFK_PROVIDER_LOG: join(root, 'providers.log'),
     // 受控 retention：不真实等待 24 小时，也避免测试残留 companion 进程。
     AFK_DASHBOARD_RETENTION_MS: '3000',
     PATH: `${bin}:${process.env.PATH}`,
@@ -157,6 +170,9 @@ exec "${process.execPath}" "$AFK_FAKE_CLAUDE" "$@"`);
   };
   return { root, repo, roleLog, openLog, env };
 }
+
+const providerLog = fixture => existsSync(fixture.env.AFK_PROVIDER_LOG) ? readFileSync(fixture.env.AFK_PROVIDER_LOG, 'utf8').trim().split('\n').filter(Boolean) : [];
+const resolveSelection = (fixture, args = []) => JSON.parse(command(process.execPath, [script, 'resolve-selection', '--repo', fixture.repo, ...args], { env: fixture.env, timeout: 15_000 }));
 
 function addBranchCommit(fixture, number) {
   const branch = `afk/issue-${number}`;
@@ -887,11 +903,348 @@ test('run 终态后 companion 按 retention 到期退出，最终 HTML 长期保
 test('resolve-selection 不创建 run、Dashboard 或浏览器副作用', async () => {
   const fixture = createFixture();
   try {
-    const selection = JSON.parse(command(process.execPath, [script, 'resolve-selection', '--repo', fixture.repo], { env: fixture.env, timeout: 15_000 }));
+    const selection = resolveSelection(fixture);
     assert.equal(existsSync(join(fixture.repo, '.afk', 'logs')), false, 'resolve-selection 不得创建 run');
     assert.equal(existsSync(fixture.openLog), false, 'resolve-selection 不得打开浏览器');
     assert.ok(selection.provider);
+    // per-Role 形状不得引入副作用，且每一格都可读。
+    assert.deepEqual(Object.keys(selection.roles).sort(), ['implementer', 'merger', 'reviewer']);
   } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// 向后兼容回归护栏：不写任何 Role 前缀时三角色必须与顶层完全一致，
+// 且来源标注为「继承」而不是静默等同于显式指定。
+test('只写顶层 flag 时三角色一致且来源标注为继承（向后兼容）', async () => {
+  const fixture = createFixture();
+  try {
+    const bare = resolveSelection(fixture);
+    for (const role of ['implementer', 'reviewer', 'merger']) {
+      assert.equal(bare.roles[role].provider, 'claude');
+      assert.equal(bare.roles[role].model, null);
+      assert.equal(bare.roles[role].effort, null);
+      assert.equal(bare.roles[role].selectionSource, 'role-inherited-default', `${role} 省略时应标注继承而非显式`);
+    }
+    // 顶层 default 保留升级前的来源语义，使既有单份读取方不失效。
+    assert.equal(bare.selectionSource, 'cli-config-or-explicit');
+    assert.equal(bare.provider, 'claude', '默认 provider 仍是 claude，不从宿主猜测');
+
+    const top = resolveSelection(fixture, ['--provider', 'claude', '--model', 'opus', '--effort', 'high']);
+    assert.equal(top.selectionSource, 'cli-config-or-explicit');
+    for (const role of ['implementer', 'reviewer', 'merger']) {
+      assert.deepEqual(
+        { provider: top.roles[role].provider, model: top.roles[role].model, effort: top.roles[role].effort },
+        { provider: 'claude', model: 'opus', effort: 'high' },
+        `${role} 应完整继承顶层默认`,
+      );
+      assert.equal(top.roles[role].selectionSource, 'role-inherited-default');
+    }
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('per-Role flag 逐角色解析、逐字段继承顶层默认', async () => {
+  const fixture = createFixture();
+  try {
+    const selection = resolveSelection(fixture, [
+      '--provider', 'claude', '--model', 'sonnet', '--effort', 'medium',
+      '--implementer-provider', 'pi', '--implementer-model', 'cliproxy/gpt-5.6-luna', '--implementer-effort', 'high',
+      '--reviewer-model', 'opus',
+      '--merger-effort', 'max',
+    ]);
+    assert.deepEqual(
+      { ...selection.roles.implementer, capabilityNote: undefined, selectionIntent: undefined, capabilityVerified: undefined, authenticationVerified: undefined },
+      { provider: 'pi', model: 'cliproxy/gpt-5.6-luna', effort: 'high', selectionSource: 'explicit-unverified', capabilityNote: undefined, selectionIntent: undefined, capabilityVerified: undefined, authenticationVerified: undefined },
+      'Implementer 应使用自己的 harness/模型/effort',
+    );
+    // 只给 --reviewer-model：provider/effort 逐字段继承顶层，不是整份回退。
+    assert.equal(selection.roles.reviewer.provider, 'claude');
+    assert.equal(selection.roles.reviewer.model, 'opus');
+    assert.equal(selection.roles.reviewer.effort, 'medium', 'Reviewer 未指定的 effort 必须继承顶层');
+    assert.equal(selection.roles.merger.provider, 'claude');
+    assert.equal(selection.roles.merger.model, 'sonnet');
+    assert.equal(selection.roles.merger.effort, 'max');
+    // 顶层 default 仍是 Run 默认值，供既有单份读取方使用。
+    assert.equal(selection.provider, 'claude');
+    assert.equal(selection.model, 'sonnet');
+    assert.equal(selection.effort, 'medium');
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// 缺省 Role 只跟随顶层默认，不跟随其他已指定 Role：否则只指定 Implementer
+// 时 Reviewer 会被悄悄拉到同源模型，而 Gate 完全依赖 Reviewer 判读。
+test('缺省 Role 只继承顶层默认，不跟随其他已指定 Role', async () => {
+  const fixture = createFixture();
+  try {
+    const selection = resolveSelection(fixture, ['--implementer-model', 'sonnet']);
+    assert.equal(selection.roles.implementer.model, 'sonnet');
+    assert.equal(selection.roles.reviewer.model, null, 'Reviewer 不得被推断为与 Implementer 同源');
+    assert.equal(selection.roles.merger.model, null, 'Merger 不得被推断为与 Implementer 同源');
+    assert.equal(selection.roles.reviewer.selectionSource, 'role-inherited-default');
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// selection.json 的公开形状：既有单份读取方读顶层扁平三字段，新增方读
+// `roles`/`default`；三者必须是同一份值，不能各说各话。
+test('selection.json 同时给出顶层扁平值、default 与 roles 且互相一致', async () => {
+  const fixture = createFixture();
+  let runDir;
+  try {
+    addBranchCommit(fixture, 9);
+    const started = JSON.parse(command(process.execPath, [
+      script, 'start', '--repo', fixture.repo, '--issues', '9',
+      '--provider', 'claude', '--model', 'sonnet', '--effort', 'medium',
+      '--reviewer-model', 'opus',
+    ], { env: fixture.env, timeout: 15_000 }));
+    runDir = started.logDir;
+    const selection = JSON.parse(readFileSync(join(runDir, 'selection.json'), 'utf8'));
+    const defaultFields = ({ provider, model, effort, selectionSource }) => ({ provider, model, effort, selectionSource });
+    // 顶层扁平值就是 default 键的内容。
+    assert.deepEqual(defaultFields(selection.default), defaultFields(selection));
+    // 未指定任何前缀的角色是 default 的副本（仅来源标注不同）。
+    assert.deepEqual(defaultFields(selection.roles.merger), { ...defaultFields(selection.default), selectionSource: 'role-inherited-default' });
+    // 显式覆盖的角色只改被指定的字段。
+    assert.deepEqual(defaultFields(selection.roles.reviewer), { provider: 'claude', model: 'opus', effort: 'medium', selectionSource: 'cli-config-or-explicit' });
+    await stopRun(runDir, fixture.env);
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// resolve-selection 是只读预览入口，必须与 start 用同一展示路径逐角色列出，
+// 否则用户在派发前看不到「哪一格是哪来的」。
+test('resolve-selection 输出逐角色展示且不改变机器可读字段', async () => {
+  const fixture = createFixture();
+  try {
+    const result = resolveSelection(fixture, ['--provider', 'claude', '--model', 'sonnet', '--effort', 'medium', '--merger-model', 'opus']);
+    // 机器可读的原始映射保持枚举值，供脚本消费。
+    assert.equal(result.roles.merger.selectionSource, 'cli-config-or-explicit');
+    assert.equal(result.roles.implementer.selectionSource, 'role-inherited-default');
+    // display 是同一份数据的人类可读视图。
+    assert.deepEqual(result.display.implementer, {
+      harness: 'claude', model: 'sonnet', effort: 'medium', source: '继承顶层默认',
+      capability: result.display.implementer.capability,
+    });
+    assert.equal(result.display.merger.model, 'opus');
+    // 省略模型/effort 用既有措辞，且不把 null 说成已探测。
+    const bare = resolveSelection(fixture);
+    for (const role of ['implementer', 'reviewer', 'merger']) {
+      assert.equal(bare.display[role].model, 'CLI 本机配置');
+      assert.equal(bare.display[role].effort, 'CLI 本机配置');
+    }
+    assert.equal(existsSync(join(fixture.repo, '.afk', 'logs')), false, 'resolve-selection 仍不得创建 run');
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// 不静默降级：非法组合必须在启动前被拒，并给出该 harness 的合法值。
+test('非法 provider/effort 组合被拒并列出合法值', async () => {
+  const fixture = createFixture();
+  const fails = (args, pattern) => {
+    try {
+      resolveSelection(fixture, args);
+      assert.fail(`未拒绝：${args.join(' ')}`);
+    } catch (error) {
+      assert.match(`${error.stderr || ''}${error.stdout || ''}${error.message}`, pattern, `${args.join(' ')} 的拒绝理由必须可读`);
+    }
+  };
+  try {
+    fails(['--provider', 'gemini'], /provider 必须为 claude、codex 或 pi/);
+    fails(['--provider', 'codex', '--effort', 'none'], /不支持的 codex effort：?"none".*low\/medium\/high\/xhigh\/max/s);
+    fails(['--provider', 'codex', '--effort', 'minimal'], /不支持的 codex effort/);
+    fails(['--reviewer-effort', 'ultra'], /不支持的 claude effort/);
+    fails(['--implementer-provider', 'pi', '--implementer-model', 'deepseek-v4.1-flash'], /准确 API-provider\/model/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// 受控 pi 可执行文件会遮蔽真实 Pi 安装，而「声明式注册目录里这个模型支持哪些
+// 档位」只能从真实安装读到——能力校验本身没有 fake 可注入。因此这一条**不做
+// 夹具**：它明确依赖本机 Pi 安装，没有时整条跳过，而不是伪装成 hermetic 测试。
+const realPiCatalogue = () => {
+  try { return JSON.parse(command(process.execPath, [script, 'resolve-selection', '--repo', process.cwd(), '--provider', 'pi', '--model', 'cliproxy/deepseek-v4.1-flash', '--effort', 'high'], { timeout: 30_000 })); }
+  catch { return undefined; }
+};
+test('Pi 模型级 effort 能力校验拦住不支持的档位', { skip: realPiCatalogue() === undefined ? '本机无可用真实 Pi 声明式目录' : false }, () => {
+  const run = args => command(process.execPath, [script, 'resolve-selection', '--repo', process.cwd(), ...args], { timeout: 30_000 });
+  const rejects = (args, pattern) => {
+    try {
+      run(args);
+      assert.fail(`未拒绝：${args.join(' ')}`);
+    } catch (error) {
+      assert.match(`${error.stderr || ''}${error.stdout || ''}${error.message}`, pattern);
+    }
+  };
+  // cliproxy/deepseek-v4.1-flash 支持 low/high/max，不支持 medium。
+  rejects(['--provider', 'pi', '--model', 'cliproxy/deepseek-v4.1-flash', '--effort', 'medium'], /不支持 effort medium/);
+  const accepted = JSON.parse(run(['--provider', 'pi', '--model', 'cliproxy/deepseek-v4.1-flash', '--effort', 'high']));
+  assert.equal(accepted.roles.merger.effort, 'high');
+  assert.equal(accepted.roles.merger.model, 'cliproxy/deepseek-v4.1-flash');
+});
+
+// 拼写错误的模型在目录可证明完整时必须启动即失败。本机 Pi 有 packages 配置，
+// 无法证明目录完整性，因此这里只断言「绝不静默通过」——要么拒绝，要么给出
+// 显式的未验证告警。两种行为都不允许 exit 0 且无任何提示。
+test('Pi 未知模型要么启动即失败，要么显式告警', { skip: realPiCatalogue() === undefined ? '本机无可用真实 Pi 声明式目录' : false }, () => {
+  let output, code = 0;
+  try { output = command(process.execPath, [script, 'resolve-selection', '--repo', process.cwd(), '--provider', 'pi', '--model', 'cliproxy/no-such-model', '--effort', 'high'], { timeout: 30_000 }); }
+  catch (error) { code = 1; output = `${error.stderr || ''}${error.stdout || ''}`; }
+  if (code !== 0) { assert.match(output, /不存在模型|无法证明/); return; }
+  const selection = JSON.parse(output);
+  assert.equal(selection.roles.merger.capabilityVerified, false, '未知模型不得标记为能力已验证');
+  assert.match(selection.roles.merger.capabilityNote, /无法证明/, '未知模型必须显式告警，不能静默通过');
+});
+
+// Codex 硬编码表曾腐坏（含 CLI 不支持的 none/minimal、缺 CLI 支持的 max）。
+// 本机 codex debug models 的真实档位为 low/medium/high/xhigh/max。
+test('Codex max 被接受，none/minimal 被拒（腐坏表已修正）', async () => {
+  const fixture = createFixture();
+  try {
+    const selection = resolveSelection(fixture, ['--provider', 'codex', '--effort', 'max', '--model', 'gpt-5.6-luna']);
+    assert.equal(selection.roles.merger.effort, 'max');
+    assert.equal(selection.roles.merger.provider, 'codex');
+    for (const level of ['low', 'medium', 'high', 'xhigh']) {
+      assert.equal(resolveSelection(fixture, ['--provider', 'codex', '--effort', level]).effort, level, `Codex 应接受 ${level}`);
+    }
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// Pi 自动意图与 per-Role 显式指定共存且互不污染。自动路径能否成功取决于本机
+// Pi 目录；不论成功还是 fail-closed，用户写下的显式 per-Role 配置都不得丢失。
+// 这一条也依赖本机真实 Pi 安装（受控 pi 会遮蔽它）。
+test('Pi 自动意图失败不影响显式 per-Role 指定', { skip: realPiCatalogue() === undefined ? '本机无可用真实 Pi 声明式目录' : false }, () => {
+  const run = args => command(process.execPath, [script, 'resolve-selection', '--repo', process.cwd(), ...args], { timeout: 30_000 });
+  // 显式 per-Role 不受自动路径结果影响。
+  const selection = JSON.parse(run(['--provider', 'claude', '--implementer-provider', 'pi', '--implementer-model', 'cliproxy/deepseek-v4.1-flash', '--implementer-effort', 'high']));
+  assert.equal(selection.roles.implementer.provider, 'pi');
+  assert.equal(selection.roles.implementer.model, 'cliproxy/deepseek-v4.1-flash');
+  assert.equal(selection.roles.implementer.effort, 'high');
+  assert.equal(selection.roles.reviewer.provider, 'claude', '未指定的 Role 不得被 Pi 污染');
+  assert.equal(selection.roles.reviewer.selectionSource, 'role-inherited-default');
+  // 自动路径：要么给出可解析的 Pi 意图结果，要么 fail-closed 并说明原因。
+  // 不允许既返回一个非 Pi 的结果又不说明。
+  try {
+    const auto = JSON.parse(run(['--provider', 'pi']));
+    assert.equal(auto.roles.merger.provider, 'pi');
+    assert.ok(auto.roles.merger.model, 'Pi 自动意图必须给出准确模型');
+    assert.equal(auto.roles.merger.selectionSource, 'pi-declarative-intent');
+  } catch (error) {
+    assert.match(`${error.stderr || ''}${error.stdout || ''}${error.message}`, /动态来源|luna|无匹配|歧义/);
+  }
+});
+
+// 启动期校验覆盖去重后的全部 harness：若某个 Role 的 CLI 缺失，必须在
+// start 握手期就失败，而不是拖到该角色真正被派发时。
+test('start 启动期检查全部用到的 harness 可执行文件', async () => {
+  const fixture = createFixture({ omit: ['codex'] });
+  try {
+    addBranchCommit(fixture, 9);
+    const args = [
+      script, 'start', '--repo', fixture.repo, '--issues', '9',
+      '--implementer-provider', 'pi', '--implementer-model', 'cliproxy/deepseek-v4.1-flash', '--implementer-effort', 'high',
+      '--reviewer-provider', 'claude', '--reviewer-model', 'opus', '--reviewer-effort', 'high',
+      '--merger-provider', 'codex', '--merger-effort', 'max',
+    ];
+    // 收窄 PATH：本机真实安装的 codex 不能让缺项检查被绕过。
+    const env = { ...fixture.env, PATH: `${join(fixture.root, 'bin')}:/usr/bin:/bin` };
+    assert.throws(
+      () => command(process.execPath, args, { env, timeout: 30_000 }),
+      error => /codex/.test(`${error.stderr || ''}${error.stdout || ''}${error.message}`),
+      '缺少 codex 可执行文件应在启动期失败而不是拖到 Merger 启动',
+    );
+    // pi 在 codex 之前被探针检查，证明检查是按实际用到的 provider 逐个进行，
+    // 而不是只检查顶层默认的那一个。
+    assert.match(providerLog(fixture).join('\n'), /pi --version/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// 启动输出必须逐角色反映该 Role 实际使用的 harness/模型/来源，
+// 否则用户在派发前无法发现自己填错了哪一格。
+test('启动输出逐角色展示 harness/模型/effort/来源', async () => {
+  const fixture = createFixture();
+  let runDir;
+  try {
+    addBranchCommit(fixture, 9);
+    const started = JSON.parse(command(process.execPath, [
+      script, 'start', '--repo', fixture.repo, '--issues', '9',
+      '--provider', 'claude', '--model', 'sonnet', '--effort', 'medium',
+      '--implementer-provider', 'pi', '--implementer-model', 'cliproxy/deepseek-v4.1-flash', '--implementer-effort', 'high',
+    ], { env: fixture.env, timeout: 15_000 }));
+    runDir = started.logDir;
+    assert.deepEqual(
+      { ...started.roles.implementer, capability: undefined },
+      { harness: 'pi', model: 'cliproxy/deepseek-v4.1-flash', effort: 'high', source: '显式指定（认证未验证）', capability: undefined },
+    );
+    // 受控 pi 遮蔽真实 Pi 安装，因此能力结论必然是显式的「未验证」，
+    // 不允许静默留空或声称已验证。
+    assert.match(started.roles.implementer.capability, /能力未验证/);
+    // 未指定 Role 明确标注继承，不静默等同于显式。
+    for (const role of ['reviewer', 'merger']) {
+      assert.deepEqual(
+        { ...started.roles[role], capability: undefined },
+        { harness: 'claude', model: 'sonnet', effort: 'medium', source: '继承顶层默认', capability: undefined },
+        `${role} 应显示继承顶层默认`,
+      );
+    }
+    // selection.json 完整记录每角色 provider/model/effort/来源，供事后审计。
+    const selection = JSON.parse(readFileSync(join(runDir, 'selection.json'), 'utf8'));
+    assert.deepEqual(Object.keys(selection.roles).sort(), ['implementer', 'merger', 'reviewer']);
+    assert.deepEqual(
+      Object.fromEntries(['implementer', 'reviewer', 'merger'].map(role => [role, selection.roles[role].selectionSource])),
+      { implementer: 'explicit-unverified', reviewer: 'role-inherited-default', merger: 'role-inherited-default' },
+    );
+    assert.equal(selection.roles.implementer.provider, 'pi');
+    assert.equal(selection.roles.merger.model, 'sonnet');
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// 混 harness 时每个被用到的 harness 都必须被启动期探针检查，且该 Role 的
+// 观测标签反映它实际使用的 harness，而不是 run 级单值。
+test('混 harness 时每个用到的 harness 都被检查，观测标签逐角色区分', async () => {
+  const fixture = createFixture();
+  let runDir;
+  try {
+    addBranchCommit(fixture, 9);
+    const started = JSON.parse(command(process.execPath, [
+      script, 'start', '--repo', fixture.repo, '--issues', '9',
+      // 受控 pi 会遮蔽真实 Pi 安装，因此这里用显式模型（跳过自动发现，
+      // 能力结论降级为未验证），只验证混 harness 的检查与标签。
+      '--implementer-provider', 'pi', '--implementer-model', 'cliproxy/deepseek-v4.1-flash', '--implementer-effort', 'high',
+      '--reviewer-provider', 'codex', '--reviewer-model', 'gpt-5.6-luna', '--reviewer-effort', 'max',
+      '--merger-provider', 'claude', '--merger-effort', 'high',
+    ], { env: fixture.env, timeout: 15_000 }));
+    runDir = started.logDir;
+    const probes = providerLog(fixture).filter(line => line.endsWith('--version'));
+    assert.ok(probes.some(line => line.startsWith('pi ')), `pi 未被启动期检查：${probes.join('；')}`);
+    assert.ok(probes.some(line => line.startsWith('codex ')), `codex 未被启动期检查：${probes.join('；')}`);
+    // 观测标签以该 Role 实际使用的 harness 命名，三个 Role 各不相同。
+    assert.equal(started.roles.implementer.harness, 'pi');
+    assert.equal(started.roles.reviewer.harness, 'codex');
+    assert.equal(started.roles.merger.harness, 'claude');
+    const selection = JSON.parse(readFileSync(join(runDir, 'selection.json'), 'utf8'));
+    assert.deepEqual(
+      Object.fromEntries(['implementer', 'reviewer', 'merger'].map(role => [role, selection.roles[role].provider])),
+      { implementer: 'pi', reviewer: 'codex', merger: 'claude' },
+    );
+    await stopRun(runDir, fixture.env);
+  } finally {
+    await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });

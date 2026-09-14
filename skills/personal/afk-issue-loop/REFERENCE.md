@@ -2,6 +2,14 @@
 
 独立本地脚本是唯一调度者，角色由本机 CLI 执行；本文件是业务规则，不是发起 agent 的操作步骤。角色输入和结构化输出遵循 [引擎内嵌契约](scripts/engine.mjs)，这里不维护第二套字段定义。
 
+## 角色执行配置
+
+每个角色各有一份 `{provider, model, effort, selectionSource}`（Role Selection）。顶层 `--provider/--model/--effort` 定义 Run 默认值，`--<role>-*` 按角色逐字段覆盖，未写则继承顶层；缺省角色**只**跟随顶层默认，不跟随其他已指定角色，以免只指定 Implementer 时 Reviewer 被悄悄拉到同源模型而 Gate 失去独立性。完全不写角色前缀时三角色完全相同。
+
+每份配置在 `start` 时解析一次并写入 `selection.json` 的 `roles`，角色启动时只读该冻结结果，不重选；daemon 崩溃恢复后同样不重新解析。既有单份读取方读顶层扁平三字段（与 `default` 键同为 Run 默认值）。`start` 返回的 `roles` 与 `resolve-selection` 返回的 `display` 逐角色展示 harness / 模型 / effort / 来源 / 能力是否已验证。当前 Run 实际用到的全部 harness（去重后）都必须在启动期通过可执行文件检查。
+
+公共 effort 契约取三家交集 `low`/`high`/`max`；各家更多档位不被拒绝，校验以该 harness（Pi 到具体模型）的实际支持面为准，不支持即启动期失败并给出合法值。Pi 遇不支持的档位会静默降级，因此显式 Pi 模型同样按声明式元数据校验。语法、继承与示例见 [模型选择](SKILL.md#模型选择) 与 [按角色指定](EXAMPLES.md#按角色指定-harness-与模型)。
+
 ## 固定批次
 
 脚本每批一次选择固定范围内当前全部未 blocked 且可执行的票，无并发数量上限；成员固定、不补位，一票就绪也开工。现场串行准备后并发 Implementer；某票实现成功且有相对目标的可交付分支改动和 commits，立即接新的独立 Reviewer，其余实现继续。历史未交付成果也计入，不只看本轮新增提交。
