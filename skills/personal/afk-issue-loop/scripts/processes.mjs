@@ -22,13 +22,26 @@ const PIPE_WAIT_MS = 1_500;
 // 这里只作窄兼容，不把任意退出码或同码竞态当作已证明的信号因果。
 const SIGNAL_EXIT_CODES = { SIGTERM: 143, SIGKILL: 137 };
 
+// macOS 在进程组长已退出但尚未被 reap（本进程是其父进程）时，对 -pgid 发信号 0
+// 会返回 EPERM，而不是 ESRCH；组长被回收后同一调用才返回 ESRCH。这个约 25ms 的
+// 窗口是正常的退出竞态，不是「无权终止」。把它误判为不可自愈的终止失败会让每次
+// 用户停止都可能把 run 判 failed 并隔离现场，因此这里按语义分类：
+// 探测时 EPERM 视为「组仍存在」（僵尸组长终将被回收），发送信号时 EPERM 视为
+// 「无成员可收、信号未投递」，与 ESRCH 同样返回 false。其余错误码仍然抛出。
 function groupExists(pid) {
   try { process.kill(-pid, 0); return true; }
-  catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+  catch (error) {
+    if (error.code === 'ESRCH') return false;
+    if (error.code === 'EPERM') return true;
+    throw error;
+  }
 }
 function signalGroup(pid, signal) {
   try { process.kill(-pid, signal); return true; }
-  catch (error) { if (error.code !== 'ESRCH') throw error; return false; }
+  catch (error) {
+    if (error.code === 'ESRCH' || error.code === 'EPERM') return false;
+    throw error;
+  }
 }
 async function waitFor(predicate, timeoutMs) {
   const end = Date.now() + timeoutMs;
@@ -124,6 +137,8 @@ export class Processes {
   stopping = false;
   hasUnsafeWriters = false;
   stopRequested = false;
+  // 最近一次 stop 的逐 entry 终止确认结果；用户停止不因单条未确认而失败整轮。
+  terminationResults = [];
   failure;
   invocation = 0;
 
@@ -147,19 +162,19 @@ export class Processes {
       if (!pid) return;
       entry.terminationStarted = performance.now();
       entry.sentSignals = [];
-      entry.terminationStage = 'initial-group-probe';
-      if (groupExists(pid)) {
-        entry.terminationStage = 'send-SIGTERM';
-        entry.signalled = signalGroup(pid, 'SIGTERM');
-        if (entry.signalled) entry.sentSignals.push('SIGTERM');
-        entry.terminationStage = 'wait-SIGTERM-group-probe';
-        if (!await waitFor(() => !groupExists(pid), TERM_WAIT_MS)) {
-          entry.terminationStage = 'send-SIGKILL';
-          if (signalGroup(pid, 'SIGKILL')) entry.sentSignals.push('SIGKILL');
-          entry.terminationStage = 'wait-SIGKILL-group-probe';
-          if (!await waitFor(() => !groupExists(pid), KILL_WAIT_MS)) {
-            throw new Error(`进程组 ${pid} 终止未确认`);
-          }
+      // 不从一次无保护的探测决定是否发信号：探测本身也会遇到 EPERM/竞态。
+      // 直接发 SIGTERM，空组或不可达时 signalGroup 返回 false，随后进入继承管道
+      // 确认；仍存活的组则由下面的轮询探测（每 25ms）负责收敛。
+      entry.terminationStage = 'send-SIGTERM';
+      entry.signalled = signalGroup(pid, 'SIGTERM');
+      if (entry.signalled) entry.sentSignals.push('SIGTERM');
+      entry.terminationStage = 'wait-SIGTERM-group-probe';
+      if (!await waitFor(() => !groupExists(pid), TERM_WAIT_MS)) {
+        entry.terminationStage = 'send-SIGKILL';
+        if (signalGroup(pid, 'SIGKILL')) entry.sentSignals.push('SIGKILL');
+        entry.terminationStage = 'wait-SIGKILL-group-probe';
+        if (!await waitFor(() => !groupExists(pid), KILL_WAIT_MS)) {
+          throw new Error(`进程组 ${pid} 终止未确认`);
         }
       }
       // Parent exit / original group disappearance does NOT prove all children
@@ -196,8 +211,13 @@ export class Processes {
     this.stopRequested = true;
     this.stopping = true;
     const results = await Promise.allSettled([...this.children].map(entry => this.terminate(entry, 'user-stop')));
-    const failures = results.filter(result => result.status === 'rejected').map(result => result.reason);
-    if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join('\n'));
+    // 用户主动停止是尽力而为的收敛路径，不是失败判定：某次终止未确认不应把
+    // stopped 终态改写成 failed。逐条保留确认结果供 status/Dashboard 判断；
+    // terminate 的 catch 已置 hasUnsafeWriters/stopping，afk.mjs 仍会据此
+    // 保留 writer lock 并报告 failed（绝不交接现场）。
+    this.terminationResults = results.map(result => result.status === 'fulfilled'
+      ? { status: 'confirmed' }
+      : { status: 'unconfirmed', error: result.reason, termination: result.reason?.termination });
   }
 
   async execute(command, args, opts = {}) {

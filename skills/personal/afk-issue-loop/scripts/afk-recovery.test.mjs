@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Processes } from './processes.mjs';
 
 const script = resolve(dirname(fileURLToPath(import.meta.url)), 'afk.mjs');
 
@@ -96,7 +97,8 @@ fi`);
   const fakeClaude = join(root, 'fake-claude.mjs');
   writeFileSync(fakeClaude, `
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
@@ -146,17 +148,49 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
     tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: context.mode === 'close' })),
   };
   process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
+} else if (behavior === 'pure-skill-delivery' && context.role === 'merger') {
+  const subject = 'chore(afk): 纯 skill 仓库交付';
+  if (context.mode === 'merge') {
+    for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+    execFileSync('git', ['commit', '--allow-empty', '-m', subject], { cwd: context.cwd });
+  } else {
+    for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
+  }
+  const result = {
+    run: context.run, attempt: context.attempt, role: context.role,
+    status: 'passed', summary: context.mode === 'merge' ? '合并验证完成，等待持久化后关闭' : 'Issue 已关闭',
+    tests: [], remaining: [], branch: context.branch, cwd: context.cwd,
+    summaryCreated: true, summarySubject: subject,
+    tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: context.mode === 'close' })),
+  };
+  process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
 } else {
+  // 纯 Skill 仓库形状：无 tests/、无类型检查。Implementer 会留下真实的未跟踪
+  // 安装产物；Reviewer 无改动可交付（commits 为空）。
+  if (behavior === 'pure-skill-delivery' && context.role === 'implementer') {
+    mkdirSync(join(process.cwd(), '.agents', 'skills', 'demo-skill'), { recursive: true });
+    writeFileSync(join(process.cwd(), '.agents', 'skills', 'demo-skill', 'SKILL.md'), 'installed residue\\n');
+    writeFileSync(join(process.cwd(), 'skills-lock.json'), '{"version":1}\\n');
+  }
   const shouldPass = (behavior === 'implement-pass-review-hang' && context.role === 'implementer')
     || (behavior === 'ir-pass-merger-hang' && context.role !== 'merger')
     || (behavior === 'full-delivery' && context.role !== 'merger')
-    || (behavior === 'merge-verification-fails' && context.role !== 'merger');
+    || (behavior === 'merge-verification-fails' && context.role !== 'merger')
+    || (behavior === 'pure-skill-delivery' && context.role !== 'merger')
+    || (behavior === 'gate-stagnation' && context.role !== 'merger');
   if (shouldPass) {
+    const pureSkill = behavior === 'pure-skill-delivery';
+    const noCommits = behavior === 'gate-stagnation';
     const result = {
       run: context.run, attempt: context.attempt, role: context.role,
-      status: 'passed', summary: '复用已有实现，无需新增提交', tests: [], remaining: [],
+      status: 'passed',
+      summary: pureSkill ? '本票只改 Markdown 指令；仓库无 tests/ 与类型检查，确无适用自动化检查，依据见摘要。' : '复用已有实现，无需新增提交',
+      tests: [],
+      remaining: [],
       branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
-      commits: ['已有可交付提交'],
+      // 纯 skill 场景下 Reviewer 通常没有新提交可交（合格即无需改动）。
+      // gate-stagnation 场景下 Implementer 反复不报告任何提交摘要。
+      commits: (pureSkill && context.role === 'reviewer') || (noCommits && context.role === 'implementer') ? [] : ['已有可交付提交'],
     };
     process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
   } else {
@@ -710,6 +744,77 @@ test('公开 start/status 提供 localhost 只读 Dashboard，页面关闭不影
   }
 });
 
+// 纯 Skill 仓库形状：没有 tests/、没有类型检查，按契约在 summary 说明“确无适用
+// 检查”而不填 tests。Implementer 会留下合法但未跟踪的安装/校验产物，Reviewer
+// 无可交付改动（commits 为空）。这两者都不构成“交付未完成”，不得被 Gate 反复
+// 拒绝——否则每轮重选同一批票形成死循环。
+test('纯 Skill 仓库的未跟踪残留与 reviewer 零提交不阻塞 I→R→M 关票', async () => {
+  const fixture = createFixture();
+  fixture.env.AFK_ROLE_BEHAVIOR = 'pure-skill-delivery';
+  let runDir;
+  try {
+    const { worktree } = addBranchCommit(fixture, 9, true);
+    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
+    runDir = started.logDir;
+    await waitUntil(() => existsSync(join(runDir, 'result.json')), '纯 Skill 仓库 run 未结束', 20_000);
+
+    const result = JSON.parse(readFileSync(join(runDir, 'result.json'), 'utf8'));
+    assert.equal(result.state, 'completed', `纯 Skill 仓库应交付完成，实际 ${result.state}：${JSON.stringify(result.waiting)}`);
+    assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'closed', 'Issue 必须被关闭');
+    // I→R→M 全链路；Merger 至少派发一次（merge 与 close 两个阶段）。
+    const roles = roleEntries(fixture).map(entry => entry.role);
+    assert.deepEqual(roles, ['implementer', 'reviewer', 'merger', 'merger'], '纯 Skill 仓库必须走完 I→R→M 并关票');
+
+    // 未跟踪残留确实存在，且不再是交付阻碍：现场保留，不被清理或改写。
+    const residue = command('git', ['-C', worktree, 'status', '--porcelain', '--untracked-files=all']);
+    assert.match(residue, /skills-lock\.json/, 'Implementer 未跟踪残留必须留在现场由用户处置');
+    // 未跟踪残留不得被自动提交进交付分支。
+    const tracked = command('git', ['-C', worktree, 'ls-tree', '-r', '--name-only', 'afk/issue-9']);
+    assert.equal(tracked.split('\n').includes('skills-lock.json'), false, '未跟踪残留不得被自动提交');
+    // 没有重复拒绝：同因 Gate 拒绝出现即视为回归。
+    const events = readFileSync(join(runDir, 'events.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(events.filter(event => event.type === 'pipeline-failed').length, 0, '纯 Skill 仓库不得再出现 pipeline-failed 死循环');
+    assert.equal(events.filter(event => event.type === 'batch-selected').length, 1, '应在单一批次内交付，不重选同一批票');
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// Gate 拒绝不能让同一批票被无退避地永远重选。Implementer 反复自称 passed 却
+// 不报告任何提交摘要时，Gate 每次都独立拒绝；同因连续拒绝达到阈值后该票转入
+// 等待用户，run 以 waiting-user 结束而不是空转烧钱（ADR 0005 禁止的是放弃交付
+// 的总重试上限，不是这种停滞熔断）。
+test('同因 Gate 拒绝连续多轮后转入等待用户，不再无限重选同一批票', async () => {
+  const fixture = createFixture();
+  fixture.env.AFK_ROLE_BEHAVIOR = 'gate-stagnation';
+  let runDir;
+  try {
+    addBranchCommit(fixture, 9, true);
+    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
+    runDir = started.logDir;
+    await waitUntil(() => existsSync(join(runDir, 'result.json')), '停滞检测未终止 run', 40_000);
+
+    const result = JSON.parse(readFileSync(join(runDir, 'result.json'), 'utf8'));
+    assert.equal(result.state, 'waiting-user', `同因停滞必须转等待用户，实际 ${result.state}`);
+    assert.match(result.waiting['9'], /同一原因被 Gate 拒绝/, '停滞原因必须显式报告');
+    // Gate 独立性未被削弱：每次仍是引擎独立发布的 Gate rejected。
+    const records = readFileSync(join(runDir, 'observations.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    const rejected = records.filter(record => record.kind === 'gate-rejected' && record.scope.role === 'implementer');
+    assert.ok(rejected.length >= 3, '同因拒绝必须仍由 Gate 独立发布（fail-closed）');
+    assert.ok(rejected.every(record => record.payload.accepted === false && record.payload.reason), 'Gate rejected 必须带机器可判定 reason');
+    assert.equal(records.some(record => record.kind === 'delivery-complete'), false, '停滞票不得显示为已交付');
+    // 停滞是有界退出而非无限循环：重选次数被阈值封顶。
+    const events = readFileSync(join(runDir, 'events.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.ok(events.filter(event => event.type === 'batch-selected').length <= 5, '不得无界重选同一批票');
+    // 退出是“等待用户”而非“放弃交付”：现场与分支保留。
+    assert.equal(command('git', ['-C', fixture.repo, 'rev-parse', '--verify', 'afk/issue-9']).length > 0, true);
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('先持久化合并验证结果，再用 close-only 关闭 Issue', async () => {
   const fixture = createFixture();
   fixture.env.AFK_ROLE_BEHAVIOR = 'full-delivery';
@@ -730,5 +835,58 @@ test('先持久化合并验证结果，再用 close-only 关闭 Issue', async ()
     command('git', ['-C', fixture.repo, 'merge-base', '--is-ancestor', 'afk/issue-9', 'main']);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// macOS 上进程组长退出但尚未被 reap（本进程是其父进程）时，kill(-pgid, 0) 返回
+// EPERM 而非 ESRCH；这个约 25ms 的窗口在生产里是正常退出竞态。若把它当作不可自愈
+// 的终止失败，每次用户停止都可能把 run 判 failed 并隔离现场。
+// 该窗口在生产的事件循环下无法观测（第一次 await 就会 reap 组长），因此用同步
+// 忙等保持在同一个 tick 内确定性地复现：spawn detached 子进程后不交出事件循环，
+// 子进程保持僵尸组长，此时 terminate 必然遭遇 EPERM。
+function busyWait(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { /* 故意阻塞事件循环以复现僵尸组长窗口 */ }
+}
+function trackTermination(child) {
+  const entry = { child, closed: false, exited: false };
+  child.once('close', () => { entry.closed = true; });
+  return entry;
+}
+
+test('僵尸组长探测返回 EPERM 时不误判为终止失败', async () => {
+  for (let round = 0; round < 3; round++) {
+    const processes = new Processes();
+    const child = spawn('/bin/sh', ['-c', 'exit 0'], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.resume();
+    child.stderr.resume();
+    const entry = trackTermination(child);
+    busyWait(60);
+    try {
+      await processes.terminate(entry, 'user-stop');
+      assert.equal(processes.hasUnsafeWriters, false, '僵尸组长窗口不得到标为终止未确认');
+    } finally {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    }
+  }
+});
+
+test('用户停止时单条终止未确认不把整轮判失败，但保留现场保全标志', async () => {
+  const processes = new Processes();
+  const child = spawn('/bin/sh', ['-c', 'exec /bin/sh -c "sleep 30"'], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.resume();
+  child.stderr.resume();
+  // closed 永不置真：terminate 在 wait-inherited-pipes-close 阶段超时，
+  // 确定性走到真实失败分支（不依赖 EPERM 时序）。
+  const entry = { child, closed: false, exited: false };
+  processes.children.add(entry);
+  try {
+    await processes.stop();
+    assert.equal(processes.terminationResults.length, 1);
+    assert.equal(processes.terminationResults[0].status, 'unconfirmed');
+    assert.equal(processes.terminationResults[0].termination.stage, 'wait-inherited-pipes-close');
+    assert.equal(processes.hasUnsafeWriters, true, '终止未确认必须保留 hasUnsafeWriters，禁止交接现场');
+  } finally {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch {}
   }
 });

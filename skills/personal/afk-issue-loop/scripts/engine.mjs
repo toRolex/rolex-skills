@@ -242,6 +242,19 @@ export async function createEngine(config, processes, event = () => {}, observat
   const attemptCounters = new Map();
   let attemptIds = 0;
   const mergeQueue = [];
+  // 停滞检测，不是重试预算：ADR 0005 禁止的是“总重试/批次上限”（放弃交付）。
+  // 同一票以逐字相同的原因连续失败 N 轮，说明当前规格/契约下无法推进，
+  // 再重跑只是同样结果重复烧钱；此时转入等待用户并保留现场，而非静默放弃。
+  // 任何新的 Gate 接受都会清零，因此不限制正常重试。
+  const rejections = new Map();
+  const stagnantRounds = 3;
+  function noteRejection(number, reason) {
+    const state = rejections.get(number);
+    if (state?.reason === reason) return ++state.count;
+    rejections.set(number, { reason, count: 1 });
+    return 1;
+  }
+  function clearRejections(number) { rejections.delete(number); }
   let targetCwd, targetReason, pending, batch = 0, attempt = 0;
   let running = false, finished = false, quarantined = false, abandonedReleasePromise;
   const targetDirtyReason = '目标有未归属本运行的 dirty/冲突；保留用户修改，独立实现/审查继续';
@@ -502,6 +515,13 @@ export async function createEngine(config, processes, event = () => {}, observat
     // 运行日志保持未跟踪；不改 .gitignore 或全局排除配置，
     // 此检查不得隐藏其他用户修改。
     return git(['status', '--porcelain', '--untracked-files=all', '--', '.', ':(exclude).afk/logs', ':(exclude).afk/logs/**'], cwd);
+  }
+  async function trackedDirty(cwd) {
+    // 交付判据只看可合并内容：未跟踪文件永远不进入 merge，也不能被交付。
+    // 若用 --untracked-files=all 否决提交，角色在纯 Skill/文档仓库里留下的
+    // 合法残留（安装产物、笔记）会让每次尝试都被判“现场不干净”而永不关票。
+    // 已跟踪文件的未提交改动（staged/unstaged/删除/冲突/submodule）仍是硬拒。
+    return git(['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude).afk/logs', ':(exclude).afk/logs/**'], cwd);
   }
   async function correctWorkspace(workspace) {
     if (realpathSync(await git(['rev-parse', '--show-toplevel'], workspace.cwd)) !== realpathSync(workspace.cwd)) throw new Error('角色离开绑定根目录');
@@ -764,6 +784,9 @@ export async function createEngine(config, processes, event = () => {}, observat
     }
     validateCommon(result, identity);
     observations?.observe('role/self-report', 'self-report', { role, attempt: identity.attempt, invocation: result.invocation, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, result);
+    // commits 是“本角色新增提交”的摘要，不是“分支必须由本角色追加”的证明：
+    // 上游 reviewer 模板明确允许“合格则无需新 commit”，纯 Skill/文档仓库里
+    // 常见的一次审查不产生提交。因此只校验字段形状，不再要求非空。
     if (role !== 'merger' && (result.ticket !== context.ticket.number || !strings(result.commits))) throw new Error('逐票结果 ticket/commits 字段无效');
     return result;
   }
@@ -772,7 +795,7 @@ export async function createEngine(config, processes, event = () => {}, observat
     const commits = Number(await git(['rev-list', '--count', `${target}..${workspace.branch}`], workspace.cwd));
     const changes = await git(['diff', '--name-only', `${target}...${workspace.branch}`], workspace.cwd);
     if (changes.split('\n').some(path => path.startsWith('.afk/logs/'))) throw new Error('运行日志被提交，需用户处理现场');
-    return Number.isSafeInteger(commits) && commits > 0 && Boolean(changes) && !await dirty(workspace.cwd) && !await inProgress(workspace.cwd);
+    return Number.isSafeInteger(commits) && commits > 0 && Boolean(changes) && !await trackedDirty(workspace.cwd) && !await inProgress(workspace.cwd);
   }
   // 提取 main.mts:123–160 的 try/run→commits gate→review→累计 commits→finally。
   // sandbox.run/close 替换本机 runRole/closeWorkspace；AFK 加平铺结果与实际交付检查。
@@ -787,6 +810,8 @@ export async function createEngine(config, processes, event = () => {}, observat
       observations?.observe('engine/gate', 'gate-rejected', scope, { accepted: false, reason });
       observations?.observe('engine/delivery', 'delivery-blocked', scope, { state: 'blocked', reason });
       pipelineFeedback.set(ticket.number, { role, reason, result });
+      // 同因连续拒绝达到阈值后转入停滞，不再被下一轮批次无退避重选。
+      if (noteRejection(ticket.number, reason) >= stagnantRounds) blocks.set(ticket.number, `连续 ${stagnantRounds} 轮同一原因被 Gate 拒绝，疑似当前规格或契约无法自动满足；保留现场等待用户：${reason}`);
     };
     // Self-report 与必需验证层面的拒绝原因；无拒绝时返回 undefined。
     const selfReportReason = (role, result) => {
@@ -839,7 +864,9 @@ export async function createEngine(config, processes, event = () => {}, observat
           reviewReason = `Reviewer 未说明前序验收缺口如何解决或为何不适用：${inheritedGaps.map(test => `${test.command} (${test.status})：${test.summary}`).join('; ')}`;
           blocks.set(ticket.number, reviewReason);
         }
-        if (!reviewReason && (!review.commits.length || !await deliverable(workspace))) reviewReason = '审查未满足 commits/现场契约';
+        // 审查可以没有新提交（上游 reviewer 模板“合格则无需新 commit”）；
+        // 交付由 branch commits 与 trackedDirty 独立核实，review.commits 只作摘要。
+        if (!reviewReason && !await deliverable(workspace)) reviewReason = '审查未满足现场契约：分支无可交付提交或存在未提交的已跟踪改动';
         if (reviewReason) {
           gateReject('reviewer', review, reviewReason);
           return;
@@ -847,6 +874,7 @@ export async function createEngine(config, processes, event = () => {}, observat
         // 只有到这里才算 Gate 接受：Self-report、测试与 Git deliverable 全部独立核实通过。
         gateAccept('reviewer', review);
         pipelineFeedback.delete(ticket.number);
+        clearRejections(ticket.number);
         queuedForMerge = true;
         return {
           ...review,
