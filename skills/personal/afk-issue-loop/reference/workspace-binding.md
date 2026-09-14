@@ -10,7 +10,7 @@
 2. 恢复继承已有 commits 与 dirty 进度。writer socket 按 liveness-first 的正向活跃证据核实：只有 ownership channel 可连接且返回当前 AFK 标识时才认为 writer 仍在运行，该票进入 `waiting-writer`；连接拒绝时以 recovery guard 串行接管。stale/unreachable socket、未知响应、历史 PID/PGID、`EPERM` 和不完整历史事件都只作 Recovery Observation，不再单独阻止派发。`waiting-writer` 期间 run 定期重新做正向活跃检测，active writer 消失后自动恢复派发，无需重新调用 skill；其他独立 Ticket 不受影响。已成为目标祖先的分支进入 `merged-unverified`，由 Merger 继续验证和关闭。
 3. 每个 CLI 角色收到 Ticket 正文/评论、父 SPEC 上下文、目标与任务分支、绝对工作目录、前序结果及项目验证要求。角色启动前自动采集 Implementer 最近十条提交、Reviewer 相对目标的完整 diff/log；只执行可信模板命令，参数中的命令、伪标记和占位符不二次求值，命令插参安全转义。沿用指定现场，不再增加宿主隔离层。
 
-Merger 使用目标分支现场，缺少时由脚本通过 Worktrunk 创建；上批自身保留的合并进度交给 Merger 继续，无关 dirty 或其他占用等待用户。Worktrunk hooks 审批由用户在本机完成，不使用 `--yes` 自动批准。
+Merger 使用目标分支现场，缺少时由脚本通过 Worktrunk 创建；上批自身保留的合并进度交给 Merger 继续。目标工作区的未提交改动不阻止 Merger（Git merge 自身对重叠修改、未跟踪文件被覆盖等会丢失改动的场景 fail-closed），只有未完成的 merge/rebase/冲突或其他占用才等待用户。Worktrunk hooks 审批由用户在本机完成，不使用 `--yes` 自动批准。
 
 Worktrunk 管理 worktree，Git 管理提交与合并。worktree 只隔离代码目录，不隔离系统权限、进程、网络或共享服务；无 Docker。不自动 fetch/pull、push、创建 PR、安装依赖、更改全局 Git 或权限配置。
 

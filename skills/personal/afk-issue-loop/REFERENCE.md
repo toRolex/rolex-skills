@@ -42,7 +42,7 @@ writer 采用 liveness-first：只有 writer ownership channel 可连接、且�
 
 多个 worktree、错误仓库绑定、locked/prunable、Git conflict/merge/rebase 等非 writer 阻碍继续沿用既有语义，不因 writer 策略变化而放宽。
 
-任务分支已成为目标祖先时记为 `merged-unverified`，跳过重复实现与 merge，交 Merger 继续目标验证、summary 核实和关闭。目标 dirty 仅阻止 Merger；同一 run 的独立 I/R 继续，已审查成果留在合并队列，目标恢复 clean 后不重跑 I/R。
+任务分支已成为目标祖先时记为 `merged-unverified`，跳过重复实现与 merge，交 Merger 继续目标验证、summary 核实和关闭。目标工作区存在未提交改动**不阻止 Merger**：Git merge 对会丢失工作区改动的场景自身 fail-closed（本地修改与合并内容重叠、或未跟踪文件将被合并覆盖时拒绝并中止，且不改动用户文件），非重叠的脏改动可安全合并并原样保留。因此只有目标处于未完成的 merge/rebase/冲突时才保留现场等待用户；引擎另核实本批 summary 提交未吞并目标原有的未提交改动，避免用户改动变成别人的提交。
 
 ## 就绪选择与全阻塞停止
 

@@ -148,6 +148,25 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
     tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: context.mode === 'close' })),
   };
   process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
+} else if (behavior === 'swallow-baseline' && context.role === 'merger') {
+  const subject = 'chore(afk): 违规吞并用户改动';
+  if (context.mode === 'merge') {
+    for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+    // 违规：管理员契约要求 summary 用空提交承载，这里故意把工作区里的用户改动
+    // 一并提交，模拟「用户改动凭空消失、变成别人的提交」。
+    execFileSync('git', ['add', '-A'], { cwd: context.cwd });
+    execFileSync('git', ['commit', '-m', subject], { cwd: context.cwd });
+  } else {
+    for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
+  }
+  const result = {
+    run: context.run, attempt: context.attempt, role: context.role,
+    status: 'passed', summary: '合并验证完成，等待持久化后关闭',
+    tests: [], remaining: [], branch: context.branch, cwd: context.cwd,
+    summaryCreated: true, summarySubject: subject,
+    tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: context.mode === 'close' })),
+  };
+  process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
 } else if (behavior === 'pure-skill-delivery' && context.role === 'merger') {
   const subject = 'chore(afk): 纯 skill 仓库交付';
   if (context.mode === 'merge') {
@@ -177,6 +196,7 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
     || (behavior === 'full-delivery' && context.role !== 'merger')
     || (behavior === 'merge-verification-fails' && context.role !== 'merger')
     || (behavior === 'pure-skill-delivery' && context.role !== 'merger')
+    || (behavior === 'swallow-baseline' && context.role !== 'merger')
     || (behavior === 'gate-stagnation' && context.role !== 'merger');
   if (shouldPass) {
     const pureSkill = behavior === 'pure-skill-delivery';
@@ -639,37 +659,101 @@ test('旧 daemon ownership channel 消失后不凭历史 PID 阻止新 run', asy
   }
 });
 
-test('目标 dirty 时保留已审查队列，恢复 clean 后不重跑 I/R 直接派 Merger', async () => {
+// Git merge 自身对会丢失工作区改动的场景 fail-closed：本地修改与合并内容重叠、
+// 或未跟踪文件将被合并覆盖时，git 拒绝并中止且不动用户文件。因此目标工作区
+// 未提交的改动不构成阻塞 Merger 的理由——引擎若在此预检阻塞，就会把「git 能
+// 安全推进的局部情况」升级为「整个 run 永不关票」。这里既验证 Merger 照常
+// 推进，也验证用户的未提交改动原样留在工作区、不被 summary 提交吞并。
+test('目标有未提交改动时 Merger 照常合并关闭，且用户改动原样保留', async () => {
   const fixture = createFixture();
-  fixture.env.AFK_ROLE_BEHAVIOR = 'ir-pass-merger-hang';
-  let runDir;
-  let competingRun;
-  const targetDirty = join(fixture.repo, 'user-change.txt');
+  fixture.env.AFK_ROLE_BEHAVIOR = 'full-delivery';
+  try {
+    const { worktree } = addBranchCommit(fixture, 9, true);
+    // 已跟踪文件的未提交改动；与待合并分支（新增 issue-9.txt）不重叠。
+    writeFileSync(join(fixture.repo, 'README.md'), 'fixture\n用户本地修改\n');
+    // 未跟踪文件同样不得阻止合并。
+    writeFileSync(join(fixture.repo, 'user-notes.txt'), 'user notes\n');
+
+    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
+    await waitUntil(() => existsSync(join(started.logDir, 'result.json')), '目标 dirty 下交付未结束', 15_000);
+    const result = JSON.parse(readFileSync(join(started.logDir, 'result.json'), 'utf8'));
+
+    assert.equal(result.state, 'completed');
+    assert.equal(result.targetBlocked, undefined);
+    assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'closed');
+    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer', 'merger', 'merger']);
+    command('git', ['-C', fixture.repo, 'merge-base', '--is-ancestor', 'afk/issue-9', 'main']);
+
+    // 用户改动必须原样留在工作区。
+    assert.equal(readFileSync(join(fixture.repo, 'README.md'), 'utf8'), 'fixture\n用户本地修改\n');
+    assert.equal(readFileSync(join(fixture.repo, 'user-notes.txt'), 'utf8'), 'user notes\n');
+    assert.equal(command('git', ['-C', fixture.repo, 'status', '--porcelain', '--untracked-files=no']).trim(), 'M README.md');
+    // 且不得被卷进本批 summary 提交。
+    const summaryPaths = command('git', ['-C', fixture.repo, 'show', '--name-only', '--format=', 'HEAD']).split('\n').filter(Boolean);
+    assert.equal(summaryPaths.includes('README.md'), false, `summary 提交吞并了用户改动：${summaryPaths.join(', ')}`);
+    assert.ok(existsSync(worktree));
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// Merger 契约允许 summary 用空提交承载，不需要 git add。若它违规 add -A，用户的
+// 基线未提交改动会被卷进 summary 提交——从工作区消失、变成别人的提交。这类改动
+// 在真实仓库里常是中文路径，而 porcelain 默认会把非 ASCII 路径转义成 \xxx 八进制，
+// 朴素的字符串比较会漏判；此处专门用中文路径锁住该核实。
+test('Merger 把用户未提交改动卷进 summary 提交时被核实拒绝', async () => {
+  const fixture = createFixture();
+  fixture.env.AFK_ROLE_BEHAVIOR = 'swallow-baseline';
   try {
     addBranchCommit(fixture, 9, true);
-    writeFileSync(targetDirty, 'user change\n');
-    const started = await startAndWaitForRole(fixture);
-    runDir = started.logDir;
-    await waitUntil(() => roleEntries(fixture).filter(entry => entry.ticket === 9).length >= 2, 'dirty 目标下 I/R 未完成');
-    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer']);
+    writeFileSync(join(fixture.repo, '中文笔记.md'), '用户未提交内容\n');
+    writeFileSync(join(fixture.repo, 'README.md'), 'fixture\n用户本地修改\n');
 
-    competingRun = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
-    // liveness-first：active writer 仍在运行时该票保持 waiting-writer，
-    // 竞争 run 保持存活并定期重新做正向活跃检测，直到原 run 结束。
-    await waitUntil(() => {
-      try {
-        const status = JSON.parse(command(process.execPath, [script, 'status', '--run', competingRun.logDir], { env: fixture.env }));
-        return status.recovery?.['9']?.state === 'waiting-writer';
-      } catch { return false; }
-    }, 'active writer 未使竞争 run 进入 waiting-writer', 15_000);
-    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer']);
-
-    rmSync(targetDirty);
-    await waitUntil(() => roleEntries(fixture).some(entry => entry.role === 'merger'), '目标恢复 clean 后未派发 Merger', 10_000);
-    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer', 'merger']);
+    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
+    await waitUntil(
+      () => existsSync(join(started.logDir, 'events.jsonl'))
+        && readFileSync(join(started.logDir, 'events.jsonl'), 'utf8').includes('summary 提交包含了目标原有的未提交改动'),
+      'Merger 吞并用户改动未被核实拒绝',
+      15_000,
+    );
+    // 核实必须拒绝交付：Issue 不得被关闭。
+    assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'open');
   } finally {
-    await stopRun(competingRun?.logDir, fixture.env);
-    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// 目标处于未完成的 merge/rebase/冲突时，引擎无法安全接续现场：这必须继续硬拒，
+// 否则会把别人的合并冲突当成自己的成果交出去。区别于「用户只是有未提交改动」。
+test('目标存在未完成的 merge 冲突时仍保留现场并等待用户', async () => {
+  const fixture = createFixture();
+  fixture.env.AFK_ROLE_BEHAVIOR = 'ir-pass-merger-hang';
+  try {
+    addBranchCommit(fixture, 9, true);
+    // 在 main 上制造一个真实的未完成合并：双方修改同一文件 → git 留下冲突与 MERGE_HEAD。
+    writeFileSync(join(fixture.repo, 'shared.txt'), 'base\n');
+    command('git', ['-C', fixture.repo, 'add', 'shared.txt']);
+    command('git', ['-C', fixture.repo, 'commit', '-q', '-m', 'chore: shared']);
+    command('git', ['-C', fixture.repo, 'checkout', '-q', '-b', 'conflict-side']);
+    writeFileSync(join(fixture.repo, 'shared.txt'), 'side\n');
+    command('git', ['-C', fixture.repo, 'commit', '-q', '-am', 'chore: side']);
+    command('git', ['-C', fixture.repo, 'checkout', '-q', 'main']);
+    writeFileSync(join(fixture.repo, 'shared.txt'), 'main\n');
+    command('git', ['-C', fixture.repo, 'commit', '-q', '-am', 'chore: main']);
+    assert.throws(() => command('git', ['-C', fixture.repo, 'merge', 'conflict-side', '--no-edit']));
+    assert.ok(existsSync(join(fixture.repo, '.git', 'MERGE_HEAD')));
+
+    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
+    await waitUntil(() => existsSync(join(started.logDir, 'result.json')), '未完成合并下 run 未结束', 15_000);
+    const result = JSON.parse(readFileSync(join(started.logDir, 'result.json'), 'utf8'));
+
+    // I/R 照常完成并进入队列，但 Merger 不得在别人的冲突上开工。
+    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer']);
+    assert.equal(result.state, 'waiting-user');
+    assert.match(result.targetBlocked, /未完成的 merge/);
+    assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'open');
+    assert.ok(existsSync(join(fixture.repo, '.git', 'MERGE_HEAD')), '引擎不得清除用户的合并现场');
+  } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });

@@ -255,9 +255,14 @@ export async function createEngine(config, processes, event = () => {}, observat
     return 1;
   }
   function clearRejections(number) { rejections.delete(number); }
-  let targetCwd, targetReason, pending, batch = 0, attempt = 0;
+  let targetCwd, targetReason, targetPreexisting = [], pending, batch = 0, attempt = 0;
   let running = false, finished = false, quarantined = false, abandonedReleasePromise;
-  const targetDirtyReason = '目标有未归属本运行的 dirty/冲突；保留用户修改，独立实现/审查继续';
+  // 目标现场的用户未提交改动不是阻塞 Merger 的理由。Git merge 自身对会丢失
+  // 工作区改动的场景 fail-closed：本地修改与合并内容重叠、或未跟踪文件将被
+  // 合并覆盖时，git 拒绝并中止且不改动用户文件；而非重叠的脏改动可以安全
+  // 合并、合入后原样保留。因此只有「未完成的 merge/rebase/冲突」这类引擎
+  // 无法安全接续的现场才阻止 Merger。
+  const targetInProgressReason = '目标现场存在未完成的 merge/rebase/冲突；保留现场等待用户处理';
 
   async function releaseOwnedLocks(onFailure) {
     const failures = [];
@@ -523,6 +528,29 @@ export async function createEngine(config, processes, event = () => {}, observat
     // 已跟踪文件的未提交改动（staged/unstaged/删除/冲突/submodule）仍是硬拒。
     return git(['status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude).afk/logs', ':(exclude).afk/logs/**'], cwd);
   }
+  async function dirtyPaths(cwd) {
+    // 用 -z 取路径：默认 porcelain 会按 core.quotePath 把非 ASCII 路径转义成
+    // \xxx 八进制，且路径里含 " -> " 时无法与重命名的双字段记录区分（实测会把
+    // `a -> b.md` 截成 `b.md"`）。-z 给出未转义、NUL 分隔、字段边界明确的路径，
+    // 使解析不依赖仓库配置与文件名内容。
+    const status = await git(['status', '--porcelain', '-z', '--untracked-files=all', '--', '.', ':(exclude).afk/logs', ':(exclude).afk/logs/**'], cwd);
+    if (!status) return [];
+    const fields = status.split('\0').filter(Boolean);
+    const paths = [];
+    // 每条记录是 `XY <path>`；重命名/复制在 -z 下把**新**路径放在状态字段后、
+    // 旧路径作为独立的下一字段，因此跳过紧随其后的旧路径字段。
+    for (let index = 0; index < fields.length; index++) {
+      const line = fields[index];
+      paths.push(line.slice(3));
+      if (/^[RC]/.test(line)) index++;
+    }
+    return paths;
+  }
+  async function committedPaths(cwd) {
+    // 与 dirtyPaths 同一渲染方式，保证可直接做字符串比较。
+    const listed = await git(['show', '--name-only', '-z', '--format=', 'HEAD'], cwd);
+    return listed ? listed.split('\0').filter(Boolean) : [];
+  }
   async function correctWorkspace(workspace) {
     if (realpathSync(await git(['rev-parse', '--show-toplevel'], workspace.cwd)) !== realpathSync(workspace.cwd)) throw new Error('角色离开绑定根目录');
     if (await git(['symbolic-ref', '--short', 'HEAD'], workspace.cwd) !== workspace.branch) throw new Error(`现场分支改变：${workspace.branch}`);
@@ -554,7 +582,9 @@ export async function createEngine(config, processes, event = () => {}, observat
         targetCwd = realpathSync(created.cwd);
       }
       await correctWorkspace({ cwd: targetCwd, branch: target });
-      if (await dirty(targetCwd) || await inProgress(targetCwd)) throw new Error(targetDirtyReason);
+      // 快照用户既有未提交现场：允许带着它推进合并，但本批 summary 不得吞并它。
+      targetPreexisting = await dirtyPaths(targetCwd);
+      if (await inProgress(targetCwd)) throw new Error(targetInProgressReason);
     } catch (error) {
       if (unsafeTermination.test(error.message)) throw error;
       targetReason = error.message;
@@ -923,7 +953,9 @@ export async function createEngine(config, processes, event = () => {}, observat
     const evidence = { reason, tickets: [] };
     try {
       await correctWorkspace({ cwd: targetCwd, branch: target });
-      evidence.status = await dirty(targetCwd);
+      // dirty 不再是交付判据（用户既有未提交改动不阻塞 Merger）。仍记录相对
+      // 准备阶段基线的新增路径作为观察事实，便于人工核实过程中是否有新改动。
+      evidence.newChanges = (await dirtyPaths(targetCwd)).filter(path => !targetPreexisting.includes(path));
       evidence.inProgress = await inProgress(targetCwd);
       evidence.history = await git(['log', '-10', '--format=%s%n%b'], targetCwd);
       for (const item of group.tickets) {
@@ -939,7 +971,7 @@ export async function createEngine(config, processes, event = () => {}, observat
       evidence.error = error.message;
     }
     event('merge-reconciled', { batch: group.id, ...evidence });
-    if (group.phase === 'close' && !evidence.error && !evidence.status && !evidence.inProgress && evidence.tickets.every(item => item.merged)) {
+    if (group.phase === 'close' && !evidence.error && !evidence.inProgress && evidence.tickets.every(item => item.merged)) {
       // 本运行已验收过合并/验证/summary，坏 close 封套只重读逐票状态，不重做交付。
       for (const item of evidence.tickets) if (item.state === 'closed') deliveredTickets.add(item.ticket);
       return;
@@ -948,13 +980,13 @@ export async function createEngine(config, processes, event = () => {}, observat
     targetReason = group.uncertain;
   }
   async function recheckTarget() {
-    // 仅此原因证明 prepareTarget 已持锁并校验归属；其他阻碍绝不自动清除。
-    if (targetReason !== targetDirtyReason || processes.stopping || processes.hasUnsafeWriters || quarantined) return;
+    // 仅 in-progress 目标可自动恢复；其他阻碍需要用户核实，绝不自动清除。
+    if (targetReason !== targetInProgressReason || processes.stopping || processes.hasUnsafeWriters || quarantined) return;
     try {
       const tree = (await trees()).find(item => item.branch === target);
       if (!tree || tree.locked || tree.prunable || realpathSync(tree.cwd) !== targetCwd) throw new Error('目标 worktree 归属未经确认或已锁定');
       await correctWorkspace({ cwd: targetCwd, branch: target });
-      if (await dirty(targetCwd) || await inProgress(targetCwd)) return;
+      if (await inProgress(targetCwd)) return;
       targetReason = undefined;
       event('target-unblocked', { target, cwd: targetCwd });
     } catch (error) {
@@ -972,8 +1004,8 @@ export async function createEngine(config, processes, event = () => {}, observat
     let dispatched = false;
     try {
       await correctWorkspace({ cwd: targetCwd, branch: target });
-      if (!group.started && (await dirty(targetCwd) || await inProgress(targetCwd))) {
-        targetReason = targetDirtyReason;
+      if (!group.started && await inProgress(targetCwd)) {
+        targetReason = targetInProgressReason;
         return;
       }
       // 提取 main.mts:208–221 的单次 merger 调用及 BRANCHES/ISSUES 参数（见 prompt）。
@@ -1004,7 +1036,11 @@ export async function createEngine(config, processes, event = () => {}, observat
       }
       await correctWorkspace({ cwd: targetCwd, branch: target });
       if (result.summaryCreated) {
-        if (!result.tickets.every(item => item.merged && item.verified) || !conventional.test(result.summarySubject || '') || (group.phase !== 'close' && !passedTests(result)) || await dirty(targetCwd) || await inProgress(targetCwd)) throw new Error('summary 前置条件未满足：合并/验证/clean/中文 Conventional Commit');
+        if (!result.tickets.every(item => item.merged && item.verified) || !conventional.test(result.summarySubject || '') || (group.phase !== 'close' && !passedTests(result)) || await inProgress(targetCwd)) throw new Error('summary 前置条件未满足：合并/验证无冲突/中文 Conventional Commit');
+        // 用户既有未提交改动必须原样留在工作区：summary commit 不得把基线脏文件
+        // 卷进提交（那会让用户改动凭空消失在工作区、变成别人的提交）。
+        const swallowed = (await committedPaths(targetCwd)).filter(path => targetPreexisting.includes(path));
+        if (swallowed.length) throw new Error(`summary 提交包含了目标原有的未提交改动：${swallowed.join(', ')}；用户改动必须保留在工作区`);
         if (group.phase === 'close') {
           if (result.summarySubject !== group.summarySubject) throw new Error('close-only 不得重写 summary');
         } else {
@@ -1083,12 +1119,6 @@ export async function createEngine(config, processes, event = () => {}, observat
             const selected = selectBatch();
             event('batch-selected', { batch, tickets: selected.map(issue => issue.number), fixed: true });
             if (!selected.length) {
-              if (pending && targetReason === targetDirtyReason) {
-                event('merge-deferred-target-dirty', { batch: pending.id, target, cwd: targetCwd, tickets: pending.tickets.map(item => item.ticket.number) });
-                await refresh();
-                for (let i = 0; i < 10 && !processes.stopping; i++) await delay(100);
-                continue;
-              }
               // 某票等待 active writer 时其余独立票继续；此处定期重新做正向活跃检测，
               // 一旦不再检测到 active writer 就自动恢复并派发，无需重新调用 skill。
               const waitingWriter = open.filter(number => {
