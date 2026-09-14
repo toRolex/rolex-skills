@@ -20,7 +20,6 @@ const workspaceFailure = /现场分支改变|角色离开绑定|现场不属于|
 // 仅 writer ownership 造成的阻碍可以在重检后自动清除；其他阻碍（权限、
 // 依赖、锁定、Git 冲突）属于不同原因，不能被 writer 重检路径一并抹掉。
 const writerBlocking = /活跃写者|写锁|活跃 writer|ownership/i;
-const conventional = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^\n)]+\))?!?: .*[㐀-鿿]/u;
 const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
 const isSpec = issue => (issue.labels || []).some(label => /^spec$/i.test(typeof label === 'string' ? label : label.name)) || /^spec$/i.test(issue.type?.name || '') || /^(?:\[spec\]|spec\s*[:：])/i.test(issue.title || '');
 
@@ -231,30 +230,17 @@ export async function createEngine(config, processes, event = () => {}, observat
   const scope = new Set();
   const tickets = new Map();
   const blocks = new Map();
-  const deliveryFailures = new Map();
-  const pipelineFeedback = new Map();
   const recovery = new Map();
   const workspaces = new Map();
   const releases = new Set();
-  const attemptedTickets = new Set();
-  const deliveredTickets = new Set();
-  // planned Attempt 与实际 spawn 的 Invocation 分别记录，供 Self-report/Gate 关联。
+  // planned Attempt 与实际 spawn 的 Invocation 分别记录，供观测关联。
   const attemptCounters = new Map();
   let attemptIds = 0;
   const mergeQueue = [];
-  // 停滞检测，不是重试预算：ADR 0005 禁止的是“总重试/批次上限”（放弃交付）。
-  // 同一票以逐字相同的原因连续失败 N 轮，说明当前规格/契约下无法推进，
-  // 再重跑只是同样结果重复烧钱；此时转入等待用户并保留现场，而非静默放弃。
-  // 任何新的 Gate 接受都会清零，因此不限制正常重试。
-  const rejections = new Map();
-  const stagnantRounds = 3;
-  function noteRejection(number, reason) {
-    const state = rejections.get(number);
-    if (state?.reason === reason) return ++state.count;
-    rejections.set(number, { reason, count: 1 });
-    return 1;
-  }
-  function clearRejections(number) { rejections.delete(number); }
+  // 全局最大轮次是 run 有界性的唯一机制（上游 MAX_ITERATIONS 语义，
+  // 默认 10，可经 --max-rounds 配置）。网络抖动、瞬时失败只会重试到
+  // 轮次上限，不再被定性为业务死结。
+  const maxRounds = Number(config.maxRounds) > 0 ? Math.floor(Number(config.maxRounds)) : 10;
   let targetCwd, targetReason, targetPreexisting = [], pending, batch = 0, attempt = 0;
   let running = false, finished = false, quarantined = false, abandonedReleasePromise;
   // 目标现场的用户未提交改动不是阻塞 Merger 的理由。Git merge 自身对会丢失
@@ -437,9 +423,6 @@ export async function createEngine(config, processes, event = () => {}, observat
         }
         if (issue.state === 'closed') {
           tickets.set(number, issue);
-          const closing = [pending, ...mergeQueue].filter(Boolean).some(group => group.phase === 'close' && group.tickets.some(item => item.ticket.number === number));
-          if (closing) deliveredTickets.add(number);
-          else if (attemptedTickets.has(number) && !deliveredTickets.has(number)) deliveryFailures.set(number, `#${number} 已关闭，但 I/R 或交付未通过；需用户核实误关票`);
           continue;
         }
         const comments = await retryRead(() => pages(`repos/${repository}/issues/${number}/comments?per_page=100`));
@@ -459,13 +442,7 @@ export async function createEngine(config, processes, event = () => {}, observat
     const groups = [pending, ...mergeQueue].filter(Boolean);
     mergeQueue.length = 0;
     for (const group of groups) {
-      if (group.phase !== 'close') {
-        for (const item of group.tickets) if (tickets.get(item.ticket.number)?.state === 'closed') {
-          const reason = `#${item.ticket.number} 已关闭但本批合并/验证/summary 未通过验收；需用户核实，不能宣称交付`;
-          deliveryFailures.set(item.ticket.number, reason);
-          targetReason = reason;
-        }
-      } else group.tickets = group.tickets.filter(item => tickets.get(item.ticket.number)?.state !== 'closed');
+      group.tickets = group.tickets.filter(item => tickets.get(item.ticket.number)?.state !== 'closed');
       if (group.tickets.length) mergeQueue.push(group);
     }
     pending = mergeQueue.shift();
@@ -771,10 +748,11 @@ export async function createEngine(config, processes, event = () => {}, observat
   function validTests(result) {
     return Array.isArray(result.tests) && result.tests.every(test => test && typeof test.command === 'string' && test.command.trim() && ['passed', 'failed', 'not-run'].includes(test.status) && typeof test.summary === 'string');
   }
-  // 无适用检查可为空；明确 failed/not-run 仍不能作为验证通过。
-  // issue #12 后只对 Merger summary 前置成立：Reviewer 的 tests 已是信息性，
-  // Implementer 由自报状态与 Git deliverable 独立核实。
-  function passedTests(result) { return result.tests.every(test => test.status === 'passed'); }
+  // 分支上是否真有提交（Git 事实，与角色自报的 commits 摘要对照）。
+  async function branchAhead(workspace) {
+    try { return Number(await git(['rev-list', '--count', `${target}..${workspace.branch}`], workspace.cwd)) > 0; }
+    catch { return false; }
+  }
   function validateCommon(result, context) {
     if (result.run !== config.run || result.attempt !== context.attempt || result.role !== context.role || !['passed', 'failed', 'blocked'].includes(result.status) || typeof result.summary !== 'string' || !validTests(result) || !strings(result.remaining)) throw new Error('角色业务结果通用字段无效');
     if (result.branch !== context.branch || typeof result.cwd !== 'string' || !result.cwd.startsWith('/') || realpathSync(result.cwd) !== realpathSync(context.cwd)) throw new Error('角色业务结果 branch/cwd 与绑定不符');
@@ -803,8 +781,8 @@ export async function createEngine(config, processes, event = () => {}, observat
     await correctWorkspace(context);
     onDispatch();
     const result = await processes.role(config, { ...identity, prompt: rendered }, logPath, event, observations, value => { invocation = value; });
-    // Invocation 随结果返回，Gate 直接引用它，不靠 ordinal 反查（不同 Ticket
-    // 的 Attempt ordinal 可以相同）。
+    // Invocation 随结果返回，供观测关联；不同 Ticket 的 Attempt ordinal
+    // 可以相同，不能用它做跨票反查。
     result.invocation = invocation;
     event('role-result', { role, attempt: identity.attempt, tickets: context.tickets, result });
     // Provider 层的失败/权限结果不含业务封套，
@@ -815,65 +793,30 @@ export async function createEngine(config, processes, event = () => {}, observat
       return result;
     }
     validateCommon(result, identity);
-    observations?.observe('role/self-report', 'self-report', { role, attempt: identity.attempt, invocation: result.invocation, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, result);
     // commits 是“本角色新增提交”的摘要，不是“分支必须由本角色追加”的证明：
     // 上游 reviewer 模板明确允许“合格则无需新 commit”，纯 Skill/文档仓库里
     // 常见的一次审查不产生提交。因此只校验字段形状，不再要求非空。
     if (role !== 'merger' && (result.ticket !== context.ticket.number || !strings(result.commits))) throw new Error('逐票结果 ticket/commits 字段无效');
     return result;
   }
-  async function deliverable(workspace) {
-    await correctWorkspace(workspace);
-    const commits = Number(await git(['rev-list', '--count', `${target}..${workspace.branch}`], workspace.cwd));
-    const changes = await git(['diff', '--name-only', `${target}...${workspace.branch}`], workspace.cwd);
-    if (changes.split('\n').some(path => path.startsWith('.afk/logs/'))) throw new Error('运行日志被提交，需用户处理现场');
-    return Number.isSafeInteger(commits) && commits > 0 && Boolean(changes) && !await trackedDirty(workspace.cwd) && !await inProgress(workspace.cwd);
-  }
-  // 提取 main.mts:123–160 的 try/run→commits gate→review→累计 commits→finally。
+  // 提取 main.mts:123–160 的 try/run→commits 门→review→累计 commits→finally。
   // sandbox.run/close 替换本机 runRole/closeWorkspace；AFK 加平铺结果与实际交付检查。
   async function pipeline(ticket, workspace) {
-    const context = { ticket, tickets: [ticket.number], ...workspace, target, targetCwd, feedback: pipelineFeedback.get(ticket.number) };
-    // engine 独立发布 Gate 结论，不由 UI 从 Self-report 反向猜测；
-    // 每次 Gate 都关联同一 planned Attempt 与 Invocation。
-    const gateScope = (role, result) => ({ role, attempt: result.attempt, invocation: result.invocation, ticket: ticket.number, tickets: [ticket.number] });
-    // issue #12 后 tests 对 reviewer 是信息性而非门控：接受理由是「自报状态可接受
-    // 且 Git deliverable 通过」，不再断言逐项测试均通过。
-    const gateAccept = (role, result) => observations?.observe('engine/gate', 'gate-accepted', gateScope(role, result), { accepted: true, reason: 'Self-report 状态可接受且 Git deliverable 通过' });
-    const gateReject = (role, result, reason) => {
-      const scope = gateScope(role, result);
-      // 停滞只统计引擎业务判断：带合法结构化封套才说明引擎走到了自己的判断。
-      // 无封套是载体/Provider 层失败，只发布观测、由既有重试继续，不计入停滞。
-      const counted = Object.hasOwn(result, 'run');
-      observations?.observe('engine/gate', 'gate-rejected', scope, { accepted: false, reason, stagnationCounted: counted });
-      observations?.observe('engine/delivery', 'delivery-blocked', scope, { state: 'blocked', reason, stagnationCounted: counted });
-      pipelineFeedback.set(ticket.number, { role, reason, result });
-      if (!counted) return;
-      // 同因连续拒绝达到阈值后转入停滞，不再被下一轮批次无退避重选。
-      if (noteRejection(ticket.number, reason) >= stagnantRounds) blocks.set(ticket.number, `连续 ${stagnantRounds} 轮同一原因被 Gate 拒绝（引擎业务判断连续失败），疑似当前规格或契约无法自动满足；保留现场等待用户：${reason}`);
+    const context = { ticket, tickets: [ticket.number], ...workspace, target, targetCwd };
+    // 上游门语义：推进只看角色结果里的 commits 摘要与 Git 事实。
+    const blockedReason = result => {
+      if (result.status === 'blocked') {
+        const reason = [result.reason || result.summary, ...(result.tests || []).filter(test => test.status !== 'passed').map(test => `${test.command}：${test.summary}`), ...(result.remaining || [])].filter(Boolean).join('; ');
+        blocks.set(ticket.number, reason);
+        return reason;
+      }
+      if (result.status !== 'passed') return [result.reason || result.summary, ...(result.tests || []).filter(test => test.status !== 'passed').map(test => `${test.command}：${test.summary}`), ...(result.remaining || [])].filter(Boolean).join('; ');
+      return undefined;
     };
-    // Self-report 层面的拒绝原因；无拒绝时返回 undefined。
-    // tests 对 reviewer 是信息性（对齐上游复核者定位），not-run 不再硬阻断；
-    // blocked 终局仍按原逻辑阻断。
-    const selfReportReason = (role, result) => {
-      if (result.status === 'passed') return undefined;
-      const reason = [result.reason || result.summary, ...(result.tests || []).filter(test => test.status !== 'passed').map(test => `${test.command}：${test.summary}`), ...(result.remaining || [])].filter(Boolean).join('; ');
-      if (result.status === 'blocked') blocks.set(ticket.number, reason);
-      return reason;
-    };
-    // Git deliverable 是 Gate 的独立条件：核实异常也必须归入 Gate 拒绝，
-    // 不能跳过 Gate 直接失败。
-    const deliverableFailure = async () => {
-      try { return await deliverable(workspace) ? undefined : '实现无可交付 commits/变更，或现场不一致/不干净'; }
-      catch (error) { return `交付条件无法核实：${error.message}`; }
-    };
-    attemptedTickets.add(ticket.number);
     let queuedForMerge = false;
     try {
       if (workspace.mergedIntoTarget) {
         event('merge-already-present', { ticket: ticket.number, branch: workspace.branch, target, action: 'verify-close' });
-        // 分支已是目标祖先时没有 Role Self-report 可引用，但 Gate 仍必须由
-        // engine 显式发布：跳过 I/R 是 engine 的独立结论，不是 Role 自报。
-        observations?.observe('engine/gate', 'gate-accepted', { ticket: ticket.number, tickets: [ticket.number] }, { accepted: true, reason: '分支提交已成为目标分支祖先，跳过重复实现与 merge，转入验证关闭' });
         queuedForMerge = true;
         return {
           status: 'passed', summary: '分支提交已在目标中，跳过重复实现与 merge，继续验证和关闭',
@@ -883,38 +826,18 @@ export async function createEngine(config, processes, event = () => {}, observat
       }
       const implement = await runRole('implementer', context);
       if (implement.status === 'stopped' || processes.stopping) return implement;
-      const implementReason = selfReportReason('implementer', implement) ?? await deliverableFailure();
-      if (implementReason) {
-        gateReject('implementer', implement, implementReason);
-        return;
-      }
-      const notDeliverable = !implement.commits.length ? '实现结果没有提交摘要' : undefined;
-
-      // Only review if the implementer produced commits (upstream main.mts:137).
-      if (!notDeliverable) {
-        const review = await runRole('reviewer', { ...context, previous: implement });
-        if (review.status === 'stopped' || processes.stopping) return review;
-        let reviewReason = selfReportReason('reviewer', review);
-        // 审查可以没有新提交（上游 reviewer 模板“合格则无需新 commit”）；
-        // 交付由 branch commits 与 trackedDirty 独立核实，review.commits 只作摘要。
-        if (!reviewReason && !await deliverable(workspace)) reviewReason = '审查未满足现场契约：分支无可交付提交或存在未提交的已跟踪改动';
-        if (reviewReason) {
-          gateReject('reviewer', review, reviewReason);
-          return;
-        }
-        // 只有到这里才算 Gate 接受：Self-report、测试与 Git deliverable 全部独立核实通过。
-        gateAccept('reviewer', review);
-        pipelineFeedback.delete(ticket.number);
-        clearRejections(ticket.number);
-        queuedForMerge = true;
-        return {
-          ...review,
-          commits: [...implement.commits, ...review.commits],
-          ticket, workspace, review,
-        };
-      }
-      gateReject('implementer', implement, notDeliverable);
-      return;
+      // Implementer 有提交摘要才进 Reviewer，没有就直接归入本轮结果。
+      if (blockedReason(implement) || !implement.commits.length) return;
+      const review = await runRole('reviewer', { ...context, previous: implement });
+      if (review.status === 'stopped' || processes.stopping) return review;
+      // Reviewer 结果直接与 Implementer 提交合并进入待合集。
+      if (blockedReason(review)) return;
+      queuedForMerge = true;
+      return {
+        ...review,
+        commits: [...implement.commits, ...review.commits],
+        ticket, workspace, review,
+      };
     } catch (error) {
       if (unsafeTermination.test(error.message) || processes.hasUnsafeWriters) quarantined = true;
       throw error;
@@ -935,7 +858,7 @@ export async function createEngine(config, processes, event = () => {}, observat
     group.blockedReason = group.uncertain || (ready.length ? undefined : group.tickets.map(item => `#${item.ticket.number}：${waitingReasons(false).get(item.ticket.number) || 'GitHub 状态未知'}`).join('; '));
     return ready.length > 0;
   }
-  function selectDelivery() {
+  function prioritizeCloseGroup() {
     if (!pending || targetReason || pending.phase !== 'close' || mergerReady(pending)) return;
     // 一个未知的仅待关闭票不占用唯一 Merger；不可跨越未完成合并现场。
     for (let index = 0; index < mergeQueue.length; index++) {
@@ -972,12 +895,7 @@ export async function createEngine(config, processes, event = () => {}, observat
       evidence.error = error.message;
     }
     event('merge-reconciled', { batch: group.id, ...evidence });
-    if (group.phase === 'close' && !evidence.error && !evidence.inProgress && evidence.tickets.every(item => item.merged)) {
-      // 本运行已验收过合并/验证/summary，坏 close 封套只重读逐票状态，不重做交付。
-      for (const item of evidence.tickets) if (item.state === 'closed') deliveredTickets.add(item.ticket);
-      return;
-    }
-    group.uncertain = `Merger 最终结果不可用：${reason}；已读取现场/历史/GitHub，仍需核实验证与 summary 是否完成，禁止盲目重做`;
+    group.uncertain = `Merger 最终结果不可用：${reason}；已读取现场/历史/GitHub，仍需核实验证是否完成，禁止盲目重做`;
     targetReason = group.uncertain;
   }
   async function recheckTarget() {
@@ -998,7 +916,7 @@ export async function createEngine(config, processes, event = () => {}, observat
   }
   async function mergePending() {
     await recheckTarget();
-    selectDelivery();
+    prioritizeCloseGroup();
     if (!pending || targetReason || processes.stopping || !mergerReady(pending)) return;
     const group = pending;
     const items = mergerCandidates(group).map(item => ({ ...item, ticket: tickets.get(item.ticket.number) || item.ticket }));
@@ -1025,73 +943,54 @@ export async function createEngine(config, processes, event = () => {}, observat
         }
         return;
       }
-      if (typeof result.summaryCreated !== 'boolean' || !(result.summarySubject === null || typeof result.summarySubject === 'string') || !Array.isArray(result.tickets) || result.tickets.length !== items.length) throw new Error('Merger 结果缺少 summary/逐票状态');
+      // 引擎只做形状与血缘的事实核验：身份逐票对应、分支已成为目标祖先。
+      // verified / summary 不再作为关闭前置阻断；“说关就关”的责任在 Merger。
+      if (!Array.isArray(result.tickets) || result.tickets.length !== items.length) throw new Error('Merger 结果缺少逐票状态');
       const expected = new Map(items.map(item => [item.ticket.number, item]));
       for (const item of result.tickets) {
         const original = expected.get(item.ticket);
         if (!original || original.workspace.branch !== item.branch || ['merged', 'verified', 'closed'].some(key => typeof item[key] !== 'boolean')) throw new Error('Merger 逐票结果与固定批次不符');
         expected.delete(item.ticket);
-        if (item.verified && !item.merged || item.closed && (!item.verified || !result.summaryCreated)) throw new Error('Merger 提前验证/关闭');
-        if (group.phase !== 'close' && item.closed) throw new Error('merge 阶段不得关闭 Issue；须先核验并持久化，再进入 close-only');
         if (item.merged) await git(['merge-base', '--is-ancestor', item.branch, target], targetCwd);
       }
       await correctWorkspace({ cwd: targetCwd, branch: target });
-      if (result.summaryCreated) {
-        if (!result.tickets.every(item => item.merged && item.verified) || !conventional.test(result.summarySubject || '') || (group.phase !== 'close' && !passedTests(result)) || await inProgress(targetCwd)) throw new Error('summary 前置条件未满足：合并/验证无冲突/中文 Conventional Commit');
-        // 用户既有未提交改动必须原样留在工作区：summary commit 不得把基线脏文件
-        // 卷进提交（那会让用户改动凭空消失在工作区、变成别人的提交）。
-        const swallowed = (await committedPaths(targetCwd)).filter(path => targetPreexisting.includes(path));
-        if (swallowed.length) throw new Error(`summary 提交包含了目标原有的未提交改动：${swallowed.join(', ')}；用户改动必须保留在工作区`);
+      // 用户既有未提交改动必须原样留在工作区：summary commit 不得把基线脏文件
+      // 卷进提交（那会让用户改动凭空消失在工作区、变成别人的提交）。
+      const swallowed = (await committedPaths(targetCwd)).filter(path => targetPreexisting.includes(path));
+      if (swallowed.length) throw new Error(`summary 提交包含了目标原有的未提交改动：${swallowed.join(', ')}；用户改动必须保留在工作区`);
+      if (typeof result.summaryCreated === 'boolean' && result.summaryCreated) {
         if (group.phase === 'close') {
           if (result.summarySubject !== group.summarySubject) throw new Error('close-only 不得重写 summary');
         } else {
-          // 普通提交历史核实，不锁 HEAD、不对标题计数，也不要求模型给 SHA。
-          const subject = await git(['log', '-1', '--format=%s'], targetCwd);
-          if (subject !== result.summarySubject) throw new Error('实际最新提交不是本次报告的 summary');
           group.phase = 'close';
           group.summarySubject = result.summarySubject;
         }
-      } else if (group.phase === 'close' || result.summarySubject !== null || result.status === 'passed') throw new Error('Merger 成功/close-only 必须保留已完成 summary');
+      }
       group.previous = result;
       if (result.status === 'blocked') {
         const blockedReason = group.phase === 'close' ? `关闭受阻：${result.summary}；${result.remaining.join('; ')}` : result.summary || 'Merger 权限/现场阻碍';
         if (group.phase === 'close') {
           for (const item of result.tickets) if (!item.closed) blocks.set(item.ticket, blockedReason);
         } else targetReason = blockedReason;
-        // Merger 受阻同样是逐票 Delivery 事实，不能只留在 blocks/targetReason
-        // 供 UI 反推；尚未关闭的票独立发布 blocked。
-        const blockedTickets = group.phase === 'close' ? result.tickets.filter(item => !item.closed).map(item => item.ticket) : result.tickets.map(item => item.ticket);
-        // Merger 路径不参与停滞计数：该字段仅为与 Gate 拒绝载荷保持 schema 一致。
-        for (const number of blockedTickets) observations?.observe('engine/delivery', 'delivery-blocked', { ticket: number, tickets: [number], batch: group.id, role: 'merger' }, { state: 'blocked', phase: group.phase, reason: blockedReason, stagnationCounted: false });
       }
       // 合并失败可接续；关闭失败逐票保留，下一轮仅关闭，绝不重跑 merge/test/summary。
       event('merge-progress', { batch: group.id, phase: group.phase, summarySubject: group.summarySubject, tickets: result.tickets });
-      // 逐票 Delivery 独立发布；共享逻辑 Merger 不合并各票交付结果，
-      // 也不能由 role-end、Self-report 或 Merger 汇总隐式替代。
+      // 看板逐票状态从 Merger 逐票结果推导：每票独立发布一条观测事实。
       for (const item of result.tickets) {
-        // Merger 路径不参与停滞计数：该字段仅为与 Gate 拒绝载荷保持 schema 一致。
-        observations?.observe('engine/delivery', item.closed ? 'delivery-complete' : item.merged ? 'delivery-merged' : 'delivery-blocked', { ticket: item.ticket, tickets: [item.ticket], batch: group.id, role: 'merger' }, {
-          state: item.closed ? 'closed' : item.merged ? (item.verified ? 'verified' : 'merged-unverified') : 'blocked',
-          merged: item.merged, verified: item.verified, closed: item.closed, phase: group.phase,
-          ...(!item.closed && !item.merged ? { stagnationCounted: false } : {}),
-        });
+        observations?.observe('engine', 'merger-result', { ticket: item.ticket, tickets: [item.ticket], batch: group.id, role: 'merger' }, { merged: item.merged, verified: item.verified, closed: item.closed, phase: group.phase });
       }
     } catch (error) {
       if (unsafeTermination.test(error.message)) throw error;
       if (dispatched && !processes.stopping) await inspectMerger(group, error.message);
       else if ([permission, configurationFailure, workspaceFailure].some(pattern => pattern.test(error.message))) targetReason = error.message;
       event('merge-failed', { batch: group.id, reason: error.message });
-      // 交付异常同样是逐票 Delivery 事实；不能由 merge-failed 事件隐式替代，
-      // 也不代表每票都已失败，因此逐票发布 blocked 并保留原因。
-      // Merger 路径不参与停滞计数：该字段仅为与 Gate 拒绝载荷保持 schema 一致。
-      for (const item of group.tickets) observations?.observe('engine/delivery', 'delivery-blocked', { ticket: item.ticket.number, tickets: [item.ticket.number], batch: group.id, role: 'merger' }, { state: 'blocked', phase: group.phase, reason: error.message, stagnationCounted: false });
     }
   }
 
   // 握手只等待前置检查及固定范围；逐票上下文读取留在可观察、可取消的运行阶段。
   event('scope', { repository, target, tickets: [...scope], specs: [...specs], waiting: Object.fromEntries(waitingReasons()) });
   return {
-    describe: () => ({ repository, repo: root, target, targetCwd, tickets: [...scope], specs: [...specs], batch, pending: pending && { phase: pending.phase, tickets: pending.tickets.map(item => item.ticket.number) }, queued: mergeQueue.map(group => ({ batch: group.id, tickets: group.tickets.map(item => item.ticket.number) })), recovery: Object.fromEntries(recovery), waiting: Object.fromEntries(waitingReasons()), deliveryFailures: Object.fromEntries(deliveryFailures), targetBlocked: targetReason, quarantined }),
+    describe: () => ({ repository, repo: root, target, targetCwd, tickets: [...scope], specs: [...specs], batch, pending: pending && { phase: pending.phase, tickets: pending.tickets.map(item => item.ticket.number) }, queued: mergeQueue.map(group => ({ batch: group.id, tickets: group.tickets.map(item => item.ticket.number) })), recovery: Object.fromEntries(recovery), waiting: Object.fromEntries(waitingReasons()), targetBlocked: targetReason, quarantined }),
     releaseAbandonedLocks,
     async run() {
       if (running || finished) throw new Error('Engine 实例只允许运行一次；新 run 由当前 Git/GitHub 事实重新恢复');
@@ -1110,12 +1009,13 @@ export async function createEngine(config, processes, event = () => {}, observat
         while (!processes.stopping) {
           const open = [...scope].filter(number => tickets.get(number)?.state !== 'closed');
           if (!open.length) {
-            if (deliveryFailures.size) return { state: 'waiting-user', tickets: [...deliveryFailures.keys()], waiting: Object.fromEntries(deliveryFailures), batches: batch };
             return { state: 'completed', tickets: [...scope], batches: batch };
           }
           batch++;
+          // 全局最大轮次兜底：达到即正常结束当前 run，不无限烧钱。
+          if (batch > maxRounds) return { state: 'completed', tickets: [...scope], batches: batch, roundsCapped: true, maxRounds };
           if (pending) await recheckTarget();
-          selectDelivery();
+          prioritizeCloseGroup();
           // 待合并或 close-only 始终由单个 Merger 继续；
           // 不重派实现/审查，也不让新批次改变该组 summary。
           if (pending && !targetReason && mergerReady(pending)) {
@@ -1167,16 +1067,19 @@ export async function createEngine(config, processes, event = () => {}, observat
               if (outcome.status === 'rejected') {
                 if (unsafeTermination.test(outcome.reason?.message || '')) throw outcome.reason;
                 const number = prepared[index].ticket.number;
-                pipelineFeedback.set(number, { reason: String(outcome.reason?.message || outcome.reason) });
                 if ([permission, configurationFailure, workspaceFailure].some(pattern => pattern.test(outcome.reason?.message || ''))) blocks.set(number, outcome.reason.message);
                 event('pipeline-failed', { ticket: number, reason: String(outcome.reason?.message || outcome.reason) });
               }
             }
-            // main.mts:175–182 的 fulfilled+commits 筛选；AFK 仅允许审查通过值进入成功集。
-            const successful = settled
-              .map((outcome, i) => ({ outcome, issue: prepared[i] }))
-              .filter(entry => entry.outcome.status === 'fulfilled' && entry.outcome.value?.commits.length > 0)
-              .map(entry => entry.outcome.value);
+            // 上游 main.mts:175–182 的 fulfilled + commits.length > 0 门：
+            // 待合集只收“正常完成且提交非空”的结果。
+            const successful = [];
+            for (const [index, outcome] of settled.entries()) {
+              if (outcome.status !== 'fulfilled' || !outcome.value?.commits?.length) continue;
+              // 已是目标祖先的分支无 ahead 提交，但仍需进 Merger 验证关闭。
+              if (!prepared[index].workspace.mergedIntoTarget && !await branchAhead(prepared[index].workspace)) continue;
+              successful.push(outcome.value);
+            }
             if (successful.length) {
               const group = { id: batch, phase: 'merge', tickets: successful };
               if (pending) mergeQueue.push(group);
@@ -1187,8 +1090,7 @@ export async function createEngine(config, processes, event = () => {}, observat
           if (processes.stopping) break;
           await refresh();
           event('batch-settled', { batch, open: [...scope].filter(number => tickets.get(number)?.state !== 'closed'), waiting: Object.fromEntries(waitingReasons()) });
-          // 不设总重试/批次上限。短暂且可中断的退避，
-          // 避免空结果、格式错误或 CLI 持续失败导致忙循环。
+          // 短暂且可中断的退避，避免空结果、格式错误或 CLI 持续失败导致忙循环。
           for (let i = 0; i < 10 && !processes.stopping; i++) await delay(100);
         }
         return { state: 'stopped', tickets: [...scope].filter(number => tickets.get(number)?.state !== 'closed'), batches: batch };

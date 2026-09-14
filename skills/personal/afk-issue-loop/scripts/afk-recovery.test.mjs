@@ -108,8 +108,7 @@ const context = input.context;
 appendFileSync(process.env.AFK_ROLE_LOG, JSON.stringify({ role: context.role, ticket: context.ticket?.number, mode: context.mode, cwd: process.cwd() }) + '\\n');
 const behavior = process.env.AFK_ROLE_BEHAVIOR || 'hang';
 // 载体层失败：中途只给出失败的 provider 结果与文本，没有任何 <afk-result> 封套，
-// 进程正常退出 => role 返回 failed 且不带 run 键（引擎无法据此做业务判断）。
-// 用于证明「载体层失败不计入停滞」与「引擎业务判断连续失败仍会停滞」的区别。
+// 进程正常退出 => role 返回 failed 且不带 run 键。失败只会重试到轮次上限。
 if (behavior === 'carrier-failure') {
   process.stdout.write(JSON.stringify({ type: 'result', result: '载体层失败：provider 返回 500 EOF，未产生结构化结果', is_error: true, subtype: 'error_during_execution', permission_denials: [] }) + '\\n');
   process.exit(0);
@@ -191,11 +190,10 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
   };
   process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
 } else {
-  // Reviewer 带封套业务拒绝的停滞覆盖：Implementer 每轮通过（自报 passed +
-  // commits 非空，分支真实提交由 addBranchCommit 预置），Reviewer 每轮返回
-  // 逐字相同的 failed 封套。failed 不会首轮直接 blocks.set（只有 blocked 会），
-  // 因此走 gateReject 计数，同因 3 轮后转入等待用户。
-  if (behavior === 'reviewer-failed-stagnation') {
+  // Reviewer 持续失败覆盖：Implementer 每轮通过（passed + commits 非空，
+  // 分支真实提交由 addBranchCommit 预置），Reviewer 每轮返回 failed 封套。
+  // 失败只会重试到全局轮次上限，不再被定性为业务死结。
+  if (behavior === 'reviewer-failed-retries') {
     if (context.role !== 'implementer' && context.role !== 'reviewer') {
       while (true) await delay(1_000);
     }
@@ -259,11 +257,11 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
     || (behavior === 'merge-verification-fails' && context.role !== 'merger')
     || (behavior === 'pure-skill-delivery' && context.role !== 'merger')
     || (behavior === 'swallow-baseline' && context.role !== 'merger')
-    || (behavior === 'gate-stagnation' && context.role !== 'merger')
+    || (behavior === 'no-commits' && context.role !== 'merger')
     || (behavior === 'permission-recovered' && context.role === 'implementer');
   if (shouldPass) {
     const pureSkill = behavior === 'pure-skill-delivery';
-    const noCommits = behavior === 'gate-stagnation';
+    const noCommits = behavior === 'no-commits';
     const result = {
       run: context.run, attempt: context.attempt, role: context.role,
       status: 'passed',
@@ -272,7 +270,7 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
       remaining: [],
       branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
       // 纯 skill 场景下 Reviewer 通常没有新提交可交（合格即无需改动）。
-      // gate-stagnation 场景下 Implementer 反复不报告任何提交摘要。
+      // no-commits 场景下 Implementer 反复不报告任何提交摘要。
       commits: (pureSkill && context.role === 'reviewer') || (noCommits && context.role === 'implementer') ? [] : ['已有可交付提交'],
     };
     process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
@@ -350,12 +348,13 @@ function readTail(path) {
   return lines.slice(-15).join('\n');
 }
 
-function roleGateRecords(runDir) {
+function journalRecords(runDir) {
   const path = join(runDir, 'observations.jsonl');
   if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
-    .filter(record => record.source === 'engine/gate')
-    .map(record => ({ kind: record.kind, role: record.scope.role, attempt: record.scope.attempt, reason: record.payload?.reason }));
+  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+}
+function threeLayerKinds(records) {
+  return records.filter(record => record.kind === 'self-report' || record.kind.startsWith('gate-') || record.kind.startsWith('delivery-'));
 }
 
 function readTailInLogDir(runDir) {
@@ -914,8 +913,8 @@ test('公开 start/status 提供 localhost 只读 Dashboard，页面关闭不影
 
 // 纯 Skill 仓库形状：没有 tests/、没有类型检查，按契约在 summary 说明“确无适用
 // 检查”而不填 tests。Implementer 会留下合法但未跟踪的安装/校验产物，Reviewer
-// 无可交付改动（commits 为空）。这两者都不构成“交付未完成”，不得被 Gate 反复
-// 拒绝——否则每轮重选同一批票形成死循环。
+// 无可交付改动（commits 为空）。未跟踪残留不进入待合集筛选，Reviewer 零提交
+// 照常合入待合集——否则每轮重选同一批票形成死循环。
 test('纯 Skill 仓库的未跟踪残留与 reviewer 零提交不阻塞 I→R→M 关票', async () => {
   const fixture = createFixture();
   fixture.env.AFK_ROLE_BEHAVIOR = 'pure-skill-delivery';
@@ -939,7 +938,7 @@ test('纯 Skill 仓库的未跟踪残留与 reviewer 零提交不阻塞 I→R→
     // 未跟踪残留不得被自动提交进交付分支。
     const tracked = command('git', ['-C', worktree, 'ls-tree', '-r', '--name-only', 'afk/issue-9']);
     assert.equal(tracked.split('\n').includes('skills-lock.json'), false, '未跟踪残留不得被自动提交');
-    // 没有重复拒绝：同因 Gate 拒绝出现即视为回归。
+    // 三层零出现：self-report / gate-* / delivery-* 出现即视为回归。
     const events = readFileSync(join(runDir, 'events.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
     assert.equal(events.filter(event => event.type === 'pipeline-failed').length, 0, '纯 Skill 仓库不得再出现 pipeline-failed 死循环');
     assert.equal(events.filter(event => event.type === 'batch-selected').length, 1, '应在单一批次内交付，不重选同一批票');
@@ -949,35 +948,25 @@ test('纯 Skill 仓库的未跟踪残留与 reviewer 零提交不阻塞 I→R→
   }
 });
 
-// Gate 拒绝不能让同一批票被无退避地永远重选。Implementer 反复自称 passed 却
-// 不报告任何提交摘要时，Gate 每次都独立拒绝；同因连续拒绝达到阈值后该票转入
-// 等待用户，run 以 waiting-user 结束而不是空转烧钱（ADR 0005 禁止的是放弃交付
-// 的总重试上限，不是这种停滞熔断）。
-test('同因 Gate 拒绝连续多轮后转入等待用户，不再无限重选同一批票', async () => {
+// 上游门语义：Implementer 反复不报告提交摘要时无提交不进 Reviewer，
+// 该票不进待合集；run 靠全局轮次上限有界结束，不无限烧钱。
+test('无提交不进 Reviewer：run 在轮次上限内结束', async () => {
   const fixture = createFixture();
-  fixture.env.AFK_ROLE_BEHAVIOR = 'gate-stagnation';
+  fixture.env.AFK_ROLE_BEHAVIOR = 'no-commits';
   let runDir;
   try {
     addBranchCommit(fixture, 9, true);
-    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
+    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9', '--max-rounds', '3'], { env: fixture.env, timeout: 15_000 }));
     runDir = started.logDir;
-    await waitUntil(() => existsSync(join(runDir, 'result.json')), '停滞检测未终止 run', 40_000);
+    await waitUntil(() => existsSync(join(runDir, 'result.json')), '轮次上限未终止 run', 40_000);
 
-    const result = JSON.parse(readFileSync(join(runDir, 'result.json'), 'utf8'));
-    assert.equal(result.state, 'waiting-user', `同因停滞必须转等待用户，实际 ${result.state}`);
-    assert.match(result.waiting['9'], /同一原因被 Gate 拒绝/, '停滞原因必须显式报告');
-    // Gate 独立性未被削弱：每次仍是引擎独立发布的 Gate rejected。
-    const records = readFileSync(join(runDir, 'observations.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-    const rejected = records.filter(record => record.kind === 'gate-rejected' && record.scope.role === 'implementer');
-    assert.ok(rejected.length >= 3, '同因拒绝必须仍由 Gate 独立发布（fail-closed）');
-    // 这是引擎自己的业务判断（带合法封套），必须计入停滞计数。
-    assert.ok(rejected.every(record => record.payload.stagnationCounted === true), '业务拒绝必须计入停滞（issue #12）');
-    assert.ok(rejected.every(record => record.payload.accepted === false && record.payload.reason), 'Gate rejected 必须带机器可判定 reason');
-    assert.equal(records.some(record => record.kind === 'delivery-complete'), false, '停滞票不得显示为已交付');
-    // 停滞是有界退出而非无限循环：重选次数被阈值封顶。
-    const events = readFileSync(join(runDir, 'events.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
-    assert.ok(events.filter(event => event.type === 'batch-selected').length <= 5, '不得无界重选同一批票');
-    // 退出是“等待用户”而非“放弃交付”：现场与分支保留。
+    const result = JSON.parse(readFileSync(join(started.logDir, 'result.json'), 'utf8'));
+    assert.equal(result.state, 'completed');
+    assert.equal(result.roundsCapped, true);
+    assert.equal(result.maxRounds, 3);
+    assert.deepEqual(roleEntries(fixture).map(entry => entry.role).filter(role => role === 'reviewer'), [], '无提交不得派发 Reviewer');
+    assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'open');
+    assert.equal(threeLayerKinds(journalRecords(runDir)).length, 0, '三层观测必须零出现');
     assert.equal(command('git', ['-C', fixture.repo, 'rev-parse', '--verify', 'afk/issue-9']).length > 0, true);
   } finally {
     await stopRun(runDir, fixture.env);
@@ -985,28 +974,22 @@ test('同因 Gate 拒绝连续多轮后转入等待用户，不再无限重选�
   }
 });
 
-// Reviewer 带封套业务拒绝的停滞覆盖：Implementer 每轮通过，Reviewer 每轮返回
-// 逐字相同的 failed 封套（failed 不首轮 blocks.set，只有 blocked 会）。Gate 每次
-// 独立拒绝并计数，同因 3 轮后该票转入等待用户，run 以 waiting-user 结束。
-test('Reviewer 同因业务拒绝连续多轮后转入等待用户', async () => {
+// Reviewer 持续失败只会重试到轮次上限，不再被定性为业务死结。
+test('Reviewer 持续失败时重试到轮次上限即停', async () => {
   const fixture = createFixture();
-  fixture.env.AFK_ROLE_BEHAVIOR = 'reviewer-failed-stagnation';
+  fixture.env.AFK_ROLE_BEHAVIOR = 'reviewer-failed-retries';
   let runDir;
   try {
     addBranchCommit(fixture, 9, true);
-    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
+    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9', '--max-rounds', '3'], { env: fixture.env, timeout: 15_000 }));
     runDir = started.logDir;
-    await waitUntil(() => existsSync(join(runDir, 'result.json')), 'Reviewer 停滞检测未终止 run', 40_000);
+    await waitUntil(() => existsSync(join(runDir, 'result.json')), '轮次上限未终止 run', 40_000);
 
-    const result = JSON.parse(readFileSync(join(runDir, 'result.json'), 'utf8'));
-    assert.equal(result.state, 'waiting-user', `Reviewer 同因停滞必须转等待用户，实际 ${result.state}`);
-    assert.match(result.waiting['9'], /同一原因被 Gate 拒绝/, '停滞原因必须显式报告');
-    const records = readFileSync(join(runDir, 'observations.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-    const rejected = records.filter(record => record.kind === 'gate-rejected' && record.scope.role === 'reviewer');
-    assert.ok(rejected.length >= 3, 'Reviewer 同因拒绝必须仍由 Gate 独立发布（fail-closed）');
-    assert.ok(rejected.every(record => record.payload.stagnationCounted === true), 'Reviewer 业务拒绝必须计入停滞（issue #12）');
-    assert.ok(rejected.every(record => record.payload.accepted === false && record.payload.reason), 'Gate rejected 必须带机器可判定 reason');
-    assert.equal(records.some(record => record.kind === 'delivery-complete'), false, '停滞票不得显示为已交付');
+    const result = JSON.parse(readFileSync(join(started.logDir, 'result.json'), 'utf8'));
+    assert.equal(result.state, 'completed');
+    assert.equal(result.roundsCapped, true);
+    assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'open');
+    assert.equal(threeLayerKinds(journalRecords(runDir)).length, 0, '三层观测必须零出现');
     assert.equal(command('git', ['-C', fixture.repo, 'rev-parse', '--verify', 'afk/issue-9']).length > 0, true);
   } finally {
     await stopRun(runDir, fixture.env);
@@ -1026,73 +1009,49 @@ test('Reviewer 过程被拦截工具后成功终局不被误判为权限拒绝�
     addBranchCommit(fixture, 9, true);
     const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
     runDir = started.logDir;
-    // 推进证据：出现 Reviewer 的 Gate accepted 或（更下游的）Merger 已派发。
-    await waitUntil(() => {
-      if (!existsSync(join(runDir, 'observations.jsonl'))) return false;
-      const records = readFileSync(join(runDir, 'observations.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-      return records.some(record => record.kind === 'gate-accepted' && record.scope.role === 'reviewer')
-        || roleEntries(fixture).some(entry => entry.role === 'merger');
-    }, () => ['权限误判：Reviewer 成功终局后 run 未继续推进',
+    // 推进证据：Merger 已被派发（Reviewer 成功终局后 run 继续推进）。
+    await waitUntil(() => roleEntries(fixture).some(entry => entry.role === 'merger'),
+    () => ['权限误判：Reviewer 成功终局后 run 未继续推进',
       'roles: ' + JSON.stringify(roleEntries(fixture).map(entry => entry.role)),
-      'gates: ' + JSON.stringify(roleGateRecords(runDir)),
+      'observations: ' + JSON.stringify(threeLayerKinds(journalRecords(runDir))),
       'events: ' + readTail(join(runDir, 'events.jsonl')),
       'daemon: ' + readTail(join(runDir, 'daemon.log')),
     ].join('\n'));
 
-    const records = readFileSync(join(runDir, 'observations.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-    // 终局成功被采信：Reviewer 有 Gate accepted，且该 Attempt 无 Gate rejected。
-    const accepted = records.filter(record => record.kind === 'gate-accepted' && record.scope.role === 'reviewer');
-    assert.ok(accepted.length >= 1, '成功终局必须被独立发布为 Gate accepted');
-    const selfReport = records.find(record => record.kind === 'self-report' && record.scope.role === 'reviewer');
-    assert.equal(accepted[0].scope.attempt, selfReport.scope.attempt, 'Gate accepted 必须关联同一 Attempt');
-    assert.equal(records.some(record => record.kind === 'gate-rejected' && record.scope.role === 'reviewer'), false, '过程中的拒绝记录不得翻转成功的终局判定');
-    assert.equal(records.some(record => record.kind === 'delivery-blocked' && record.scope.role === 'reviewer'), false, '该票不得被判 blocked');
+    // 过程中的拒绝记录不得翻转成功的终局判定：该票不得被 blocks 阻断。
+    const status = JSON.parse(command(process.execPath, [script, 'status', '--run', runDir], { env: fixture.env }));
+    assert.equal(status.waiting?.['9'], undefined, '成功终局的票不得进入 waiting');
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
-// 停滞只统计引擎的业务判断，而不是载体层失败：Reviewer 连续多轮返回 failed 且
-// 没有任何 <afk-result> 封套（无 run 键）。这类失败必须继续由重试处理，
-// batch-selected 可以远超 3 轮阈值，run 不得因此进入 waiting-user 停滞。
-test('角色只返回无封套的载体层失败时不计入停滞，run 不转入等待用户', async () => {
+// 载体层失败（无 <afk-result> 封套）只会重试到轮次上限。
+test('角色只返回无封套的载体层失败时重试到轮次上限即停', async () => {
   const fixture = createFixture();
   fixture.env.AFK_ROLE_BEHAVIOR = 'carrier-failure';
   let runDir;
   try {
     addBranchCommit(fixture, 9, true);
-    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9'], { env: fixture.env, timeout: 15_000 }));
+    const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9', '--max-rounds', '3'], { env: fixture.env, timeout: 15_000 }));
     runDir = started.logDir;
     const eventsPath = join(runDir, 'events.jsonl');
     const batchCount = () => existsSync(eventsPath)
       ? readFileSync(eventsPath, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(event => event.type === 'batch-selected').length
       : 0;
-    // 跨过 3 轮停滞阈值：载体层失败必须继续重试，而不是被熔断。
-    await waitUntil(() => batchCount() > 6, () => [`载体层失败被误判为停滞：batch-selected 只有 ${batchCount()} 轮；run 终态 ${existsSync(join(runDir, 'result.json')) ? JSON.parse(readFileSync(join(runDir, 'result.json'), 'utf8')).state : '仍在运行'}；roles ${JSON.stringify(roleEntries(fixture).map(entry => entry.role))}`,
-      'gates: ' + JSON.stringify(roleGateRecords(runDir)),
-      'events: ' + readTail(join(runDir, 'events.jsonl')),
-      'daemon: ' + readTail(join(runDir, 'daemon.log')),
-      'stdout: ' + readTailInLogDir(runDir),
-    ].join('\n'), 45_000);
-
-    // 重试不被 3 轮阈值封顶本身就是「未停滞」的证据：run 此刻仍在推进，
-    // 载体层失败只是被重试，而不是把该票永久置为等待用户。
-    assert.ok(batchCount() > 6, '载体层失败必须继续重试，不得被停滞熔断');
-    assert.equal(existsSync(join(runDir, 'result.json')), false, '载体层失败不得把 run 终止在等待用户');
-    const records = existsSync(join(runDir, 'observations.jsonl'))
-      ? readFileSync(join(runDir, 'observations.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
-    const counted = records.filter(record => (record.kind === 'gate-rejected' || record.kind === 'delivery-blocked') && record.payload?.stagnationCounted !== undefined);
-    assert.ok(counted.every(record => record.payload.stagnationCounted === false), '载体层失败不得计入停滞计数');
+    // 载体层失败重试到轮次上限即正常结束，不转入 waiting-user。
+    await waitUntil(() => existsSync(join(runDir, 'result.json')), '轮次上限未终止 run', 45_000);
+    const result = JSON.parse(readFileSync(join(runDir, 'result.json'), 'utf8'));
+    assert.equal(result.state, 'completed');
+    assert.equal(result.roundsCapped, true);
+    assert.ok(batchCount() >= 3, '载体层失败必须重试到轮次上限');
+    assert.equal(threeLayerKinds(journalRecords(runDir)).length, 0, '三层观测必须零出现');
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
-
-// 与「载体层失败不计入停滞」成对的另一半由下面保留的 gate-stagnation 用例承担：
-// 带合法封套的引擎业务拒绝（Implementer 反复自报 passed 却没有任何提交摘要）
-// 仍必须由 Gate 独立拒绝、计入停滞并转入等待用户，防烧钱保护不得被本次对齐削弱。
 
 test('先持久化合并验证结果，再用 close-only 关闭 Issue', async () => {
   const fixture = createFixture();

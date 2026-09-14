@@ -46,9 +46,9 @@ Worktrunk 管理 worktree，Git 管理提交与合并。worktree 只隔离代码
 
 每个 run 拥有一个独立的只读 Dashboard companion：仅监听 `127.0.0.1`、由 OS 分配端口、使用与 control capability 分离的 per-run read token；它不参与调度，也没有 stop/retry/approve/resume 等 mutation endpoint。`start` 结果与 `status` 都返回当前 URL；`dashboard --run <绝对日志目录>` 可按 run identity 重建 companion 并复用原 read token。浏览器自动打开是 best-effort，失败不影响 run。
 
-- 核心 `events.jsonl` 继续服务调度、Recovery 与终态证据，写入失败仍使 run 可见失败。与之分离的 `observations.jsonl` 是 best-effort 旁路事实源：AFK daemon 是运行期唯一 writer 与 `seq` 分配者，provider 原始 payload 在 provider-specific 解析前写入；它不被 engine 用作调度、Recovery、Gate 或 Delivery 的依赖。
-- Recovery、Process lifecycle、provider text delta、tool-call、tool result、stdout、stderr、Self-report、Gate 与 Delivery 共享同一 run-level 单调 `seq`；SSE event ID 等于该 `seq`，重连按最后已见 ID 只补发后续记录。
-- `Attempt` 是 per-Ticket/per-Role（Merger 为 per-Batch）完整 Recovery/派发 cycle 序号，`Invocation` 是实际 spawn 的 Role CLI 全局序号；planned Attempt 在 spawn 前可见且 Invocation/PID 为空，只有 spawn 成功才分配 Invocation。Self-report 不等于 Gate，Role 退出不等于 Ticket 交付；Gate 与逐票 Delivery 由 engine 显式发布。
+- 核心 `events.jsonl` 继续服务调度、Recovery 与终态证据，写入失败仍使 run 可见失败。与之分离的 `observations.jsonl` 是 best-effort 旁路事实源：AFK daemon 是运行期唯一 writer 与 `seq` 分配者，provider 原始 payload 在 provider-specific 解析前写入；它不被 engine 用作调度或 Recovery 的依赖。
+- Recovery、Process lifecycle、provider text delta、tool-call、tool result、stdout、stderr 与 Merger 逐票结果共享同一 run-level 单调 `seq`；SSE event ID 等于该 `seq`，重连按最后已见 ID 只补发后续记录。
+- `Attempt` 是 per-Ticket/per-Role（Merger 为 per-Batch）完整 Recovery/派发 cycle 序号，`Invocation` 是实际 spawn 的 Role CLI 全局序号；planned Attempt 在 spawn 前可见且 Invocation/PID 为空，只有 spawn 成功才分配 Invocation。Role 退出不等于 Ticket 交付；看板逐票状态从 Merger 逐票结果与 Git 祖先关系推导。
 - provider 观测标签（`provider/<name>`）与流解析器取该 Invocation 所属**角色**冻结的 harness，而不是 run 级单值：混 harness 时不同 CLI 的 stream-json 格式完全不同，标签与实际载体必须一致，否则 Dashboard 与排障会误导。
 - 采集与排版忠实于 provider 与进程实际发出的完整内容，不摘要、不截断、不改写、不脱敏，也不提供独立 Raw 标签页。Dashboard 故障、慢客户端、断线、journal 写入失败或导出失败都不进入 run 失败路径；完整性损失必须在 `status` 与页面显式标记 `degraded/incomplete`。
 - run 终态后 journal 冻结，companion 导出自包含 `dashboard.html` 并继续提供页面 24 小时；静态文件在 server 退出后仍可直接打开。Observation journal、read-token metadata 与最终 HTML 均为 owner-only `0600`，read token 不进入 events、Role 日志、access log 或最终 HTML。

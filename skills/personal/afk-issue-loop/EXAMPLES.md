@@ -24,7 +24,7 @@ node "<skill绝对路径>/scripts/afk.mjs" dashboard --run "/absolute/project/.a
 顶层 `--provider` / `--model` / `--effort` 是 Run 默认值；`--<role>-provider` / `--<role>-model` / `--<role>-effort`（role 为 `implementer` / `reviewer` / `merger`）为该角色覆盖对应字段，其余字段逐字段继承顶层。
 
 ```sh
-# 三角色混 harness：实现放在便宜的模型，Gate 判断交给更强的模型，
+# 三角色混 harness：实现放在便宜的模型，复核交给更强的模型，
 # 不可逆的合并/关票留在已验收过的 Claude 上
 node "<skill绝对路径>/scripts/afk.mjs" start --repo "/absolute/project" --issues 3,4,5 \
   --implementer-provider pi --implementer-model cliproxy/deepseek-v4.1-flash --implementer-effort high \
@@ -45,7 +45,7 @@ node "<skill绝对路径>/scripts/afk.mjs" resolve-selection --repo "/absolute/p
 ```
 
 - **逐字段继承**：`--reviewer-model opus` 只换 Reviewer 的模型，它的 provider 与 effort 仍跟随顶层。
-- **缺省角色只跟随顶层默认**，不跟随其他已指定角色。只指定 Implementer 时 Reviewer 不会被拉到同源模型——否则 Reviewer 会系统性认可同源输出的盲区，而 Gate 完全依赖它的判读。
+- **缺省角色只跟随顶层默认**，不跟随其他已指定角色。只指定 Implementer 时 Reviewer 不会被拉到同源模型——否则 Reviewer 会系统性认可同源输出的盲区，而 Reviewer 需要独立判读。
 - **完全不写角色前缀**时三角色完全相同，与升级前行为一致。
 - **effort 交集**：公共承诺 `low` / `high` / `max`。各家还有更多档位（Claude 五档、Pi 七档、Codex 五档），按该 harness 实际支持面校验；不支持就在启动期失败并列出合法值。
 - **Pi 的档位按模型不同**，不能按 harness 记：`cliproxy/deepseek-v4.1-flash` 仅支持 `low` / `high` / `max`；`cliproxy/gpt-5.6-luna` 支持 `low` / `medium` / `high` / `xhigh` / `max`。Pi 遇到模型不支持的档位会**静默降级且不报错**，所以显式 Pi 模型同样按声明式元数据做能力校验，不做自动验证时也会显式标注未验证。

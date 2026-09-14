@@ -20,7 +20,7 @@ const help = `AFK：独立本地 CLI 编排（Node >=22，macOS/Linux）
       [--implementer-effort L] [--reviewer-provider P] [--reviewer-model M]
       [--reviewer-effort L] [--merger-provider P] [--merger-model M]
       [--merger-effort L] [--verify '项目验证命令']
-      [--priority-labels critical,high,low] [--reuse 1,2]
+      [--priority-labels critical,high,low] [--reuse 1,2] [--max-rounds 10]
   node afk.mjs resolve-selection --repo /absolute/repository [--provider pi] [--model API-provider/model] [--effort LEVEL]
       [--implementer-provider P] [--implementer-model M] [--implementer-effort L]
       [--reviewer-provider P] [--reviewer-model M] [--reviewer-effort L]
@@ -52,6 +52,7 @@ Codex exec --dangerously-bypass-approvals-and-sandbox；Pi 不加权限 flag。
 --spec 仅提供上下文，不实现或关闭。无 priority-labels 时全部同级按编号。
 唯一标准 afk/issue-N 现场默认按当前 Git/worktree/writer 事实恢复；--reuse 仅保留显式归属兼容信息，不能绕过活跃写者、锁定或 quarantine。
 恢复保留已有 commits 与 dirty 修改；已合入目标的分支跳过重复 merge，继续验证和关闭。
+全局最大轮次默认 10（--max-rounds 可配），到达即正常结束当前 run。
 启动成功只表示运行已启动。恢复分类、阻碍和最终结果见 status/events.jsonl；不自动 push/PR。
 支持进程退出后的 Git 现场恢复，不恢复旧进程内存或历史 PID。worktree 隔离代码，不隔离系统权限。`;
 
@@ -358,6 +359,7 @@ async function start(values) {
     effort: effort ?? undefined,
     verify: values.verify,
     priorityLabels: values['priority-labels']?.split(',').filter(Boolean) || [],
+    maxRounds: values['max-rounds'],
   };
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
   save(join(logDir, 'selection.json'), selection);
@@ -406,7 +408,7 @@ async function main() {
     process.once('message', config => daemon(config).catch(error => { console.error(error); process.exitCode = 1; }));
     return;
   }
-  const { values } = parseArgs({ args: process.argv.slice(3), options: Object.fromEntries(['repo', 'issues', 'spec', 'target', 'provider', 'model', 'effort', 'verify', 'priority-labels', 'reuse', 'run', ...roleFlags].map(name => [name, { type: 'string' }])) });
+  const { values } = parseArgs({ args: process.argv.slice(3), options: Object.fromEntries(['repo', 'issues', 'spec', 'target', 'provider', 'model', 'effort', 'verify', 'priority-labels', 'reuse', 'max-rounds', 'run', ...roleFlags].map(name => [name, { type: 'string' }])) });
   if (!action || ['help', '--help', '-h'].includes(action)) return console.log(help);
   if (action === 'start') return start(values);
   if (action === 'resolve-selection') {

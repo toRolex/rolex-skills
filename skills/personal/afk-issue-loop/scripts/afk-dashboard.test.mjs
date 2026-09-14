@@ -118,10 +118,10 @@ if (['permission-recovered', 'carrier-failure'].includes(process.env.AFK_ROLE_BE
   process.stderr.write('dashboard fixture 不支持该 AFK_ROLE_BEHAVIOR\\n');
   process.exit(1);
 }
-// 受控场景：Self-report passed 但该角色有一个 not-run 验证。Issue #12 后 tests 对
-// Reviewer 是信息性而非门控，引擎不得因此发布 Gate rejected。
+// 受控场景：Reviewer 结果带一个 not-run 验证。tests 对 Reviewer 是信息性，
+ // pipeline 只看 commits 摘要与 Git 事实，不再有门控拒绝。
 const notRun = process.env.AFK_ROLE_BEHAVIOR === 'reviewer-not-run-passed' && context.role === 'reviewer';
-// Merger 行为：把本批分支合入目标并写 summary，使逐票 Delivery 与 batch
+// Merger 行为：把本批分支合入目标并写 summary，使逐票 Merger 结果与 batch
 // identity 可被观察。
 let result;
 if (context.role === 'merger') {
@@ -218,6 +218,7 @@ async function startRun(fixture, issues = '9') {
 }
 
 const journal = runDir => readFileSync(join(runDir, 'observations.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+const roleLogHas = (fixture, role) => existsSync(fixture.roleLog) && readFileSync(fixture.roleLog, 'utf8').split('\n').filter(Boolean).some(line => { try { return JSON.parse(line).role === role; } catch { return false; } });
 const withKind = (records, kind) => records.filter(record => record.kind === kind || record.kind.startsWith(`${kind}-`));
 const readToken = url => new URL(url).searchParams.get('token');
 
@@ -228,12 +229,12 @@ test('Observation journal 完整保留 provider 原始负载并携带 run/seq �
     addBranchCommit(fixture, 9);
     const started = await startRun(fixture);
     runDir = started.logDir;
-    // Gate 在 Git deliverable 核实之后才发布，需等它真正出现。
+    // 等 provider 原始负载与 Invocation 事实入库。
     await waitUntil(
       () => existsSync(join(runDir, 'observations.jsonl'))
-        && journal(runDir).some(record => record.kind === 'self-report')
-        && journal(runDir).some(record => record.source === 'engine/gate'),
-      '未观察到 Self-report 与独立 Gate',
+        && journal(runDir).some(record => record.kind === 'raw-payload')
+        && journal(runDir).some(record => record.kind === 'invocation-started'),
+      '未观察到 provider 原始负载与 Invocation',
     );
 
     const records = journal(runDir);
@@ -267,13 +268,8 @@ test('Observation journal 完整保留 provider 原始负载并携带 run/seq �
     assert.ok(invocations.every(record => Number.isSafeInteger(record.payload.managedPid)), 'Invocation 必须携带 PID');
     assert.deepEqual(invocations.map(record => record.scope.invocation), invocations.map((_, index) => index + 1), 'Invocation 必须全局单调');
 
-    // Self-report 与 Gate 各自独立，且关联同一 Attempt/Invocation。
-    const selfReport = withKind(records, 'self-report');
-    assert.ok(selfReport.length >= 1 && selfReport.every(record => Number.isSafeInteger(record.scope.invocation)), 'Self-report 必须关联 Invocation');
-    const gate = records.filter(record => record.source === 'engine/gate');
-    assert.ok(gate.length >= 1, '缺少 engine 显式 Gate 事件');
-    assert.ok(gate.every(record => typeof record.payload.accepted === 'boolean' && typeof record.payload.reason === 'string'), 'Gate 必须带机器可判定 accepted/reason');
-    assert.ok(gate.every(record => Number.isSafeInteger(record.scope.attempt)), 'Gate 必须关联 Attempt');
+    // 三层零出现：全量观测中无 self-report / gate-* / delivery-* kind。
+    assert.equal(records.some(record => record.kind === 'self-report' || record.kind.startsWith('gate-') || String(record.kind).startsWith('delivery-')), false, '三层观测必须零出现');
 
     // Recovery provenance 与 Agent 输出可区分。
     const recovery = records.filter(record => record.source === 'engine/recovery');
@@ -285,7 +281,7 @@ test('Observation journal 完整保留 provider 原始负载并携带 run/seq �
   }
 });
 
-test('共享逻辑 Merger 以 batch identity 关联多票，逐票 Delivery 独立发布', async () => {
+test('共享逻辑 Merger 以 batch identity 关联多票，逐票 Merger 结果独立发布', async () => {
   const fixture = createFixture();
   let runDir;
   try {
@@ -295,8 +291,8 @@ test('共享逻辑 Merger 以 batch identity 关联多票，逐票 Delivery 独�
     runDir = started.logDir;
     await waitUntil(
       () => existsSync(join(runDir, 'observations.jsonl'))
-        && journal(runDir).some(record => Number.isSafeInteger(record.scope.batch) && String(record.kind).startsWith('delivery-')),
-      '未观察到 batch 维度的 Delivery',
+        && journal(runDir).some(record => record.kind === 'merger-result' && Number.isSafeInteger(record.scope.batch)),
+      '未观察到 batch 维度的 Merger 逐票结果',
     );
 
     const records = journal(runDir);
@@ -307,11 +303,13 @@ test('共享逻辑 Merger 以 batch identity 关联多票，逐票 Delivery 独�
     const batches = new Set(mergerPlanned.map(record => record.scope.batch));
     assert.equal(batches.size, 1, `同一批 Merger 不得产生多个 batch identity：${[...batches].join(',')}`);
 
-    // 逐票 Delivery 必须各自发布，不能只在 batch 层面汇总。
-    const deliveries = records.filter(record => String(record.kind).startsWith('delivery-'));
-    const deliveryTickets = new Set(deliveries.map(record => record.scope.ticket));
-    assert.ok(deliveryTickets.size >= 1, '逐票 Delivery 必须携带 ticket scope');
-    assert.ok(deliveries.every(record => Number.isSafeInteger(record.scope.ticket)), 'Delivery 必须逐票关联 Ticket');
+    // 逐票 Merger 结果必须各自发布，不能只在 batch 层面汇总。
+    const results = records.filter(record => record.kind === 'merger-result');
+    const resultTickets = new Set(results.map(record => record.scope.ticket));
+    assert.ok(resultTickets.size >= 1, '逐票 Merger 结果必须携带 ticket scope');
+    assert.ok(results.every(record => Number.isSafeInteger(record.scope.ticket)), 'Merger 结果必须逐票关联 Ticket');
+    assert.ok(results.every(record => typeof record.payload.merged === 'boolean' && typeof record.payload.verified === 'boolean' && typeof record.payload.closed === 'boolean'), 'Merger 逐票结果必须带 merged/verified/closed');
+    assert.equal(records.some(record => record.kind === 'self-report' || record.kind.startsWith('gate-') || String(record.kind).startsWith('delivery-')), false, '三层观测必须零出现');
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
@@ -656,10 +654,9 @@ test('active writer 消失后自动重新检查并恢复派发', async () => {
   }
 });
 
-// Issue #12：Reviewer 回到上游「复核者」定位后，tests 对引擎是信息性而非门控。
-// Self-report passed + 必需验证 not-run 应被接受：引擎仍须独立发布 Gate 结论，
-// 但结论是 accepted，且不得为该 Attempt 发布 gate-rejected。
-test('Reviewer 自报 passed 且必需验证 not-run 时 engine 独立接受并发布 Gate accepted', async () => {
+// Issue #12 保留：Reviewer 回到上游「复核者」定位后，tests 对 pipeline 是信息性。
+// Reviewer passed + 必需验证 not-run 照常合入待合集，Merger 被派发。
+test('Reviewer passed 且必需验证 not-run 时照常合入待合集并派发 Merger', async () => {
   const fixture = createFixture();
   fixture.env.AFK_ROLE_BEHAVIOR = 'reviewer-not-run-passed';
   let runDir;
@@ -667,21 +664,11 @@ test('Reviewer 自报 passed 且必需验证 not-run 时 engine 独立接受并�
     addBranchCommit(fixture, 9);
     const started = await startRun(fixture);
     runDir = started.logDir;
-    await waitUntil(() => existsSync(join(runDir, 'observations.jsonl')) && journal(runDir).some(record => record.kind === 'gate-accepted' && record.scope.role === 'reviewer'), '未发布 Reviewer Gate accepted');
+    await waitUntil(() => roleLogHas(fixture, 'merger'), 'Reviewer 通过后未派发 Merger', 15_000);
 
     const records = journal(runDir);
-    // Self-report 与独立 Gate 仍然各自可见：自报 passed，Gate 由引擎独立发布。
-    const selfReport = records.find(record => record.kind === 'self-report' && record.scope.role === 'reviewer');
-    assert.equal(selfReport.payload.status, 'passed', 'Self-report 应自报 passed');
-    assert.equal(selfReport.payload.tests.some(test => test.status === 'not-run'), true, '场景必须包含 not-run 验证，否则测不到门控移除');
-    const gate = records.find(record => record.kind === 'gate-accepted' && record.scope.role === 'reviewer');
-    assert.equal(gate.payload.accepted, true);
-    assert.equal(typeof gate.payload.reason, 'string', 'Gate 必须给出机器可判定 reason');
-    assert.equal(gate.scope.attempt, selfReport.scope.attempt, 'Gate 必须关联同一 Attempt');
-    assert.equal(gate.scope.invocation, selfReport.scope.invocation, 'Gate 必须关联同一 Invocation');
-    // not-run 不再阻断：该 Attempt 不得出现 Gate rejected / Delivery blocked。
-    assert.equal(records.some(record => record.kind === 'gate-rejected' && record.scope.role === 'reviewer' && record.scope.attempt === selfReport.scope.attempt), false, 'not-run 不得再触发 Gate rejected');
-    assert.equal(records.some(record => record.kind === 'delivery-blocked' && record.scope.role === 'reviewer'), false, '被接受的 Reviewer Attempt 不得发布 Delivery blocked');
+    // not-run 不再阻断：无三层观测，Merger 照常派发。
+    assert.equal(records.some(record => record.kind === 'self-report' || record.kind.startsWith('gate-') || String(record.kind).startsWith('delivery-')), false, '三层观测必须零出现');
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
@@ -984,7 +971,7 @@ test('per-Role flag 逐角色解析、逐字段继承顶层默认', async () => 
 });
 
 // 缺省 Role 只跟随顶层默认，不跟随其他已指定 Role：否则只指定 Implementer
-// 时 Reviewer 会被悄悄拉到同源模型，而 Gate 完全依赖 Reviewer 判读。
+// 时 Reviewer 会被悄悄拉到同源模型，而 Reviewer 需要独立判读。
 test('缺省 Role 只继承顶层默认，不跟随其他已指定 Role', async () => {
   const fixture = createFixture();
   try {

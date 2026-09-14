@@ -413,7 +413,7 @@ export class Processes {
         termination: failure?.termination || failure?.errors?.find(error => error.termination)?.termination,
         durationMs: Date.now() - started,
       };
-      // 进程结束是独立的 Process 层事实：Role 退出不等于 Gate 接受或已交付，
+      // 进程结束是独立的 Process 层事实：Role 退出不代表已交付，
       // 但页面必须能看出进程已不再运行。
       observations?.observe('process', 'role-end', scope(), ended);
       event('role-end', ended);

@@ -7,7 +7,7 @@ const STATE_THROTTLE_MS = 250;
 
 // Dashboard Observation journal：append-only、best-effort 旁路事实源。
 // AFK daemon 是运行期唯一 writer 与 seq 分配者；写入失败只降级为 incomplete，
-// 绝不进入调度、Recovery、Gate、Delivery 或核心失败路径。
+// 绝不进入调度、Recovery 或核心失败路径。
 export class ObservationJournal {
   #path;
   #statePath;
