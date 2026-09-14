@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import { buildInvocation, parseLine, explicitRefusal, roleSelection } from './providers.mjs';
+import { buildInvocation, parseLine, explicitRefusal, authorizationError, roleSelection } from './providers.mjs';
 import { BoundedTail, MAX_TAIL_CHARS } from './bounded-tail.mjs';
 import { findLastTagContent, unwrapFences } from './structured-output.mjs';
 
@@ -64,6 +64,8 @@ async function invokeAgent(processes, selection, context, onRawLine, onStderr, o
   let completionDetected = false;
   let timeout, entry;
   let providerError, terminalError, cancelled = false, permissionDenied = false;
+  // issue #12：终局成功是清除过程性拒绝记录（权限 / 鉴权）的唯一依据。
+  let finalSuccess = false;
   const resetTimer = () => {
     clearTimeout(timeout);
     if (!entry || entry.reason || entry.exited) return;
@@ -109,6 +111,16 @@ async function invokeAgent(processes, selection, context, onRawLine, onStderr, o
         if (parsedLine.terminal) terminalError = parsedLine.error;
         cancelled ||= Boolean(parsedLine.cancelled);
         permissionDenied ||= Boolean(parsedLine.permissionDenied);
+        // issue #12：成功终局（有结果文本、无终局错误，claude/codex/pi 对等）清除
+        // 过程中累积的权限拒绝标志，使恢复机制对权限拒绝与其它错误对称。中途鉴权
+        // 字样不在此处判定，统一由下面终局裁定处理。后来行若出现终局失败则清掉
+        // 已累积的成功，避免中间成功洗掉终局失败。
+        if (parsedLine.finalSuccess) {
+          permissionDenied = false;
+          finalSuccess = true;
+        } else if (parsedLine.terminal) {
+          finalSuccess = false;
+        }
         if (!completionDetected && COMPLETION_SIGNALS.some(sig => accumulatedOutput.toString().includes(sig))) {
           completionDetected = true;
         }
@@ -122,10 +134,16 @@ async function invokeAgent(processes, selection, context, onRawLine, onStderr, o
     });
     // Upstream final result and incremental output remain separate. Presence,
     // not truthiness, is authoritative: an empty final cannot revive old passed.
+    // 终局裁定（issue #12）：宽泛鉴权正则只作用于最终抵达调用方的终局错误文本。中途
+    // 出现过 unauthorized 字样、随后被成功终局清掉 providerError，就不再置位。成功的
+    // 终局不产生任何终局错误，因此该判定天然被排除。
+    const finalAuthorizationDenied = finalSuccess ? false
+      : authorizationError(terminalError || providerError || '');
     return {
       ...execResult,
       result: resultText === undefined ? (replyText ?? currentReply.toString()) : resultText,
-      completionDetected, providerError, terminalError, cancelled, permissionDenied,
+      completionDetected, providerError, terminalError, cancelled, finalSuccess,
+      permissionDenied: permissionDenied || finalAuthorizationDenied,
     };
   } finally {
     clearTimeout(timeout);
@@ -355,6 +373,9 @@ export class Processes {
     let invocation;
     const scope = () => ({ role: context.role, attempt: context.attempt, invocation, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) });
     let result, failure, stderrDenied = false;
+    // issue #12：stderr 里出现过的拒绝字样同样受终局信号裁定，不由累积值直接否决。
+    // 与 permissionDenied 保持同一判据：仅当最终没有成功终局时才生效。
+    const stderrDeniedFinal = () => stderrDenied && !result?.finalSuccess;
     const stderrBoundary = new BoundedTail(2_048);
     try {
       event('role-start', { role: context.role, tickets: context.tickets, log: logPath, provider: selection.provider, model: selection.model, effort: selection.effort });
@@ -403,7 +424,7 @@ export class Processes {
     }
     if (failure || this.failure) throw failure || this.failure;
     if (result.stopped) return { status: 'stopped', reason: '用户停止' };
-    if (result.permissionDenied || stderrDenied) return { status: 'blocked', reason: result.providerError || 'CLI 明确权限/授权拒绝；见原始日志' };
+    if (result.permissionDenied || stderrDeniedFinal()) return { status: 'blocked', reason: result.providerError || 'CLI 明确权限/授权拒绝；见原始日志' };
     if (result.cancelled) return { status: 'blocked', reason: result.terminalError || 'CLI aborted，取消来源未知，需用户确认' };
     if (result.idle) return { status: 'failed', reason: '600 秒 stdout idle，已终止' };
     if (result.terminalError || result.providerError) return { status: 'failed', reason: result.terminalError || result.providerError };

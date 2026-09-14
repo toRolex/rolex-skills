@@ -332,7 +332,9 @@ export function buildInvocation({ provider, model, effort, prompt, cwd }) {
 // Ordinary tool failures (including test EPERM) do not imply denied approval.
 const approvalRefusal = text => /rejected by user approval settings|writing is blocked by read-only sandbox|user (?:denied|rejected) (?:the )?(?:tool|permission|approval)|permission request (?:denied|rejected)/i.test(text);
 export const explicitRefusal = text => /^(?:error:\s*)?(?:permission denied|access denied|approval (?:denied|rejected|required))\s*[.!]?$/im.test(text) || approvalRefusal(text);
-const authorizationError = text => /permission[_ -]denied|access[_ -]denied|approval.{0,40}(?:required|denied|reject)|not logged in|authentication (?:failed|required)|auth_unavailable|no auth available|invalid api key|missing api key|no api key|unauthorized/i.test(text);
+// issue #12：宽泛鉴权正则只允许作用于终局/终止性错误文本（terminal 行或未被成功
+// 终局洗白的最终 providerError），不由 parseLine 对任意中途 error 直接置位。
+export const authorizationError = text => /permission[_ -]denied|access[_ -]denied|approval.{0,40}(?:required|denied|reject)|not logged in|authentication (?:failed|required)|auth_unavailable|no auth available|invalid api key|missing api key|no api key|unauthorized/i.test(text);
 
 export function parseLine(provider, line) {
   checkProvider(provider);
@@ -352,13 +354,24 @@ export function parseLine(provider, line) {
   if (provider === 'claude' && obj.type === 'assistant') replyText = textContent(obj.message?.content);
   if (provider === 'pi' && obj.type === 'message_end' && obj.message?.role === 'assistant') replyText = textContent(obj.message.content);
   let permissionDenied = obj.type === 'permission_denied' || (obj.type === 'system' && obj.subtype === 'permission_denied');
+  // 终局成功信号（issue #12）：claude result 且非 error 且有字符串结果文本。
+  let finalSuccess = false;
   if (provider === 'claude' && obj.type === 'result') {
     // Even an empty/missing final is authoritative; never reuse an old passed.
-    events = [{ type: 'result', result: typeof obj.result === 'string' ? obj.result : '' }];
-    permissionDenied ||= Array.isArray(obj.permission_denials) && obj.permission_denials.length > 0;
-    if (obj.is_error === true || (typeof obj.subtype === 'string' && obj.subtype.startsWith('error'))) {
+    const finalText = typeof obj.result === 'string' ? obj.result : '';
+    events = [{ type: 'result', result: finalText }];
+    const finalFailed = obj.is_error === true || (typeof obj.subtype === 'string' && obj.subtype.startsWith('error'));
+    // issue #12：非空 permission_denials 不再单独构成权限拒绝，只在同一终局为失败
+    // （is_error/subtype 报错，或无有效结果文本）时才结合 denials 判定。
+    if ((finalFailed || !finalText) && Array.isArray(obj.permission_denials) && obj.permission_denials.length > 0) {
+      permissionDenied = true;
+    }
+    if (finalFailed) {
       terminal = true;
       error = (Array.isArray(obj.errors) ? obj.errors.join('\n') : '') || extractErrorMessage(obj) || obj.result || 'Claude 终态错误';
+    } else if (finalText) {
+      // issue #12：成功终局是清除过程性拒绝记录的依据（由 invokeAgent/role 执行）。
+      finalSuccess = true;
     }
   }
   if (obj.type === 'error' || obj.type === 'agent_error' || obj.type === 'turn.failed' ||
@@ -409,6 +422,15 @@ export function parseLine(provider, line) {
     error = toolDiagnostic;
   }
   if (permissionDenied) error ||= `${provider} 明确权限拒绝`;
-  if (error && authorizationError(error)) permissionDenied = true;
-  return { events, texts: events.filter(e => e.type === 'text').map(e => e.text), replyText, replyStart, error, terminal, cancelled, permissionDenied };
+  // codex/pi 成功终局：有非空结果文本、无终局错误才算成功，与 claude result
+  // 成功分支对等。claude 已在上分支处理，这里仅补非 claude，本行不改变 claude。
+  if (!finalSuccess && provider !== 'claude' && !error && !terminal && !permissionDenied) {
+    const finalText = events.find(event => event.type === 'result')?.result;
+    if (typeof finalText === 'string' && finalText) finalSuccess = true;
+  }
+  // issue #12：鉴权正则只在终局/终止性错误上生效，不覆盖已生效的权限拒绝。
+  // 中途 error 只作为 providerError 上报给调用方；若随后出现成功终局，调用方会
+  // 连同过程性拒绝一起清除（finalSuccess），因此这里不对中途错误置位。
+  if (error && authorizationError(error) && terminal) permissionDenied = true;
+  return { events, texts: events.filter(e => e.type === 'text').map(e => e.text), replyText, replyStart, error, terminal, cancelled, permissionDenied, finalSuccess };
 }

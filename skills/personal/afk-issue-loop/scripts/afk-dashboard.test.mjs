@@ -113,8 +113,14 @@ emit({ type: 'assistant', message: { content: [
 ] } });
 emit({ type: 'afk-fixture-unknown-event', subtype: 'not-recognised', payload: { nested: [1, 2, 3], text: '未知事件 <完整保留>' } });
 process.stderr.write('fixture stderr：完整错误原文\\n');
-// 受控 Gate 场景：Self-report passed 但测试 not-run，engine 必须独立发布 Gate rejected。
-const notRun = process.env.AFK_ROLE_BEHAVIOR === 'gate-reject' && context.role === 'reviewer';
+// recovery fixture 的受控行为在本 fixture 中不存在：误用应立刻失败而不是挂住。
+if (['permission-recovered', 'carrier-failure'].includes(process.env.AFK_ROLE_BEHAVIOR)) {
+  process.stderr.write('dashboard fixture 不支持该 AFK_ROLE_BEHAVIOR\\n');
+  process.exit(1);
+}
+// 受控场景：Self-report passed 但该角色有一个 not-run 验证。Issue #12 后 tests 对
+// Reviewer 是信息性而非门控，引擎不得因此发布 Gate rejected。
+const notRun = process.env.AFK_ROLE_BEHAVIOR === 'reviewer-not-run-passed' && context.role === 'reviewer';
 // Merger 行为：把本批分支合入目标并写 summary，使逐票 Delivery 与 batch
 // identity 可被观察。
 let result;
@@ -650,30 +656,32 @@ test('active writer 消失后自动重新检查并恢复派发', async () => {
   }
 });
 
-test('Self-report passed 但必需验证 not-run 时 engine 独立发布 Gate rejected 与 Delivery blocked', async () => {
+// Issue #12：Reviewer 回到上游「复核者」定位后，tests 对引擎是信息性而非门控。
+// Self-report passed + 必需验证 not-run 应被接受：引擎仍须独立发布 Gate 结论，
+// 但结论是 accepted，且不得为该 Attempt 发布 gate-rejected。
+test('Reviewer 自报 passed 且必需验证 not-run 时 engine 独立接受并发布 Gate accepted', async () => {
   const fixture = createFixture();
-  fixture.env.AFK_ROLE_BEHAVIOR = 'gate-reject';
+  fixture.env.AFK_ROLE_BEHAVIOR = 'reviewer-not-run-passed';
   let runDir;
   try {
     addBranchCommit(fixture, 9);
     const started = await startRun(fixture);
     runDir = started.logDir;
-    await waitUntil(() => existsSync(join(runDir, 'observations.jsonl')) && journal(runDir).some(record => record.kind === 'gate-rejected'), '未发布 Gate rejected');
+    await waitUntil(() => existsSync(join(runDir, 'observations.jsonl')) && journal(runDir).some(record => record.kind === 'gate-accepted' && record.scope.role === 'reviewer'), '未发布 Reviewer Gate accepted');
 
     const records = journal(runDir);
-    // 三层状态同时可见：Self-report 自报 passed、Gate rejected、Delivery blocked。
+    // Self-report 与独立 Gate 仍然各自可见：自报 passed，Gate 由引擎独立发布。
     const selfReport = records.find(record => record.kind === 'self-report' && record.scope.role === 'reviewer');
     assert.equal(selfReport.payload.status, 'passed', 'Self-report 应自报 passed');
-    const gate = records.find(record => record.kind === 'gate-rejected' && record.scope.role === 'reviewer');
-    assert.equal(gate.payload.accepted, false);
-    assert.match(gate.payload.reason, /not-run|未执行/, 'Gate 必须给出机器可判定 reason');
+    assert.equal(selfReport.payload.tests.some(test => test.status === 'not-run'), true, '场景必须包含 not-run 验证，否则测不到门控移除');
+    const gate = records.find(record => record.kind === 'gate-accepted' && record.scope.role === 'reviewer');
+    assert.equal(gate.payload.accepted, true);
+    assert.equal(typeof gate.payload.reason, 'string', 'Gate 必须给出机器可判定 reason');
     assert.equal(gate.scope.attempt, selfReport.scope.attempt, 'Gate 必须关联同一 Attempt');
     assert.equal(gate.scope.invocation, selfReport.scope.invocation, 'Gate 必须关联同一 Invocation');
-    const delivery = records.find(record => record.kind === 'delivery-blocked');
-    assert.equal(delivery.payload.state, 'blocked');
-    // 不得出现该 Reviewer Attempt 的 Gate accepted，也不能把 Ticket 显示为完成。
-    assert.equal(records.some(record => record.kind === 'gate-accepted' && record.scope.role === 'reviewer' && record.scope.attempt === selfReport.scope.attempt), false, '拒绝路径不得先发 Gate accepted');
-    assert.equal(records.some(record => record.kind === 'delivery-complete'), false, 'Ticket 不得显示为已交付');
+    // not-run 不再阻断：该 Attempt 不得出现 Gate rejected / Delivery blocked。
+    assert.equal(records.some(record => record.kind === 'gate-rejected' && record.scope.role === 'reviewer' && record.scope.attempt === selfReport.scope.attempt), false, 'not-run 不得再触发 Gate rejected');
+    assert.equal(records.some(record => record.kind === 'delivery-blocked' && record.scope.role === 'reviewer'), false, '被接受的 Reviewer Attempt 不得发布 Delivery blocked');
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });

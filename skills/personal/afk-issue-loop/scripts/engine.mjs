@@ -766,12 +766,14 @@ export async function createEngine(config, processes, event = () => {}, observat
       (config.verify ? `验证要求（配置）：${config.verify}\n` : '') +
       `最后仅返回一个 <afk-result>JSON</afk-result> 结构化结果；退出码/完成字符串不是业务成功。身份必须逐字匹配本次 context 的 run/attempt/role。所有字段必填，布尔与整数用 JSON 原生类型。\n` +
       `输出必须是平铺对象：顶层直接包含 run、attempt、role、status、summary、tests、remaining、branch、cwd 及当前角色字段。把下方 contract 的字段替换为实际值后输出；contract/context/repository/target/specs 是输入包装，绝不作为输出的外层键，也不回显整个输入。\n` +
-      JSON.stringify({ contract: { ...resultContract.common, ...(role === 'merger' ? resultContract.merger : resultContract.ticket), ...(role === 'reviewer' && context.previous.tests.some(test => test.status !== 'passed') ? { acceptanceResolution: '逐项说明前序 failed/not-run 的解决证据或不适用依据；这是 Reviewer 审查声明，必需验收仍未完成时必须 blocked' } : {}) }, ...input }, null, 2);
+      JSON.stringify({ contract: { ...resultContract.common, ...(role === 'merger' ? resultContract.merger : resultContract.ticket) }, ...input }, null, 2);
   }
   function validTests(result) {
     return Array.isArray(result.tests) && result.tests.every(test => test && typeof test.command === 'string' && test.command.trim() && ['passed', 'failed', 'not-run'].includes(test.status) && typeof test.summary === 'string');
   }
   // 无适用检查可为空；明确 failed/not-run 仍不能作为验证通过。
+  // issue #12 后只对 Merger summary 前置成立：Reviewer 的 tests 已是信息性，
+  // Implementer 由自报状态与 Git deliverable 独立核实。
   function passedTests(result) { return result.tests.every(test => test.status === 'passed'); }
   function validateCommon(result, context) {
     if (result.run !== config.run || result.attempt !== context.attempt || result.role !== context.role || !['passed', 'failed', 'blocked'].includes(result.status) || typeof result.summary !== 'string' || !validTests(result) || !strings(result.remaining)) throw new Error('角色业务结果通用字段无效');
@@ -834,21 +836,28 @@ export async function createEngine(config, processes, event = () => {}, observat
     // engine 独立发布 Gate 结论，不由 UI 从 Self-report 反向猜测；
     // 每次 Gate 都关联同一 planned Attempt 与 Invocation。
     const gateScope = (role, result) => ({ role, attempt: result.attempt, invocation: result.invocation, ticket: ticket.number, tickets: [ticket.number] });
-    const gateAccept = (role, result) => observations?.observe('engine/gate', 'gate-accepted', gateScope(role, result), { accepted: true, reason: 'Self-report、测试与 Git deliverable 均满足 Gate 条件' });
+    // issue #12 后 tests 对 reviewer 是信息性而非门控：接受理由是「自报状态可接受
+    // 且 Git deliverable 通过」，不再断言逐项测试均通过。
+    const gateAccept = (role, result) => observations?.observe('engine/gate', 'gate-accepted', gateScope(role, result), { accepted: true, reason: 'Self-report 状态可接受且 Git deliverable 通过' });
     const gateReject = (role, result, reason) => {
       const scope = gateScope(role, result);
-      observations?.observe('engine/gate', 'gate-rejected', scope, { accepted: false, reason });
-      observations?.observe('engine/delivery', 'delivery-blocked', scope, { state: 'blocked', reason });
+      // 停滞只统计引擎业务判断：带合法结构化封套才说明引擎走到了自己的判断。
+      // 无封套是载体/Provider 层失败，只发布观测、由既有重试继续，不计入停滞。
+      const counted = Object.hasOwn(result, 'run');
+      observations?.observe('engine/gate', 'gate-rejected', scope, { accepted: false, reason, stagnationCounted: counted });
+      observations?.observe('engine/delivery', 'delivery-blocked', scope, { state: 'blocked', reason, stagnationCounted: counted });
       pipelineFeedback.set(ticket.number, { role, reason, result });
+      if (!counted) return;
       // 同因连续拒绝达到阈值后转入停滞，不再被下一轮批次无退避重选。
-      if (noteRejection(ticket.number, reason) >= stagnantRounds) blocks.set(ticket.number, `连续 ${stagnantRounds} 轮同一原因被 Gate 拒绝，疑似当前规格或契约无法自动满足；保留现场等待用户：${reason}`);
+      if (noteRejection(ticket.number, reason) >= stagnantRounds) blocks.set(ticket.number, `连续 ${stagnantRounds} 轮同一原因被 Gate 拒绝（引擎业务判断连续失败），疑似当前规格或契约无法自动满足；保留现场等待用户：${reason}`);
     };
-    // Self-report 与必需验证层面的拒绝原因；无拒绝时返回 undefined。
+    // Self-report 层面的拒绝原因；无拒绝时返回 undefined。
+    // tests 对 reviewer 是信息性（对齐上游复核者定位），not-run 不再硬阻断；
+    // blocked 终局仍按原逻辑阻断。
     const selfReportReason = (role, result) => {
-      const missing = role === 'reviewer' ? result.tests?.filter(test => test.status === 'not-run') || [] : [];
-      if (result.status === 'passed' && !missing.length) return undefined;
+      if (result.status === 'passed') return undefined;
       const reason = [result.reason || result.summary, ...(result.tests || []).filter(test => test.status !== 'passed').map(test => `${test.command}：${test.summary}`), ...(result.remaining || [])].filter(Boolean).join('; ');
-      if (result.status === 'blocked' || missing.length) blocks.set(ticket.number, missing.length ? `${role} 必需验证未执行：${reason}` : reason);
+      if (result.status === 'blocked') blocks.set(ticket.number, reason);
       return reason;
     };
     // Git deliverable 是 Gate 的独立条件：核实异常也必须归入 Gate 拒绝，
@@ -885,15 +894,7 @@ export async function createEngine(config, processes, event = () => {}, observat
       if (!notDeliverable) {
         const review = await runRole('reviewer', { ...context, previous: implement });
         if (review.status === 'stopped' || processes.stopping) return review;
-        const inheritedGaps = implement.tests.filter(test => test.status !== 'passed');
         let reviewReason = selfReportReason('reviewer', review);
-        // 审查验证不接受 failed：与 not-run 一样由 engine 独立拒绝。
-        if (!reviewReason && !passedTests(review)) reviewReason = `审查验证失败：${review.tests.filter(test => test.status === 'failed').map(test => `${test.command}：${test.summary}`).join('; ')}`;
-        // 条件必填的审查声明，不是引擎对验收完成的独立证明。
-        if (!reviewReason && inheritedGaps.length && (typeof review.acceptanceResolution !== 'string' || !review.acceptanceResolution.trim())) {
-          reviewReason = `Reviewer 未说明前序验收缺口如何解决或为何不适用：${inheritedGaps.map(test => `${test.command} (${test.status})：${test.summary}`).join('; ')}`;
-          blocks.set(ticket.number, reviewReason);
-        }
         // 审查可以没有新提交（上游 reviewer 模板“合格则无需新 commit”）；
         // 交付由 branch commits 与 trackedDirty 独立核实，review.commits 只作摘要。
         if (!reviewReason && !await deliverable(workspace)) reviewReason = '审查未满足现场契约：分支无可交付提交或存在未提交的已跟踪改动';
@@ -1060,16 +1061,19 @@ export async function createEngine(config, processes, event = () => {}, observat
         // Merger 受阻同样是逐票 Delivery 事实，不能只留在 blocks/targetReason
         // 供 UI 反推；尚未关闭的票独立发布 blocked。
         const blockedTickets = group.phase === 'close' ? result.tickets.filter(item => !item.closed).map(item => item.ticket) : result.tickets.map(item => item.ticket);
-        for (const number of blockedTickets) observations?.observe('engine/delivery', 'delivery-blocked', { ticket: number, tickets: [number], batch: group.id, role: 'merger' }, { state: 'blocked', phase: group.phase, reason: blockedReason });
+        // Merger 路径不参与停滞计数：该字段仅为与 Gate 拒绝载荷保持 schema 一致。
+        for (const number of blockedTickets) observations?.observe('engine/delivery', 'delivery-blocked', { ticket: number, tickets: [number], batch: group.id, role: 'merger' }, { state: 'blocked', phase: group.phase, reason: blockedReason, stagnationCounted: false });
       }
       // 合并失败可接续；关闭失败逐票保留，下一轮仅关闭，绝不重跑 merge/test/summary。
       event('merge-progress', { batch: group.id, phase: group.phase, summarySubject: group.summarySubject, tickets: result.tickets });
       // 逐票 Delivery 独立发布；共享逻辑 Merger 不合并各票交付结果，
       // 也不能由 role-end、Self-report 或 Merger 汇总隐式替代。
       for (const item of result.tickets) {
+        // Merger 路径不参与停滞计数：该字段仅为与 Gate 拒绝载荷保持 schema 一致。
         observations?.observe('engine/delivery', item.closed ? 'delivery-complete' : item.merged ? 'delivery-merged' : 'delivery-blocked', { ticket: item.ticket, tickets: [item.ticket], batch: group.id, role: 'merger' }, {
           state: item.closed ? 'closed' : item.merged ? (item.verified ? 'verified' : 'merged-unverified') : 'blocked',
           merged: item.merged, verified: item.verified, closed: item.closed, phase: group.phase,
+          ...(!item.closed && !item.merged ? { stagnationCounted: false } : {}),
         });
       }
     } catch (error) {
@@ -1079,7 +1083,8 @@ export async function createEngine(config, processes, event = () => {}, observat
       event('merge-failed', { batch: group.id, reason: error.message });
       // 交付异常同样是逐票 Delivery 事实；不能由 merge-failed 事件隐式替代，
       // 也不代表每票都已失败，因此逐票发布 blocked 并保留原因。
-      for (const item of group.tickets) observations?.observe('engine/delivery', 'delivery-blocked', { ticket: item.ticket.number, tickets: [item.ticket.number], batch: group.id, role: 'merger' }, { state: 'blocked', phase: group.phase, reason: error.message });
+      // Merger 路径不参与停滞计数：该字段仅为与 Gate 拒绝载荷保持 schema 一致。
+      for (const item of group.tickets) observations?.observe('engine/delivery', 'delivery-blocked', { ticket: item.ticket.number, tickets: [item.ticket.number], batch: group.id, role: 'merger' }, { state: 'blocked', phase: group.phase, reason: error.message, stagnationCounted: false });
     }
   }
 
