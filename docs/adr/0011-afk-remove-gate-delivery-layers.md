@@ -22,7 +22,9 @@ Issue #13 的决策，一次做完的纯减法：**删掉从未是需求的三�
 - 待合集筛选条件为"正常完成且提交非空"，与上游 `fulfilled + commits.length > 0` 同义，另以 `rev-list --count` 做 Git 事实对照。
 - 外层加全局最大轮次（默认 10，`--max-rounds` 可配），达到即正常结束当前 run；这是 run 有界性的唯一机制。
 - Merger 单次调用完成合并、验证、关闭三件事；关闭指令在 prompt 内，引擎不代关。
-- 引擎对 Merger 结果保留的核验：身份形状（run/attempt/role、branch/cwd 绑定、逐票分支对应）与合并血缘事实（分支已成为目标祖先）+ 用户基线改动不被吞并。verified 与 summary 前置不再作为关闭阻断。
+- 引擎对 Merger 结果保留的核验：身份形状（run/attempt/role、branch/cwd 绑定、逐票分支对应——`original.workspace.branch !== item.branch` 即拒）与合并血缘事实（分支已成为目标祖先）+ 用户基线改动不被吞并（612f7ff 既有保护，非本次新增）。verified 与 summary 前置不再作为关闭阻断。
+- merge/close 两阶段（先持久化合并验证、再独立 close-only 调用）保留：US10 的"单次调用"指合并验证关闭三件事都由 Merger prompt 执行、引擎不代关，不指压缩为一次 runRole 调用；两阶段持久化是防坏封套重做的既有机制，由既有用例锁住。
+- `merger-result` 是引擎在 `merge-progress` 旁新增的一条逐票观测事实（merged/verified/closed/phase），看板只能读 observations.jsonl 而不能读 events.jsonl，因此需要它来推导逐票状态；US15 的保留清单按此增补一条。
 - 保留 issue #12 的非三层改动：Reviewer prompt 的上游 EXECUTION 对齐、providers / processes 的终局信号裁定权限（含三 harness 洗白）。
 
 **Dashboard 与观测**
