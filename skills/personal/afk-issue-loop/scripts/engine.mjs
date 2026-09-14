@@ -16,6 +16,9 @@ const permission = /permission denied|permission.*denied|not permitted|unauthori
 const unsafeTermination = /终止未确认|禁止交接|进程组.*(?:EPERM|not permitted)|EPERM.*(?:终止|quarantine)/i;
 const configurationFailure = /not logged in|authentication|auth_unavailable|no auth available|invalid.{0,20}(?:api.?key|model)|(?:unknown|unsupported|not found).{0,20}model|model.{0,40}(?:not found|not supported|does not exist)|nested.*session|cannot be launched inside|login required|missing.{0,20}(?:credential|api.?key)|登录|模型.*不支持/i;
 const workspaceFailure = /现场分支改变|角色离开绑定|现场不属于|运行日志被暂存|运行日志被提交|归属未经确认|活跃写者|候选写者|role-start|写锁.*(?:无法|占用|确认)|worktree 已锁定|not a git repository/i;
+// 仅 writer ownership 造成的阻碍可以在重检后自动清除；其他阻碍（权限、
+// 依赖、锁定、Git 冲突）属于不同原因，不能被 writer 重检路径一并抹掉。
+const writerBlocking = /活跃写者|写锁|活跃 writer|ownership/i;
 const conventional = /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^\n)]+\))?!?: .*[㐀-鿿]/u;
 const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
 const isSpec = issue => (issue.labels || []).some(label => /^spec$/i.test(typeof label === 'string' ? label : label.name)) || /^spec$/i.test(issue.type?.name || '') || /^(?:\[spec\]|spec\s*[:：])/i.test(issue.title || '');
@@ -152,8 +155,9 @@ export async function createEngine(config, processes, event = () => {}, observat
     }
   }
   const recoveryGit = (args, cwd, scope) => recoveryCommand('git', args, cwd, scope);
-  // spec 18：现场的事实集合——could not be inferred from a boolean alone。
-  // OID、commits ahead、ancestry、dirty 与 in-progress 的判定依据全部落盘。
+  // Issue #10 Recovery completeness：布尔值本身无法说明现场为何被分类为
+  // recovered 或 merged-unverified，OID、commits ahead、ancestry、dirty 与
+  // in-progress 的判定依据全部落盘。
   const oid = async (rev, cwd) => {
     try { return await git(['rev-parse', rev], cwd); } catch { return undefined; }
   };
@@ -223,7 +227,8 @@ export async function createEngine(config, processes, event = () => {}, observat
   const attemptedTickets = new Set();
   const deliveredTickets = new Set();
   // planned Attempt 与实际 spawn 的 Invocation 分别记录，供 Self-report/Gate 关联。
-  const plannedAttempts = new Map();
+  const attemptCounters = new Map();
+  let attemptIds = 0;
   const mergeQueue = [];
   let targetCwd, targetReason, pending, batch = 0, attempt = 0;
   let running = false, finished = false, quarantined = false;
@@ -683,18 +688,31 @@ export async function createEngine(config, processes, event = () => {}, observat
   }
   async function runRole(role, context, onDispatch = () => {}) {
     if (processes.stopping) return { status: 'stopped', reason: '用户停止' };
-    const identity = { ...context, run: config.run, attempt: ++attempt, role };
+    // Attempt 是作用域内的 cycle 序号：Implementer/Reviewer 按 Ticket/Role，
+    // Merger 按 Batch/Role。同一作用域重新开始完整 cycle 才递增；
+    // 被动 inventory、probe 与 SSE 重连都不经过这里，因此不会污染计数。
+    const scopeKey = role === 'merger'
+      ? `merger|batch:${context.batch}|${context.mode}`
+      : `${role}|ticket:${context.ticket?.number}`;
+    const ordinal = (attemptCounters.get(scopeKey) || 0) + 1;
+    attemptCounters.set(scopeKey, ordinal);
+    // 内部唯一 id 只用于把 planned Attempt 与后来的 Invocation 对齐；
+    // 不同 Ticket 的 ordinal 可以相同，不能用它做键。
+    const attemptId = ++attemptIds;
+    const identity = { ...context, run: config.run, attempt: ordinal, role };
     // planned Attempt 先于 spawn 存在；Invocation/PID 只在实际 spawn 成功后补齐。
-    const planned = { invocation: undefined };
-    plannedAttempts.set(identity.attempt, planned);
-    observations?.observe('engine', 'attempt-planned', { role, attempt: identity.attempt, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, { phase: context.mode || role, state: 'planned' });
-    const logPath = join(config.logDir, `${String(attempt).padStart(5, '0')}-${role}-${context.tickets.join('-')}.stdout.log`);
+    let invocation;
+    observations?.observe('engine', 'attempt-planned', { role, attempt: ordinal, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, { phase: context.mode || role, state: 'planned' });
+    const logPath = join(config.logDir, `${String(attemptId).padStart(5, '0')}-${role}-${context.tickets.join('-')}.stdout.log`);
     await correctWorkspace(context);
     const rendered = await prompt(role, identity);
     if (processes.stopping) return { status: 'stopped', reason: '用户停止' };
     await correctWorkspace(context);
     onDispatch();
-    const result = await processes.role(config, { ...identity, prompt: rendered }, logPath, event, observations, invocation => { planned.invocation = invocation; });
+    const result = await processes.role(config, { ...identity, prompt: rendered }, logPath, event, observations, value => { invocation = value; });
+    // Invocation 随结果返回，Gate 直接引用它，不靠 ordinal 反查（不同 Ticket
+    // 的 Attempt ordinal 可以相同）。
+    result.invocation = invocation;
     event('role-result', { role, attempt: identity.attempt, tickets: context.tickets, result });
     // Provider 层的失败/权限结果不含业务封套，
     // 不能将其解读为成功的结构化交付结果。
@@ -704,7 +722,7 @@ export async function createEngine(config, processes, event = () => {}, observat
       return result;
     }
     validateCommon(result, identity);
-    observations?.observe('role/self-report', 'self-report', { role, attempt: identity.attempt, invocation: planned.invocation, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, result);
+    observations?.observe('role/self-report', 'self-report', { role, attempt: identity.attempt, invocation: result.invocation, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, result);
     if (role !== 'merger' && (result.ticket !== context.ticket.number || !strings(result.commits))) throw new Error('逐票结果 ticket/commits 字段无效');
     return result;
   }
@@ -721,7 +739,7 @@ export async function createEngine(config, processes, event = () => {}, observat
     const context = { ticket, tickets: [ticket.number], ...workspace, target, targetCwd, feedback: pipelineFeedback.get(ticket.number) };
     // engine 独立发布 Gate 结论，不由 UI 从 Self-report 反向猜测；
     // 每次 Gate 都关联同一 planned Attempt 与 Invocation。
-    const gateScope = (role, result) => ({ role, attempt: result.attempt, invocation: plannedAttempts.get(result.attempt)?.invocation, ticket: ticket.number, tickets: [ticket.number] });
+    const gateScope = (role, result) => ({ role, attempt: result.attempt, invocation: result.invocation, ticket: ticket.number, tickets: [ticket.number] });
     const gateAccept = (role, result) => observations?.observe('engine/gate', 'gate-accepted', gateScope(role, result), { accepted: true, reason: 'Self-report、测试与 Git deliverable 均满足 Gate 条件' });
     const gateReject = (role, result, reason) => {
       const scope = gateScope(role, result);
@@ -748,6 +766,9 @@ export async function createEngine(config, processes, event = () => {}, observat
     try {
       if (workspace.mergedIntoTarget) {
         event('merge-already-present', { ticket: ticket.number, branch: workspace.branch, target, action: 'verify-close' });
+        // 分支已是目标祖先时没有 Role Self-report 可引用，但 Gate 仍必须由
+        // engine 显式发布：跳过 I/R 是 engine 的独立结论，不是 Role 自报。
+        observations?.observe('engine/gate', 'gate-accepted', { ticket: ticket.number, tickets: [ticket.number] }, { accepted: true, reason: '分支提交已成为目标分支祖先，跳过重复实现与 merge，转入验证关闭' });
         queuedForMerge = true;
         return {
           status: 'passed', summary: '分支提交已在目标中，跳过重复实现与 merge，继续验证和关闭',
@@ -927,9 +948,14 @@ export async function createEngine(config, processes, event = () => {}, observat
       } else if (group.phase === 'close' || result.summarySubject !== null || result.status === 'passed') throw new Error('Merger 成功/close-only 必须保留已完成 summary');
       group.previous = result;
       if (result.status === 'blocked') {
+        const blockedReason = group.phase === 'close' ? `关闭受阻：${result.summary}；${result.remaining.join('; ')}` : result.summary || 'Merger 权限/现场阻碍';
         if (group.phase === 'close') {
-          for (const item of result.tickets) if (!item.closed) blocks.set(item.ticket, `关闭受阻：${result.summary}；${result.remaining.join('; ')}`);
-        } else targetReason = result.summary || 'Merger 权限/现场阻碍';
+          for (const item of result.tickets) if (!item.closed) blocks.set(item.ticket, blockedReason);
+        } else targetReason = blockedReason;
+        // Merger 受阻同样是逐票 Delivery 事实，不能只留在 blocks/targetReason
+        // 供 UI 反推；尚未关闭的票独立发布 blocked。
+        const blockedTickets = group.phase === 'close' ? result.tickets.filter(item => !item.closed).map(item => item.ticket) : result.tickets.map(item => item.ticket);
+        for (const number of blockedTickets) observations?.observe('engine/delivery', 'delivery-blocked', { ticket: number, tickets: [number], batch: group.id, role: 'merger' }, { state: 'blocked', phase: group.phase, reason: blockedReason });
       }
       // 合并失败可接续；关闭失败逐票保留，下一轮仅关闭，绝不重跑 merge/test/summary。
       event('merge-progress', { batch: group.id, phase: group.phase, summarySubject: group.summarySubject, tickets: result.tickets });
@@ -946,6 +972,9 @@ export async function createEngine(config, processes, event = () => {}, observat
       if (dispatched && !processes.stopping) await inspectMerger(group, error.message);
       else if ([permission, configurationFailure, workspaceFailure].some(pattern => pattern.test(error.message))) targetReason = error.message;
       event('merge-failed', { batch: group.id, reason: error.message });
+      // 交付异常同样是逐票 Delivery 事实；不能由 merge-failed 事件隐式替代，
+      // 也不代表每票都已失败，因此逐票发布 blocked 并保留原因。
+      for (const item of group.tickets) observations?.observe('engine/delivery', 'delivery-blocked', { ticket: item.ticket.number, tickets: [item.ticket.number], batch: group.id, role: 'merger' }, { state: 'blocked', phase: group.phase, reason: error.message });
     }
   }
 
@@ -992,7 +1021,13 @@ export async function createEngine(config, processes, event = () => {}, observat
               }
               // 某票等待 active writer 时其余独立票继续；此处定期重新做正向活跃检测，
               // 一旦不再检测到 active writer 就自动恢复并派发，无需重新调用 skill。
-              const waitingWriter = open.filter(number => recovery.get(number)?.state === 'waiting-writer');
+              const waitingWriter = open.filter(number => {
+                if (recovery.get(number)?.state !== 'waiting-writer') return false;
+                // 该票若还带着非 writer 阻碍（权限、依赖、锁定等），不清除它：
+                // 交给 waitingReasons 报告真实原因，避免重检路径误派发。
+                const block = blocks.get(number);
+                return !block || writerBlocking.test(block);
+              });
               if (waitingWriter.length) {
                 for (const number of waitingWriter) blocks.delete(number);
                 event('writer-recheck', { tickets: waitingWriter });

@@ -48,9 +48,23 @@ function page(data = null) {
   // 结构性文本（source/kind/scope/时间）经转义后拼入 HTML；payload 与
   // 文本行始终走 textContent，保持原始内容不被解析为标签。
   const esc=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // Process、Self-report、Gate 与 Delivery 是四层独立事实：进程存活不代表
+  // 有效工作，Self-report passed 不代表 Gate 接受，Role 退出不代表已交付。
+  // 因此四层各自取最新记录并分开呈现，任一层都不冒充业务完成。
+  function layerOf(own,match){for(let i=own.length-1;i>=0;i--){const r=own[i];if(match(r))return r}return null}
+  function facets(id){const own=records.filter(r=>r.scope?.ticket===id||(r.scope?.tickets||[]).includes(id));
+    const proc=layerOf(own,r=>r.kind==='invocation-started'||r.kind==='role-end');
+    const self=layerOf(own,r=>r.kind==='self-report');
+    const gate=layerOf(own,r=>r.kind==='gate-accepted'||r.kind==='gate-rejected');
+    const delivery=layerOf(own,r=>String(r.kind).startsWith('delivery-'));
+    return {
+      process:proc?(proc.kind==='invocation-started'?'running':'ended'):'none',
+      selfReport:self?.payload?.status||'none',
+      gate:gate?(gate.kind==='gate-accepted'?'accepted':'rejected'):'none',
+      delivery:delivery?String(delivery.payload?.state||delivery.kind.replace('delivery-','')):'none'};}
   // 重绘会替换 Ticket 按钮节点，先记下聚焦的 ticket 再在重建后恢复，
   // 否则按住方向键逐条浏览时焦点会在第一次选择后丢失。
-  function render(){const map=entries();const ids=[...map.keys()].sort((a,b)=>a-b);const focused=document.activeElement?.dataset?.ticket;document.querySelector('#tickets').innerHTML=ids.length?ids.map(id=>{const e=map.get(id);return '<button class="ticket" data-ticket="'+id+'" aria-pressed="'+(selected===id)+'"><strong>#'+id+'</strong><br><span class="kind">'+esc([...e.roles].join(' · '))+'</span><br>Recovery → Implementer → Reviewer → Merger / Delivery<br><span class="scope">'+e.count+' 条输出 · last observed '+esc(e.last)+'</span></button>'}).join(''):'<p>等待 Ticket observation…</p>';
+  function render(){const map=entries();const ids=[...map.keys()].sort((a,b)=>a-b);const focused=document.activeElement?.dataset?.ticket;document.querySelector('#tickets').innerHTML=ids.length?ids.map(id=>{const e=map.get(id);const f=facets(id);return '<button class="ticket" data-ticket="'+id+'" aria-pressed="'+(selected===id)+'"><strong>#'+id+'</strong><br><span class="kind">'+esc([...e.roles].join(' · '))+'</span><br>Recovery → Implementer → Reviewer → Merger / Delivery<br><span class="scope">process '+esc(f.process)+' · self-report '+esc(f.selfReport)+' · Gate '+esc(f.gate)+' · Delivery '+esc(f.delivery)+'</span><br><span class="scope">'+e.count+' 条输出 · last observed '+esc(e.last)+'</span></button>'}).join(''):'<p>等待 Ticket observation…</p>';
   if(focused!==undefined)document.querySelector('#tickets [data-ticket="'+focused+'"]')?.focus();
   identity.textContent=selected==null?'全部 Observation':'selected Ticket #'+selected;
   const rows=foldLines(visibleRecords());
@@ -75,7 +89,7 @@ const writeFinal = () => {
     const data = snapshot();
     writeFileSync(finalPath, page(data), { mode: 0o600 });
     chmodSync(finalPath, 0o600);
-    for (const client of clients) client.write('event: final\ndata: {}\n\n');
+    for (const client of clients) client.res.write('event: final\ndata: {}\n\n');
     process.send?.({ final: true });
   } catch { /* 导出失败只影响静态文件，不影响 run。 */ }
 };
@@ -87,12 +101,21 @@ const server = createServer((req, res) => {
   if (url.pathname === '/events') {
     res.writeHead(200, { ...headers, 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
     res.socket?.setNoDelay?.(true);
-    // SSE event ID 等于 Observation seq；Last-Event-ID/after 只补发后续记录。
-    const after = Number(url.searchParams.get('after') || req.headers['last-event-id'] || 0);
-    for (const record of readRecords()) if (record.seq > after) res.write(`id: ${record.seq}\ndata: ${JSON.stringify(record)}\n\n`);
+    // SSE event ID 等于 Observation seq；只补发 after 之后的记录。
+    // 浏览器自动重连会带 Last-Event-ID，它比 URL 里页面加载时固定的 after
+    // 更接近实际已见位置，因此优先采用；否则重连会重发全部增量。
+    const after = Number(req.headers['last-event-id'] ?? url.searchParams.get('after') ?? 0);
+    // 游标按客户端记录：补发到哪里，后续广播就从哪里继续，
+    // 避免刚 replay 完的客户端在下一轮广播里重复收到同一批记录。
+    const client = { res, cursor: after };
+    for (const record of readRecords()) {
+      if (record.seq <= client.cursor) continue;
+      res.write(`id: ${record.seq}\ndata: ${JSON.stringify(record)}\n\n`);
+      client.cursor = record.seq;
+    }
     if (existsSync(resultPath)) res.write('event: final\ndata: {}\n\n');
-    clients.add(res);
-    req.on('close', () => clients.delete(res));
+    clients.add(client);
+    req.on('close', () => clients.delete(client));
     return;
   }
   if (url.pathname !== '/') { res.writeHead(404, headers); return res.end('Not found'); }
@@ -105,7 +128,7 @@ server.listen(Number(portArg) || 0, '127.0.0.1', () => {
   if (existsSync(resultPath)) writeFinal();
 });
 
-let broadcast = 0;
+let observed = 0;
 let frozen = false;
 // 每个 SSE 客户端的有界旁路队列上限（字节）。慢客户端被断开后
 // 可通过 journal 按 seq 重连，不需要 worker 无限缓冲。
@@ -113,16 +136,17 @@ const MAX_CLIENT_BUFFER = 4 * 1024 * 1024;
 const timer = setInterval(() => {
   const records = readRecords();
   for (const record of records) {
-    if (record.seq <= broadcast) continue;
-    broadcast = record.seq;
+    if (record.seq <= observed) continue;
+    observed = record.seq;
     for (const client of [...clients]) {
-      if (client.writableLength > MAX_CLIENT_BUFFER) {
+      if (client.cursor >= record.seq) continue;
+      if (client.res.writableLength > MAX_CLIENT_BUFFER) {
         clients.delete(client);
-        try { client.destroy(); } catch {}
+        try { client.res.destroy(); } catch {}
         continue;
       }
-      try { client.write(`id: ${record.seq}\ndata: ${JSON.stringify(record)}\n\n`); }
-      catch { clients.delete(client); try { client.destroy(); } catch {} }
+      try { client.res.write(`id: ${record.seq}\ndata: ${JSON.stringify(record)}\n\n`); client.cursor = record.seq; }
+      catch { clients.delete(client); try { client.res.destroy(); } catch {} }
     }
   }
   if (!frozen && existsSync(resultPath)) { frozen = true; writeFinal(); }

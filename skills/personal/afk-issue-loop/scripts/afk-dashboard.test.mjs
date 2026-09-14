@@ -279,6 +279,42 @@ test('SSE 按 seq 发布且只补发最后已见 ID 之后的记录', async () =
   }
 });
 
+test('SSE 重连按 Last-Event-ID 只补缺失记录，不重发也不跳号', async () => {
+  const fixture = createFixture();
+  let runDir;
+  try {
+    addBranchCommit(fixture, 9);
+    const started = await startRun(fixture);
+    runDir = started.logDir;
+    await waitUntil(() => existsSync(join(runDir, 'observations.jsonl')) && journal(runDir).length >= 8, 'journal 未产生足够记录');
+    const origin = new URL(started.dashboard.url).origin;
+    const token = readToken(started.dashboard.url);
+
+    // 第二次连接携带更靠后的 Last-Event-ID；URL 里保留页面加载时的旧 after，
+    // 服务端必须优先采用 Last-Event-ID，否则会重发已见记录。
+    const response = await fetch(`${origin}/events?token=${token}&after=1`, { headers: { Accept: 'text/event-stream', 'Last-Event-ID': '5' } });
+    assert.equal(response.status, 200);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if ([...text.matchAll(/^id: (\d+)$/gm)].length >= 3) break;
+    }
+    await reader.cancel();
+    const ids = [...text.matchAll(/^id: (\d+)$/gm)].map(match => Number(match[1]));
+    assert.ok(ids.length > 0, `SSE 未返回任何记录：${text.slice(0, 200)}`);
+    assert.ok(ids.every(id => id > 5), `SSE 重放了 Last-Event-ID 之前的记录：${ids.join(',')}`);
+    assert.deepEqual(ids, [...new Set(ids)], 'SSE 重连不得重复同一 seq');
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('关闭页面与 SSE 断线不影响 run，重开 URL 恢复全部历史', async () => {
   const fixture = createFixture();
   let runDir;
@@ -565,6 +601,31 @@ test('尚未 spawn 时 planned Attempt 可见且没有 Invocation，Invocation �
     assert.equal(invocation.scope.attempt, planned.scope.attempt, 'Invocation 必须关联对应 planned Attempt');
     assert.equal(invocation.scope.invocation, 1, '本 run 首个 Invocation 为 1');
     assert.equal(invocation.payload.attempt, planned.scope.attempt);
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('Attempt 按 per-Ticket/per-Role 计数，不同 Ticket 各自从 1 开始', async () => {
+  const fixture = createFixture();
+  let runDir;
+  try {
+    addBranchCommit(fixture, 9);
+    addBranchCommit(fixture, 10);
+    const started = await startRun(fixture, '9,10');
+    runDir = started.logDir;
+    await waitUntil(() => {
+      if (!existsSync(join(runDir, 'observations.jsonl'))) return false;
+      const planned = journal(runDir).filter(record => record.kind === 'attempt-planned' && record.scope.role === 'implementer');
+      return new Set(planned.flatMap(record => record.scope.tickets)).size >= 2;
+    }, '两个 Ticket 的 Implementer Attempt 未出现');
+
+    const implementers = journal(runDir).filter(record => record.kind === 'attempt-planned' && record.scope.role === 'implementer');
+    const byTicket = new Map(implementers.map(record => [record.scope.tickets[0], record.scope.attempt]));
+    // 两票在同一 run 内并发派发：per-Ticket Attempt 各自从 1 开始，
+    // 而不是共用 run 级全局递增序号。
+    assert.deepEqual([...byTicket.entries()].sort((a, b) => a[0] - b[0]), [[9, 1], [10, 1]], `Attempt 必须按 Ticket/Role 计数：${JSON.stringify([...byTicket])}`);
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
