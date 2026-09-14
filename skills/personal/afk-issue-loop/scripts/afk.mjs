@@ -70,7 +70,8 @@ async function daemon(config) {
   const observations = new ObservationJournal(config.logDir, config.run);
   const processes = new Processes();
   const control = { run: config.run, pid: process.pid, socket: join(tmpdir(), `afk-${config.run}.sock`), token: randomUUID() };
-  let state = 'starting', result, engine, stopPromise, logFailure;
+  let state = 'starting', result, engine, stopPromise, logFailure, livenessTimer, abandonmentCleanup;
+  let missingRunSiteTicks = 0, runAbandoned = false;
   const diagnostic = error => {
     try { process.stderr.write(`AFK：${error.stack || error.message || error}\n`); }
     catch { /* 日志介质不可用时，仍继续受管停止。 */ }
@@ -86,7 +87,7 @@ async function daemon(config) {
     try { appendFileSync(join(config.logDir, 'events.jsonl'), `${JSON.stringify({ time: new Date().toISOString(), run: config.run, type, ...data })}\n`); }
     catch (error) {
       logFailure ||= error;
-      stop(false, error);
+      stop({ log: false, failure: error });
       throw error;
     }
   };
@@ -100,14 +101,45 @@ async function daemon(config) {
       if (process.connected) process.disconnect();
     });
   };
-  function stop(log = true, failure) {
+  function stop({ log = true, failure, reason = 'event-log-error' } = {}) {
     if (stopPromise) return stopPromise;
     state = 'stopping';
-    // 停止先于记录；日志故障归因于基础设施，不冒充用户停止。
-    stopPromise = failure ? processes.halt(failure, 'event-log-error') : processes.stop();
+    // 停止先于记录；基础设施故障不冒充用户停止。
+    stopPromise = failure ? processes.halt(failure, reason) : processes.stop();
     stopPromise.catch(diagnostic);
     if (log) bestEffortEvent('stop-requested');
     return stopPromise;
+  }
+  function runSiteMissing() {
+    return !existsSync(config.logDir);
+  }
+  async function cleanUpAbandonedRun() {
+    try {
+      await stopPromise.catch(() => {});
+      const released = await engine?.releaseAbandonedLocks();
+      if (released) clearInterval(livenessTimer);
+    } catch (error) {
+      diagnostic(error);
+    } finally {
+      abandonmentCleanup = undefined;
+    }
+  }
+  function checkRunSiteLiveness() {
+    if (runAbandoned) {
+      abandonmentCleanup ??= cleanUpAbandonedRun();
+      return;
+    }
+    if (!runSiteMissing()) {
+      missingRunSiteTicks = 0;
+      return;
+    }
+    missingRunSiteTicks++;
+    if (missingRunSiteTicks < 2) return;
+    runAbandoned = true;
+    const error = new Error(`运行现场已消失：${config.logDir}`);
+    diagnostic(error);
+    if (!stopPromise) void stop({ log: false, failure: error, reason: 'run-site-missing' });
+    abandonmentCleanup = cleanUpAbandonedRun();
   }
   process.on('SIGTERM', () => { stop(); });
   process.on('SIGINT', () => { stop(); });
@@ -140,6 +172,10 @@ async function daemon(config) {
     });
     chmodSync(control.socket, 0o600);
     save(join(config.logDir, 'control.json'), control);
+    // detached daemon 不依赖发起会话，但仍依赖 run 现场。外部清理器或测试宿主
+    // 移除现场后必须受管停止；否则静默角色不会再触发日志写入，daemon 会永久孤立。
+    livenessTimer = setInterval(checkRunSiteLiveness, 1_000);
+    livenessTimer.unref();
     const { createEngine } = await import('./engine.mjs');
     engine = await createEngine(config, processes, event, observations);
     if (processes.stopping) throw new Error('启动期间收到停止请求');
@@ -164,6 +200,9 @@ async function daemon(config) {
     bestEffortEvent(startup ? 'startup-failed' : 'failed', result);
     announce({ ready: false, error: error.message });
   } finally {
+    // 终止未确认时 writer ownership server 有意保留；同时保留 liveness，
+    // 只在 run 现场后来确实消失时释放本 daemon 的锁并退出。
+    if (!processes.hasUnsafeWriters) clearInterval(livenessTimer);
     if (logFailure) state = 'failed';
     bestEffortEvent('finished', { state });
     // 冻结 Observation history：落盘节流中的 state，此后 journal 不再增长。
@@ -171,7 +210,7 @@ async function daemon(config) {
     if (logFailure) {
       state = 'failed';
       result = { ...result, logError: logFailure.message };
-      try { await stop(false); } catch (error) { diagnostic(error); }
+      try { await stop({ log: false }); } catch (error) { diagnostic(error); }
     }
     try { save(join(config.logDir, 'result.json'), { ...engine?.describe(), ...result, ...config.selection, run: config.run, state, finished: new Date().toISOString() }); }
     catch (error) { diagnostic(error); }

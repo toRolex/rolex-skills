@@ -95,7 +95,7 @@ else git -C "${repo}" worktree add -q "$path" "$branch"
 fi`);
   const fakeClaude = join(root, 'fake-claude.mjs');
   writeFileSync(fakeClaude, `
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 let prompt = '';
@@ -105,6 +105,14 @@ const input = JSON.parse(prompt.slice(jsonStart + 1));
 const context = input.context;
 appendFileSync(process.env.AFK_ROLE_LOG, JSON.stringify({ role: context.role, ticket: context.ticket?.number, mode: context.mode, cwd: process.cwd() }) + '\\n');
 const behavior = process.env.AFK_ROLE_BEHAVIOR || 'hang';
+if (behavior === 'escaped-writer') {
+  const escaped = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    detached: true,
+    stdio: ['ignore', process.stdout, process.stderr],
+  });
+  appendFileSync(process.env.AFK_ESCAPED_PID_LOG, String(escaped.pid) + '\\n');
+  escaped.unref();
+}
 // 原始 transport 负载先于 provider-specific 解析进入 Observation journal。
 // 未识别事件、完整 tool-call 参数、stdout/stderr 都必须被忠实保留。
 process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [
@@ -161,8 +169,17 @@ if [ "\${1:-}" = '--version' ]; then printf '%s\\n' 'claude fixture'; exit 0; fi
 exec "${process.execPath}" "$AFK_FAKE_CLAUDE" "$@"`);
 
   // 测试不打开真实浏览器；只验证 URL 与 server 行为。
-  const env = { ...process.env, AFK_DASHBOARD_OPEN: '0', PATH: `${bin}:${process.env.PATH}`, AFK_ROLE_LOG: roleLog, AFK_FAKE_CLAUDE: fakeClaude, AFK_ISSUE_STATE_DIR: issueStateDir };
-  return { root, repo, roleLog, env };
+  const escapedPidLog = join(root, 'escaped-pids.log');
+  const env = {
+    ...process.env,
+    AFK_DASHBOARD_OPEN: '0',
+    PATH: `${bin}:${process.env.PATH}`,
+    AFK_ROLE_LOG: roleLog,
+    AFK_FAKE_CLAUDE: fakeClaude,
+    AFK_ISSUE_STATE_DIR: issueStateDir,
+    AFK_ESCAPED_PID_LOG: escapedPidLog,
+  };
+  return { root, repo, roleLog, escapedPidLog, env };
 }
 
 async function waitUntil(predicate, message, timeoutMs = 6_000) {
@@ -172,6 +189,21 @@ async function waitUntil(predicate, message, timeoutMs = 6_000) {
     await delay(50);
   }
   assert.fail(typeof message === 'function' ? message() : message);
+}
+
+function processOrGroupExists(target) {
+  try {
+    process.kill(target, 0);
+    return true;
+  } catch (error) {
+    return error.code !== 'ESRCH';
+  }
+}
+
+function forceKill(target) {
+  try {
+    process.kill(target, 'SIGKILL');
+  } catch {}
 }
 
 async function stopRun(runDir, env) {
@@ -192,6 +224,12 @@ async function startAndWaitForRole(fixture, issues = '9') {
 function roleEntries(fixture) {
   if (!existsSync(fixture.roleLog)) return [];
   return readFileSync(fixture.roleLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+}
+
+function writerSocketPath(fixture, branch) {
+  const common = realpathSync(command('git', ['-C', fixture.repo, 'rev-parse', '--path-format=absolute', '--git-common-dir']));
+  const key = createHash('sha256').update(`${common}\0${branch}`).digest('hex').slice(0, 32);
+  return join(tmpdir(), `afk-writer-${key}.sock`);
 }
 
 function addBranchCommit(fixture, number, keepWorktree) {
@@ -445,6 +483,72 @@ test('原现场有活跃写者时该票等待，其他安全票继续', async ()
   } finally {
     await stopRun(secondRun?.logDir, fixture.env);
     await stopRun(firstRun?.logDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('run 现场被移除后 daemon 终止受管角色并自行退出', async () => {
+  const fixture = createFixture();
+  let daemonPid;
+  let rolePid;
+  try {
+    addBranchCommit(fixture, 9, true);
+    const { logDir } = await startAndWaitForRole(fixture);
+    const eventsPath = join(logDir, 'events.jsonl');
+    daemonPid = JSON.parse(readFileSync(join(logDir, 'control.json'), 'utf8')).pid;
+    await waitUntil(() => {
+      if (!existsSync(eventsPath)) return false;
+      const events = readFileSync(eventsPath, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+      rolePid = events.find(event => event.type === 'role-process')?.managedPid;
+      return Number.isSafeInteger(rolePid);
+    }, 'AFK 未公开受管角色 PID');
+
+    // 模拟测试宿主或外部清理器移除运行中的 fixture。daemon 必须发现现场消失，
+    // 先终止受管角色，再自行退出。
+    rmSync(fixture.root, { recursive: true, force: true });
+    await waitUntil(() => {
+      const daemonExists = processOrGroupExists(daemonPid);
+      const roleGroupExists = processOrGroupExists(-rolePid);
+      assert.equal(daemonExists || !roleGroupExists, true, 'daemon 不得先于受管角色进程组退出');
+      return !daemonExists && !roleGroupExists;
+    }, 'run 现场消失后 daemon 或受管角色进程组未退出', 10_000);
+  } finally {
+    if (rolePid) forceKill(-rolePid);
+    if (daemonPid) forceKill(daemonPid);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('终止未确认时保留 writer lock，现场删除后释放锁并退出 daemon', async () => {
+  const fixture = createFixture();
+  fixture.env.AFK_ROLE_BEHAVIOR = 'escaped-writer';
+  let daemonPid;
+  let escapedPid;
+  let writerPath;
+  try {
+    addBranchCommit(fixture, 9, true);
+    const { logDir } = await startAndWaitForRole(fixture);
+    daemonPid = JSON.parse(readFileSync(join(logDir, 'control.json'), 'utf8')).pid;
+    writerPath = writerSocketPath(fixture, 'afk/issue-9');
+    await waitUntil(() => {
+      if (!existsSync(fixture.escapedPidLog)) return false;
+      escapedPid = Number(readFileSync(fixture.escapedPidLog, 'utf8').trim().split('\n')[0]);
+      return Number.isSafeInteger(escapedPid);
+    }, '未启动受控脱组写者');
+
+    command(process.execPath, [script, 'stop', '--run', logDir], { env: fixture.env });
+    await waitUntil(() => existsSync(join(logDir, 'result.json')), '终止未确认后未写入失败终态', 12_000);
+    assert.equal(processOrGroupExists(daemonPid), true, '现场仍存在时 daemon 必须保留 writer ownership');
+    assert.equal(existsSync(writerPath), true, '现场仍存在时不得释放 writer lock');
+
+    rmSync(fixture.root, { recursive: true, force: true });
+    await waitUntil(() => !processOrGroupExists(daemonPid), '现场删除后隔离 daemon 未退出', 12_000);
+    assert.equal(existsSync(writerPath), false, '现场删除后 writer lock 必须释放');
+    assert.equal(processOrGroupExists(-escapedPid), true, '测试必须确实覆盖终止未确认的脱组写者');
+  } finally {
+    if (escapedPid) forceKill(-escapedPid);
+    if (daemonPid) forceKill(daemonPid);
+    if (writerPath) rmSync(writerPath, { force: true });
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });

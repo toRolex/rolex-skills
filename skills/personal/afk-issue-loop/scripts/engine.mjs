@@ -102,7 +102,13 @@ async function writerLock(common, branch, probe = () => {}) {
           server.listen(path, accept);
         });
         probe({ branch, path, socketState: 'vacant' });
-        return () => new Promise((accept, reject) => server.close(error => error ? reject(error) : accept()));
+        let releasePromise;
+        return function releaseWriterLock() {
+          releasePromise ??= new Promise((accept, reject) => {
+            server.close(error => error ? reject(error) : accept());
+          });
+          return releasePromise;
+        };
       } catch (error) {
         if (error.code !== 'EADDRINUSE') throw error;
         releaseRecoveryGuard ??= acquireRecoveryGuard(recoveryPath, branch);
@@ -231,8 +237,33 @@ export async function createEngine(config, processes, event = () => {}, observat
   let attemptIds = 0;
   const mergeQueue = [];
   let targetCwd, targetReason, pending, batch = 0, attempt = 0;
-  let running = false, finished = false, quarantined = false;
+  let running = false, finished = false, quarantined = false, abandonedReleasePromise;
   const targetDirtyReason = '目标有未归属本运行的 dirty/冲突；保留用户修改，独立实现/审查继续';
+
+  async function releaseOwnedLocks(onFailure) {
+    const failures = [];
+    for (const release of [...releases].reverse()) {
+      try {
+        await release();
+        releases.delete(release);
+      } catch (error) {
+        if (onFailure) onFailure(error);
+        else failures.push(error);
+      }
+    }
+    if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join('\n'));
+    return releases.size === 0;
+  }
+
+  async function releaseAbandonedLocks() {
+    if (!finished) return false;
+    const releasePromise = abandonedReleasePromise ??= releaseOwnedLocks();
+    try {
+      return await releasePromise;
+    } finally {
+      if (abandonedReleasePromise === releasePromise) abandonedReleasePromise = undefined;
+    }
+  }
 
   function writerEventMatches(event, branch) {
     if (!Array.isArray(event.tickets)) return false;
@@ -982,6 +1013,7 @@ export async function createEngine(config, processes, event = () => {}, observat
   event('scope', { repository, target, tickets: [...scope], specs: [...specs], waiting: Object.fromEntries(waitingReasons()) });
   return {
     describe: () => ({ repository, repo: root, target, targetCwd, tickets: [...scope], specs: [...specs], batch, pending: pending && { phase: pending.phase, tickets: pending.tickets.map(item => item.ticket.number) }, queued: mergeQueue.map(group => ({ batch: group.id, tickets: group.tickets.map(item => item.ticket.number) })), recovery: Object.fromEntries(recovery), waiting: Object.fromEntries(waitingReasons()), deliveryFailures: Object.fromEntries(deliveryFailures), targetBlocked: targetReason, quarantined }),
+    releaseAbandonedLocks,
     async run() {
       if (running || finished) throw new Error('Engine 实例只允许运行一次；新 run 由当前 Git/GitHub 事实重新恢复');
       running = true;
@@ -1096,9 +1128,8 @@ export async function createEngine(config, processes, event = () => {}, observat
         finished = true;
         // 未入队管线已释放现场锁；已审查／待验证成果持锁到 run 结束。
         // 未确认终止的写者保留 socket；单个释放失败不阻止其余自身锁释放。
-        if (!quarantined && !processes.hasUnsafeWriters) for (const release of [...releases].reverse()) {
-          try { await release(); releases.delete(release); }
-          catch (error) { event('lock-release-failed', { reason: error.message }); }
+        if (!quarantined && !processes.hasUnsafeWriters) {
+          await releaseOwnedLocks(error => event('lock-release-failed', { reason: error.message }));
         }
       }
     },
