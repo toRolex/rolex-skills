@@ -93,6 +93,7 @@ exit 0`);
   const fakeClaude = join(root, 'fake-claude.mjs');
   writeFileSync(fakeClaude, `
 import { appendFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 const input = JSON.parse(prompt.slice(prompt.lastIndexOf('\\n{') + 1));
@@ -112,14 +113,31 @@ emit({ type: 'afk-fixture-unknown-event', subtype: 'not-recognised', payload: { 
 process.stderr.write('fixture stderr：完整错误原文\\n');
 // 受控 Gate 场景：Self-report passed 但测试 not-run，engine 必须独立发布 Gate rejected。
 const notRun = process.env.AFK_ROLE_BEHAVIOR === 'gate-reject' && context.role === 'reviewer';
-const result = {
-  run: context.run, attempt: context.attempt, role: context.role,
-  status: 'passed', summary: '复用已有实现，无需新增提交',
-  tests: notRun ? [{ command: 'fixture verify', status: 'not-run', summary: '未执行' }] : [],
-  remaining: [],
-  branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
-  commits: ['已有可交付提交'],
-};
+// Merger 行为：把本批分支合入目标并写 summary，使逐票 Delivery 与 batch
+// identity 可被观察。
+let result;
+if (context.role === 'merger') {
+  if (context.mode === 'merge') {
+    for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(afk): Dashboard fixture summary'], { cwd: context.cwd });
+  }
+  result = {
+    run: context.run, attempt: context.attempt, role: context.role,
+    status: 'passed', summary: 'fixture 合并完成', tests: [], remaining: [],
+    branch: context.branch, cwd: context.cwd,
+    summaryCreated: true, summarySubject: 'chore(afk): Dashboard fixture summary',
+    tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: false })),
+  };
+} else {
+  result = {
+    run: context.run, attempt: context.attempt, role: context.role,
+    status: 'passed', summary: '复用已有实现，无需新增提交',
+    tests: notRun ? [{ command: 'fixture verify', status: 'not-run', summary: '未执行' }] : [],
+    remaining: [],
+    branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
+    commits: ['已有可交付提交'],
+  };
+}
 emit({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' });
 `);
   writeExecutable(join(bin, 'claude'), `
@@ -239,6 +257,69 @@ test('Observation journal 完整保留 provider 原始负载并携带 run/seq �
     const recovery = records.filter(record => record.source === 'engine/recovery');
     assert.ok(recovery.length >= 1, '缺少 engine/recovery Observation');
     assert.ok(recovery.every(record => record.kind.startsWith('recovery') || record.kind.startsWith('workspace')), 'recovery source 不得冒充 provider 输出');
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('共享逻辑 Merger 以 batch identity 关联多票，逐票 Delivery 独立发布', async () => {
+  const fixture = createFixture();
+  let runDir;
+  try {
+    addBranchCommit(fixture, 9);
+    addBranchCommit(fixture, 10);
+    const started = await startRun(fixture, '9,10');
+    runDir = started.logDir;
+    await waitUntil(
+      () => existsSync(join(runDir, 'observations.jsonl'))
+        && journal(runDir).some(record => Number.isSafeInteger(record.scope.batch) && String(record.kind).startsWith('delivery-')),
+      '未观察到 batch 维度的 Delivery',
+    );
+
+    const records = journal(runDir);
+    // 一个逻辑 Merger 关联一个 batch、多个 Ticket；batch identity 稳定。
+    const mergerPlanned = records.filter(record => record.kind === 'attempt-planned' && record.scope.role === 'merger');
+    assert.ok(mergerPlanned.length >= 1, '缺少 Merger planned Attempt');
+    assert.ok(mergerPlanned.every(record => Number.isSafeInteger(record.scope.batch)), 'Merger Attempt 必须携带 batch identity');
+    const batches = new Set(mergerPlanned.map(record => record.scope.batch));
+    assert.equal(batches.size, 1, `同一批 Merger 不得产生多个 batch identity：${[...batches].join(',')}`);
+
+    // 逐票 Delivery 必须各自发布，不能只在 batch 层面汇总。
+    const deliveries = records.filter(record => String(record.kind).startsWith('delivery-'));
+    const deliveryTickets = new Set(deliveries.map(record => record.scope.ticket));
+    assert.ok(deliveryTickets.size >= 1, '逐票 Delivery 必须携带 ticket scope');
+    assert.ok(deliveries.every(record => Number.isSafeInteger(record.scope.ticket)), 'Delivery 必须逐票关联 Ticket');
+  } finally {
+    await stopRun(runDir, fixture.env);
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('慢 SSE 客户端不给 run 施加 backpressure，journal 仍继续增长', async () => {
+  const fixture = createFixture();
+  let runDir;
+  try {
+    addBranchCommit(fixture, 9);
+    const started = await startRun(fixture);
+    runDir = started.logDir;
+    await waitUntil(() => existsSync(join(runDir, 'observations.jsonl')) && journal(runDir).length >= 3, 'journal 未产生记录');
+    const origin = new URL(started.dashboard.url).origin;
+    const token = readToken(started.dashboard.url);
+
+    // 建立 SSE 连接但不读取，模拟慢客户端。
+    const response = await fetch(`${origin}/events?token=${token}&after=0`, { headers: { Accept: 'text/event-stream' } });
+    assert.equal(response.status, 200);
+    const before = journal(runDir).length;
+
+    // 客户端不消费数据期间，run 的 Observation 采集必须继续进行。
+    await waitUntil(() => journal(runDir).length > before, '慢客户端阻塞了 Observation 采集', 12_000);
+    const after = journal(runDir).length;
+    assert.ok(after > before, '慢客户端期间 journal 必须继续增长');
+    await response.body.cancel().catch(() => {});
+    // run 未因此失败或停止：最终仍可正常收尾。
+    await stopRun(runDir, fixture.env);
+    assert.equal(existsSync(join(runDir, 'result.json')), true, '慢客户端不得使 run 失败');
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
