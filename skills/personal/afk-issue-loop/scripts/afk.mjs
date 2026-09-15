@@ -284,7 +284,13 @@ function dashboardPublic(logDir) {
   try {
     const metadata = JSON.parse(readFileSync(join(logDir, 'dashboard.json'), 'utf8'));
     const observation = existsSync(join(logDir, 'observation-state.json')) ? JSON.parse(readFileSync(join(logDir, 'observation-state.json'), 'utf8')) : { completeness: 'incomplete' };
-    return { state: metadata.state, url: `http://127.0.0.1:${metadata.port}/?token=${encodeURIComponent(metadata.token)}`, reopenCommand: dashboardCommand(logDir), finalExport: existsSync(join(logDir, 'dashboard.html')) ? join(logDir, 'dashboard.html') : undefined, completeness: observation.completeness, ...(observation.reason ? { reason: observation.reason } : {}) };
+    const finalExport = existsSync(join(logDir, 'dashboard.html')) ? join(logDir, 'dashboard.html') : undefined;
+    // 终态回收后原 URL 必然失效：companion 已退出，server 不再监听。
+    // 如实报告 final-export 而不是让人以为面板还活着；URL 不再给出。
+    if (metadata.state === 'final-export' || (existsSync(join(logDir, 'result.json')) && !companionAlive(logDir))) {
+      return { state: 'final-export', reopenCommand: dashboardCommand(logDir), finalExport, completeness: observation.completeness, ...(observation.reason ? { reason: observation.reason } : {}) };
+    }
+    return { state: metadata.state, url: `http://127.0.0.1:${metadata.port}/?token=${encodeURIComponent(metadata.token)}`, reopenCommand: dashboardCommand(logDir), finalExport, completeness: observation.completeness, ...(observation.reason ? { reason: observation.reason } : {}) };
   } catch (error) { return { state: 'unavailable', reopenCommand: dashboardCommand(logDir), completeness: 'incomplete', reason: error.message }; }
 }
 // companion 存活判定基于其自身 PID，而不是一次 HEAD 探测。
@@ -298,6 +304,8 @@ function companionAlive(logDir) {
   catch (error) { return error.code === 'EPERM'; }
 }
 async function launchDashboard(logDir, run) {
+  // 终态后不再拉起 server：直接返回静态导出，避免又起一个空转进程。
+  if (existsSync(join(logDir, 'result.json'))) return dashboardPublic(logDir);
   // 重建时复用原 read token，使已公开的 URL capability 保持有效；
   // 无既有元数据（新 run）时生成新 token。
   let token = randomUUID();
@@ -426,6 +434,12 @@ async function main() {
     // companion 仍存活即复用：worker 重建期间也返回同一 URL identity，
     // 不重复启动第二个 server。
     if (existing.url && companionAlive(runDir)) return console.log(JSON.stringify({ state: 'reused', run, url: existing.url, final: existsSync(resultPath) }, null, 2));
+    // 终态后不再拉起 server（那会违背立即回收、又起一个空转进程）：
+    // 直接返回静态导出路径。
+    if (existsSync(resultPath)) {
+      const pub = dashboardPublic(runDir);
+      return console.log(JSON.stringify({ state: 'final-export', run, final: true, finalExport: pub.finalExport, note: pub.finalExport ? '面板已回收，静态导出见 finalExport' : '面板已回收，静态导出缺失' }, null, 2));
+    }
     const dashboard = await launchDashboard(runDir, run);
     return console.log(JSON.stringify({ state: 'started', run, url: dashboard.url, final: existsSync(resultPath) }, null, 2));
   }

@@ -397,6 +397,10 @@ export class Processes {
           observations?.observe('process', 'invocation-started', scope(), payload);
           event('role-process', payload);
         },
+        // T4 journal 源头减量：raw-payload 由 ObservationJournal 按同 invocation 连续行
+        // 批量合并为一条 '\n' 拼接的字符串 payload 记录（AFK_JOURNAL_BATCH=0 退回逐条旧行为）。
+        // text-delta 明确不合并：只占 ~1.5MB，且前端有折叠逻辑（foldLines）与测试
+        // （重放逐条 text 拼接断言）依赖逐条形态，合并收益小而风险高。
         line => observations?.observe(`provider/${selection.provider}`, 'raw-payload', scope(), line),
         parsed => observations?.observe(`provider/${selection.provider}`, parsed.type === 'text' ? 'text-delta' : parsed.type, scope(), parsed));
     } catch (error) {

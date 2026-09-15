@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Dashboard companion supervisor：只读取 Observation journal，管理 HTTP/SSE worker
-// 与终态后的 24 小时保留期，不参与 AFK 调度，也不持有 control capability。
+// 与终态后的立即回收，不参与 AFK 调度，也不持有 control capability。
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
@@ -10,8 +10,12 @@ import { fileURLToPath } from 'node:url';
 const [logDir, run, token] = process.argv.slice(2);
 const resultPath = join(logDir, 'result.json');
 const metadataPath = join(logDir, 'dashboard.json');
-// 终态后保留期；通过公开 start 的受控 adapter 覆盖，测试不等待真实 24 小时。
-const retentionMs = Number(process.env.AFK_DASHBOARD_RETENTION_MS || 24 * 60 * 60 * 1000);
+// 终态后默认立即回收（0），不再空转 24 小时；只有显式设置正值
+// AFK_DASHBOARD_RETENTION_MS 才恢复旧的保留期行为（回滚逃生口）。
+// 注意用 undefined 判定而不用 ||，否则传 '0' 会被误判为未设置。
+const retentionMs = process.env.AFK_DASHBOARD_RETENTION_MS === undefined
+  ? 0
+  : Number(process.env.AFK_DASHBOARD_RETENTION_MS);
 // worker 崩溃重建的受控故障注入；只作用于首个 worker。
 const faultFirstWorker = process.env.AFK_DASHBOARD_WORKER_FAULT === '1';
 const workerPath = fileURLToPath(new URL('dashboard-worker.mjs', import.meta.url));
@@ -54,7 +58,13 @@ function startWorker() {
       // 只转发首个 ready；重建不得改变已公开的 URL identity。
       if (process.connected && !readySent) { readySent = true; process.send({ ready: true, port }); }
     }
-    if (message?.final) beginRetention();
+    if (message?.final) {
+      // 只在真正立即回收时标记 final-export。设置正值 retention 时面板仍在
+      // 服务期内，若此时就标记，afk.mjs 会据此隐藏 URL 并判定面板已回收，
+      // 逃生口名义上恢复保留期、实际上仍不可用。
+      if (!(retentionMs > 0)) { try { record('final-export'); } catch {} }
+      beginRetention();
+    }
   });
   worker.on('exit', () => {
     if (stopped) return;
@@ -66,14 +76,24 @@ function startWorker() {
     setTimeout(() => { restarting = false; if (!stopped) startWorker(); }, 50);
   });
 }
+function reclaim() {
+  if (stopped) return;
+  stopped = true;
+  try { worker?.kill('SIGTERM'); } catch {}
+  try { process.disconnect?.(); } catch {}
+  process.exit(0);
+}
 function beginRetention() {
-  if (retentionTimer) return;
-  retentionTimer = setTimeout(() => {
-    stopped = true;
-    try { worker?.kill('SIGTERM'); } catch {}
-    try { process.disconnect?.(); } catch {}
-    process.exit(0);
-  }, retentionMs);
+  if (retentionTimer || stopped) return;
+  // 默认立即回收：先标 final-export，再留短暂宽限让最终 SSE event: final
+  // 送达已连接浏览器，然后 SIGTERM worker 并退出，不再空转保留期。
+  const graceMs = 2000;
+  if (!(retentionMs > 0)) {
+    try { record('final-export'); } catch {}
+    retentionTimer = setTimeout(reclaim, graceMs);
+    return;
+  }
+  retentionTimer = setTimeout(reclaim, retentionMs);
 }
 const port = await freePort().catch(() => 0);
 startWorker();

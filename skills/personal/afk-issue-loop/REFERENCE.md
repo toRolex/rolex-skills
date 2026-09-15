@@ -79,3 +79,7 @@ writer 采用 liveness-first：只有 writer ownership channel 可连接、且�
 单票关闭失败仍继续其他可关闭票。close-only 不重复验证；已有 summary 沿用。角色可能已产生副作用但结果损坏时，结合 Git 历史、现场和 GitHub 核实，能确定则续作，不能确定则报告待核实项；不靠历史 passed 猜成功，不增加目标内容快照、HEAD 钉死或 summary 标题计数证明。
 
 关闭权限尚未恢复时等待用户，其余独立工作继续。调度者只接收和核对结果，Issue 关闭始终由 Merger 执行。
+
+## Dashboard 终态回收与 reopen
+
+run 进入终态（`result.json` 出现）后 companion 立即回收 live 面板：worker 发出 `final` 信号，先留约 2 秒宽限让最终 SSE `event: final` 送达已连接浏览器，再 `SIGTERM` worker 并退出，不再保留 24 小时。`dashboard.html` 静态导出保留（零 CPU 离线文件），权限 0600。`dashboard.json` 置 `state: 'final-export'`，`status`/`dashboardPublic` 如实报告"面板已回收，静态导出在 X 路径"，原 URL 失效不再给出。终态后再执行 `dashboard --run <logDir>` 不拉起新 server，直接返回 `state: 'final-export'` 与 `finalExport` 路径。回滚逃生口：显式设置 `AFK_DASHBOARD_RETENTION_MS=<正值>`（毫秒）恢复旧保留期行为；默认 0 即立即回收。run 现场目录被移除时 companion 仍自行退出（既有 liveness 检查保留）。

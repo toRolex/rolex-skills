@@ -51,6 +51,6 @@ Worktrunk 管理 worktree，Git 管理提交与合并。worktree 只隔离代码
 - `Attempt` 是 per-Ticket/per-Role（Merger 为 per-Batch）完整 Recovery/派发 cycle 序号，`Invocation` 是实际 spawn 的 Role CLI 全局序号；planned Attempt 在 spawn 前可见且 Invocation/PID 为空，只有 spawn 成功才分配 Invocation。Role 退出不等于 Ticket 交付；看板逐票状态从 Merger 逐票结果与 Git 祖先关系推导。
 - provider 观测标签（`provider/<name>`）与流解析器取该 Invocation 所属**角色**冻结的 harness，而不是 run 级单值：混 harness 时不同 CLI 的 stream-json 格式完全不同，标签与实际载体必须一致，否则 Dashboard 与排障会误导。
 - 采集与排版忠实于 provider 与进程实际发出的完整内容，不摘要、不截断、不改写、不脱敏，也不提供独立 Raw 标签页。Dashboard 故障、慢客户端、断线、journal 写入失败或导出失败都不进入 run 失败路径；完整性损失必须在 `status` 与页面显式标记 `degraded/incomplete`。
-- run 终态后 journal 冻结，companion 导出自包含 `dashboard.html` 并继续提供页面 24 小时；静态文件在 server 退出后仍可直接打开。Observation journal、read-token metadata 与最终 HTML 均为 owner-only `0600`，read token 不进入 events、Role 日志、access log 或最终 HTML。
+- run 终态后 journal 冻结，companion 导出自包含 `dashboard.html` 并**立即回收** live 面板（不再保留 24 小时）；静态文件在 server 退出后仍可直接打开。Observation journal、read-token metadata 与最终 HTML 均为 owner-only `0600`，read token 不进入 events、Role 日志、access log 或最终 HTML。
 
 本机平台与所选 Provider 须以实际运行结果核验，不能用一个 CLI 成功代替其他 CLI 通过。

@@ -57,7 +57,7 @@ node "<skill绝对路径>/scripts/afk.mjs" start --repo "<目标仓库绝对路�
 
 同一次 `start` 还会返回当前 run 专属的只读 Dashboard：`dashboard.url`（`127.0.0.1`、OS 分配端口、独立只读 token）、`dashboard.state`、`dashboard.reopenCommand` 与完整性状态。原样把 URL 报告给用户；浏览器自动打开是 best-effort，失败不影响 run。Dashboard 只读、无 mutation endpoint，关闭页面不影响 run，重新打开同一 URL 会恢复全部历史并定位最新输出；忘记地址时用 `status` 的 `dashboard` 字段或 `dashboard --run <日志目录>` 重新获得。完整未脱敏输出只在本机页面呈现，read token 不会出现在 events、Role 日志或最终导出中。
 
-`stop` 的停止请求受理不等于角色已结束；以后续 `status` 确认最终停止，未知状态保留现场。新 run 可从当前 Git/GitHub/worktree/writer 事实恢复代码现场，但不恢复旧进程内存、历史 PID 或旧 Reviewer 结论；`status`、`events.jsonl` 与 Dashboard 展示逐票恢复分类和阻碍。run 终态后 companion 导出自包含 `dashboard.html` 并继续提供页面 24 小时，静态文件在 server 退出后仍可直接打开。
+`stop` 的停止请求受理不等于角色已结束；以后续 `status` 确认最终停止，未知状态保留现场。新 run 可从当前 Git/GitHub/worktree/writer 事实恢复代码现场，但不恢复旧进程内存、历史 PID 或旧 Reviewer 结论；`status`、`events.jsonl` 与 Dashboard 展示逐票恢复分类和阻碍。run 终态后 companion 导出自包含 `dashboard.html` 并立即回收 live 面板（原 URL 失效），静态文件可直接离线打开；终态后再执行 `dashboard --run` 只返回导出路径，不再拉起 server。
 
 完成条件：启动身份、日志、Dashboard 地址、查看与停止方式均已告知，此 skill 任务结束。
 

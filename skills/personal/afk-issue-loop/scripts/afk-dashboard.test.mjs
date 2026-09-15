@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { ObservationJournal } from './observations.mjs';
 
 const script = resolve(dirname(fileURLToPath(import.meta.url)), 'afk.mjs');
+const scriptsDir = dirname(fileURLToPath(import.meta.url));
+const workerPath = join(scriptsDir, 'dashboard-worker.mjs');
 
 function command(name, args, options = {}) {
   return execFileSync(name, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options }).trim();
@@ -245,14 +248,19 @@ test('Observation journal 完整保留 provider 原始负载并携带 run/seq �
     assert.ok(records.every(record => record.runId === started.run), '所有 Observation 归属当前 run');
     assert.ok(records.every(record => typeof record.source === 'string' && typeof record.kind === 'string' && typeof record.observedAt === 'string'), '每条记录必须有 source/kind/observedAt');
 
-    // provider 原始 payload 在解析前逐行入库，未被过滤、改写或截断。
+    // provider 原始 payload 在解析前入库，未被过滤、改写或截断。
+    // T4 起同 scope 连续 raw-payload 按 scope 缓冲合并为一条 '\n' 拼接记录，
+    // 因此不断言逐行条数，而断言「合并可还原」：expandRawPayload 拆开必须
+    // 还原全部原文行、顺序不变。
     const raw = withKind(records, 'raw-payload');
-    assert.ok(raw.length >= 6, 'provider 原始负载未完整进入 journal');
-    const rawText = raw.map(record => record.payload).join('\n');
+    assert.ok(raw.length >= 1, 'provider 原始负载未进入 journal');
+    const rawLines = raw.flatMap(record => ObservationJournal.expandRawPayload(record));
+    assert.ok(rawLines.length >= 6, `provider 原始负载未完整进入 journal：仅还原 ${rawLines.length} 行`);
+    const rawText = rawLines.join('\n');
     assert.match(rawText, /afk-fixture-unknown-event/, '未知 provider 事件不得被静默丢弃');
     assert.match(rawText, /必须完整保留/, '完整 tool-call 参数不得被过滤');
-    // 每个 provider 事件各占一条原始记录，逐行入库且顺序保持。
-    for (const fragment of ['第一行输出', '继续同一行', '当前行仍在增长', '第二行完成', '执行检查']) assert.ok(rawText.includes(fragment), `原始 payload 缺少 ${fragment}；不得截断或合并`);
+    // 每个 provider 事件原文逐行可还原且顺序保持。
+    for (const fragment of ['第一行输出', '继续同一行', '当前行仍在增长', '第二行完成', '执行检查']) assert.ok(rawText.includes(fragment), `原始 payload 缺少 ${fragment}；不得截断或丢弃`);
 
     const stderr = withKind(records, 'stderr');
     assert.ok(stderr.some(record => record.payload.includes('fixture stderr：完整错误原文')), 'stderr 未完整进入 journal');
@@ -270,6 +278,32 @@ test('Observation journal 完整保留 provider 原始负载并携带 run/seq �
 
     // 三层零出现：全量观测中无 self-report / gate-* / delivery-* kind。
     assert.equal(records.some(record => record.kind === 'self-report' || record.kind.startsWith('gate-') || String(record.kind).startsWith('delivery-')), false, '三层观测必须零出现');
+
+    // 逃生口 AFK_JOURNAL_BATCH=0 关闭合并，退回逐条旧行为（逐行条数与输入一致）。
+    {
+      const batchOff = createFixture();
+      batchOff.env.AFK_JOURNAL_BATCH = '0';
+      let offDir;
+      try {
+        addBranchCommit(batchOff, 9);
+        const offStarted = await startRun(batchOff);
+        offDir = offStarted.logDir;
+        await waitUntil(
+          () => existsSync(join(offDir, 'observations.jsonl'))
+            && journal(offDir).some(record => record.kind === 'raw-payload')
+            && journal(offDir).some(record => record.kind === 'invocation-started'),
+          '逃生口 run 未产生 provider 原始负载',
+        );
+        const offRaw = withKind(journal(offDir), 'raw-payload');
+        const offLines = offRaw.flatMap(record => ObservationJournal.expandRawPayload(record));
+        assert.ok(offRaw.length >= 6, `AFK_JOURNAL_BATCH=0 时应逐条写入，实际仅 ${offRaw.length} 条`);
+        assert.ok(offLines.length >= 6, '逃生口下原始负载还原行数不足');
+        assert.ok(offRaw.every(record => !String(record.payload ?? '').includes('\n')), '逃生口下 raw-payload 不得合并多行');
+      } finally {
+        await stopRun(offDir, batchOff.env);
+        rmSync(batchOff.root, { recursive: true, force: true });
+      }
+    }
 
     // Recovery provenance 与 Agent 输出可区分。
     const recovery = records.filter(record => record.source === 'engine/recovery');
@@ -544,6 +578,9 @@ test('Observation journal 写入失败时 run 继续但公开状态显式 degrad
 
 test('run 终态后冻结 history、导出可离线重放的自包含 dashboard.html', async () => {
   const fixture = createFixture();
+  // 本用例断言终态后的默认回收契约：必须清掉 fixture 的受控保留期，
+  // 否则 companion 走正值保留期仍在服务，reopen 会（正确地）返回 reused。
+  delete fixture.env.AFK_DASHBOARD_RETENTION_MS;
   try {
     addBranchCommit(fixture, 9);
     const started = await startRun(fixture);
@@ -567,17 +604,23 @@ test('run 终态后冻结 history、导出可离线重放的自包含 dashboard.
     const status = JSON.parse(command(process.execPath, [script, 'status', '--run', started.logDir], { env: fixture.env }));
     assert.equal(status.dashboard.finalExport, finalPath);
     assert.equal(status.dashboard.reopenCommand.includes('dashboard'), true);
+    // /snapshot 有界但归档必须全量：HTML 内嵌的 "seq": 计数不得少于 journal 记录数。
+    const journalCount = journal(started.logDir).length;
+    const archivedSeqs = (html.match(/"seq":/g) || []).length;
+    assert.ok(archivedSeqs >= journalCount, `归档 HTML 静默截断：内嵌 seq ${archivedSeqs} < journal ${journalCount}`);
+    console.log(`终态归档：journal ${journalCount} 条，HTML 内嵌 "seq": ${archivedSeqs} 个`);
 
-    // companion 不可用时，公开 reopen 命令按 run identity 重建并恢复 URL。
+    // T5 新契约：终态后 dashboard --run 不再拉起 server，只返回静态导出路径。
+    const companionPid = JSON.parse(readFileSync(join(started.logDir, 'dashboard.json'), 'utf8')).pid;
     const reopened = JSON.parse(command(process.execPath, [script, 'dashboard', '--run', started.logDir], { env: fixture.env }));
-    assert.ok(['reused', 'started'].includes(reopened.state), `reopen 状态未知：${reopened.state}`);
-    assert.equal(reopened.run, started.run);
+    assert.equal(reopened.state, 'final-export');
+    assert.equal(reopened.finalExport, finalPath);
     assert.equal(reopened.final, true);
-    assert.match(reopened.url, /^http:\/\/127\.0\.0\.1:\d+\/?\?token=/);
-    assert.equal(html.includes(readToken(reopened.url)), false, 'read token 不得进入最终 HTML');
-    // 重建复用原 read token，使已公开的 URL capability 保持有效。
-    assert.equal(readToken(reopened.url), readToken(started.dashboard.url));
-    assert.equal((await fetch(reopened.url)).status, 200, 'reopen 后 URL 必须可用');
+    assert.equal(reopened.url, undefined, '终态 reopen 不再给出 URL（无 server）');
+    // 没有新进程被拉起：dashboard.json 的 companion PID 未被替换。
+    assert.equal(JSON.parse(readFileSync(join(started.logDir, 'dashboard.json'), 'utf8')).pid, companionPid, '终态 reopen 不得拉起新 companion');
+    // read token 不得进入最终 HTML（用终态前已公开的 URL 里的 token 验证）。
+    assert.equal(html.includes(readToken(started.dashboard.url)), false, 'read token 不得进入最终 HTML');
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -892,6 +935,154 @@ test('run 终态后 companion 按 retention 到期退出，最终 HTML 长期保
     assert.match(html, /Output Inspector/);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('run 终态后默认立即回收 companion，最终 HTML 长期保留', async () => {
+  const fixture = createFixture();
+  // 新默认行为：不设 AFK_DASHBOARD_RETENTION_MS（fixture 默认 '3000' 走旧路径，必须清掉）。
+  delete fixture.env.AFK_DASHBOARD_RETENTION_MS;
+  try {
+    addBranchCommit(fixture, 9);
+    const started = await startRun(fixture);
+    await waitUntil(
+      () => existsSync(join(started.logDir, 'observations.jsonl')) && journal(started.logDir).some(record => record.kind === 'raw-payload'),
+      'journal 未产生完整记录',
+    );
+    await stopRun(started.logDir, fixture.env);
+
+    const finalPath = join(started.logDir, 'dashboard.html');
+    await waitUntil(() => existsSync(finalPath), '未生成最终 dashboard.html');
+    assert.equal(statSync(finalPath).mode & 0o777, 0o600, '最终 HTML 必须为 0600');
+    const companionPid = JSON.parse(readFileSync(join(started.logDir, 'dashboard.json'), 'utf8')).pid;
+
+    // 需求 B 核心：默认 0 即立即回收（2s 宽限让最终 SSE event: final 送达），≤5 秒内退出。
+    const t0 = Date.now();
+    await waitUntil(() => {
+      try { process.kill(companionPid, 0); return false; } catch (error) { return error.code === 'ESRCH'; }
+    }, '默认行为下终态后 companion 未立即退出', 8_000);
+    const elapsed = Date.now() - t0;
+    console.log(`立即回收：companion ${elapsed}ms 后退出（上限 8000ms，目标 ≤5000ms）`);
+    assert.ok(elapsed <= 8_000, `companion 回收过慢：${elapsed}ms`);
+    assert.equal(existsSync(finalPath), true, '静态最终页面必须在 companion 退出后继续存在');
+    const html = readFileSync(finalPath, 'utf8');
+    assert.match(html, /afk-fixture-unknown-event/);
+    assert.match(html, /Ticket Kanban/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+// 性能回归：合成大 journal（直接写 observations.jsonl，不走真实 run、不拉真实进程）。
+function writeSyntheticJournal(dir, count, startSeq = 1) {
+  const lines = new Array(count);
+  for (let i = 0; i < count; i++) {
+    const seq = startSeq + i;
+    lines[i] = JSON.stringify({ seq, observedAt: new Date().toISOString(), runId: 'perf-run', source: 'provider/claude', kind: 'text-delta', scope: { role: 'implementer', attempt: 1, invocation: 1 }, payload: { text: `合成行 ${seq} ` + 'x'.repeat(40) } });
+  }
+  appendFileSync(join(dir, 'observations.jsonl'), lines.join('\n') + '\n', { mode: 0o600 });
+}
+
+function spawnWorker(logDir, runId, token) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [workerPath, logDir, runId, token, '0'], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; try { child.kill('SIGTERM'); } catch {} reject(new Error('worker 未在 5s 内 ready')); }
+    }, 5_000);
+    child.once('message', message => {
+      if (message?.ready && !settled) { settled = true; clearTimeout(timer); resolvePromise({ child, port: message.port }); }
+    });
+    child.once('error', error => { if (!settled) { settled = true; clearTimeout(timer); reject(error); } });
+    child.once('exit', code => { if (!settled) { settled = true; clearTimeout(timer); reject(new Error(`worker 启动即退出：${code}`)); } });
+  });
+}
+
+// node fetch 收 SSE 长连接会 UND_ERR_HEADERS_TIMEOUT：用 curl -sN 配 --max-time
+// 落盘文件再读取。stdout 必须传 openSync 的 fd（数字），传路径字符串会报
+// ERR_INVALID_SYNC_FORK_INPUT。
+function curlSseToFile(url, outPath, maxTimeSec) {
+  const fd = openSync(outPath, 'w');
+  try {
+    return new Promise((resolvePromise, reject) => {
+      const curl = spawn('curl', ['-sN', '--max-time', String(maxTimeSec), url], { stdio: ['ignore', fd, 'ignore'] });
+      curl.once('error', reject);
+      curl.once('exit', () => {
+        try { resolvePromise(readFileSync(outPath, 'utf8')); } catch (error) { reject(error); }
+      });
+    });
+  } finally {
+    try { closeSync(fd); } catch {}
+  }
+}
+const sseIds = text => [...text.matchAll(/^id: (\d+)$/gm)].map(match => Number(match[1]));
+
+test('性能回归：大 journal 下 snapshot 有界/空闲零重读/SSE 增量/truncated/归档全量', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'afk-dashboard-perf-'));
+  const token = 'perf-token';
+  const runId = 'perf-run';
+  const COUNT = 50_000;
+  writeFileSync(join(root, 'observation-state.json'), JSON.stringify({ completeness: 'complete' }));
+  writeSyntheticJournal(root, COUNT);
+  let worker;
+  try {
+    worker = await spawnWorker(root, runId, token);
+    const origin = `http://127.0.0.1:${worker.port}`;
+
+    // 1. /snapshot 有界：默认尾部 500，lastSeq/total 反映全量，seq 升序。
+    const t0 = Date.now();
+    const snapshotRes = await fetch(`${origin}/snapshot?token=${token}`);
+    assert.equal(snapshotRes.status, 200);
+    const snapshotText = await snapshotRes.text();
+    const snapshotMs = Date.now() - t0;
+    const snapshotBytes = Buffer.byteLength(snapshotText, 'utf8');
+    const snapshot = JSON.parse(snapshotText);
+    console.log(`snapshot：${snapshotMs}ms / ${snapshotBytes}B / observations ${snapshot.observations.length} / total ${snapshot.total} / lastSeq ${snapshot.lastSeq} / truncatedFrom ${snapshot.truncatedFrom}`);
+    assert.ok(snapshotMs < 500, `默认 snapshot 过慢：${snapshotMs}ms`);
+    assert.ok(snapshotBytes < 1024 * 1024, `默认 snapshot 响应过大：${snapshotBytes}B`);
+    assert.equal(snapshot.observations.length, 500);
+    assert.ok(snapshot.truncatedFrom > 0, '大 journal 下 truncatedFrom 必须 > 0');
+    assert.equal(snapshot.total, COUNT);
+    assert.equal(snapshot.lastSeq, COUNT);
+    assert.deepEqual(snapshot.observations.map(record => record.seq), [...snapshot.observations.map(record => record.seq)].sort((a, b) => a - b), 'snapshot seq 必须升序');
+    assert.equal(snapshot.observations.at(-1).seq, COUNT, '默认 snapshot 应为尾部');
+
+    // 2. 空闲零全量重读：journal 静止时只有 stat，无 O(万级) 拷贝。
+    // 阈值 <20 是防回归（改前空转 105+），不是精确基准，机器波动下仍有余量。
+    await delay(3_000);
+    const cpu = Number(command('ps', ['-o', '%cpu=', '-p', String(worker.child.pid)]).trim());
+    console.log(`idle %CPU：${cpu}（阈值 <20，改前 105+）`);
+    assert.ok(Number.isFinite(cpu) && cpu < 20, `空闲 worker CPU 过高：${cpu}`);
+
+    // 3. SSE 增量精确：after=lastSeq 时 0 条重放；append 1 条后恰好收到 1 条且 id 正确。
+    const quiet = await curlSseToFile(`${origin}/events?token=${token}&after=${COUNT}`, join(root, 'sse-quiet.txt'), 2);
+    const quietIds = sseIds(quiet);
+    console.log(`SSE after=lastSeq：收到 ${quietIds.length} 条（期望 0）`);
+    assert.equal(quietIds.length, 0, `after=lastSeq 不得重放：${quietIds.slice(0, 5).join(',')}`);
+    writeSyntheticJournal(root, 1, COUNT + 1);
+    const one = await curlSseToFile(`${origin}/events?token=${token}&after=${COUNT}`, join(root, 'sse-one.txt'), 3);
+    const oneIds = sseIds(one);
+    console.log(`SSE append 1 条后：收到 [${oneIds.join(',')}]（期望 [${COUNT + 1}]）`);
+    assert.deepEqual(oneIds, [COUNT + 1], 'append 后必须恰好收到 1 条且 id 正确');
+
+    // 4. event: truncated：远落后游标只收 truncated + 尾部，不重放全部历史。
+    const behind = await curlSseToFile(`${origin}/events?token=${token}&after=0`, join(root, 'sse-behind.txt'), 2);
+    const behindIds = sseIds(behind);
+    console.log(`SSE after=0：truncated=${behind.includes('event: truncated')}，收到 ${behindIds.length} 条（期望尾部 500，远小于 total ${COUNT + 1}）`);
+    assert.ok(behind.includes('event: truncated'), '远落后游标必须收到 truncated 事件');
+    assert.ok(behindIds.length <= 500, `truncated 后不得重放全部历史：收到 ${behindIds.length} 条`);
+    assert.ok(behindIds.length > 0 && behindIds.at(-1) === COUNT + 1, 'truncated 尾部必须对齐最新 seq');
+
+    // 5. 归档全量：实时视图有界，但终态 dashboard.html 必须含完整 history。
+    writeFileSync(join(root, 'result.json'), JSON.stringify({ run: runId }));
+    await waitUntil(() => existsSync(join(root, 'dashboard.html')), '终态后未生成 dashboard.html', 10_000);
+    const archive = readFileSync(join(root, 'dashboard.html'), 'utf8');
+    const archiveSeqs = (archive.match(/"seq":/g) || []).length;
+    console.log(`归档 HTML：journal ${COUNT + 1} 条，内嵌 "seq": ${archiveSeqs} 个`);
+    assert.ok(archiveSeqs >= COUNT + 1, `归档 HTML 静默截断：内嵌 seq ${archiveSeqs} < journal ${COUNT + 1}`);
+  } finally {
+    if (worker?.child) { try { worker.child.kill('SIGTERM'); } catch {} }
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
