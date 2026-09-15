@@ -20,7 +20,6 @@ const workspaceFailure = /现场分支改变|角色离开绑定|现场不属于|
 // 仅 writer ownership 造成的阻碍可以在重检后自动清除；其他阻碍（权限、
 // 依赖、锁定、Git 冲突）属于不同原因，不能被 writer 重检路径一并抹掉。
 const writerBlocking = /活跃写者|写锁|活跃 writer|ownership/i;
-const strings = value => Array.isArray(value) && value.every(item => typeof item === 'string');
 const isSpec = issue => (issue.labels || []).some(label => /^spec$/i.test(typeof label === 'string' ? label : label.name)) || /^spec$/i.test(issue.type?.name || '') || /^(?:\[spec\]|spec\s*[:：])/i.test(issue.title || '');
 
 function worktreeRecords(text) {
@@ -241,7 +240,7 @@ export async function createEngine(config, processes, event = () => {}, observat
   // 默认 10，可经 --max-rounds 配置）。网络抖动、瞬时失败只会重试到
   // 轮次上限，不再被定性为业务死结。
   const maxRounds = Number(config.maxRounds) > 0 ? Math.floor(Number(config.maxRounds)) : 10;
-  let targetCwd, targetReason, targetPreexisting = [], pending, batch = 0, attempt = 0;
+  let targetCwd, targetReason, targetPreexisting = [], pending, batch = 0;
   let running = false, finished = false, quarantined = false, abandonedReleasePromise;
   // 目标现场的用户未提交改动不是阻塞 Merger 的理由。Git merge 自身对会丢失
   // 工作区改动的场景 fail-closed：本地修改与合并内容重叠、或未跟踪文件将被
@@ -719,11 +718,6 @@ export async function createEngine(config, processes, event = () => {}, observat
     }
   }
 
-  const resultContract = {
-    common: { run: config.run, attempt: '由本次 prompt 提供的整数', role: 'implementer|reviewer|merger', status: 'passed|failed|blocked', summary: '交付说明', tests: [{ command: '实际验证命令或具体人工检查', status: 'passed|failed|not-run', summary: '实际结果' }], remaining: ['未完成问题；无则空数组'] },
-    ticket: { ticket: '整数编号', branch: 'afk/issue-N', cwd: '绑定绝对路径', commits: ['可交付提交的文字摘要，非 SHA；可包含复用历史提交'] },
-    merger: { branch: target, cwd: '绑定目标绝对路径', summaryCreated: 'boolean：本批 summary 已完成（含上次已完成）', summarySubject: 'summaryCreated 为 true 时为实际中文 Conventional Commit 标题，否则 null', tickets: [{ ticket: '整数编号', branch: 'afk/issue-N', merged: 'boolean', verified: 'boolean', closed: 'boolean：实际 GitHub 状态' }] },
-  };
   async function prompt(role, context) {
     const related = context.ticket?.specs || [...new Map((context.items || []).flatMap(item => item.ticket.specs || []).map(spec => [spec.number, spec])).values()];
     const input = { context, repository, target, specs: related, verify: config.verify || null };
@@ -739,23 +733,19 @@ export async function createEngine(config, processes, event = () => {}, observat
       CONTEXT: JSON.stringify(input),
       VALIDATION_COMMANDS: config.verify || '按项目约定运行实际测试与类型检查，记录具体命令及结果。',
     }, { cwd: context.cwd, command });
+    // 全部角色统一：完成信号只是 <promise>COMPLETE</promise> 字符串；
+    // 引擎不解析 afk-result 封套，不校验结构化字段。
+    const footer = `全部收尾完成后终输出 <promise>COMPLETE</promise>；remaining/遗留如实上报，不把完成信号当作全部交付。\n` +
+      `CONTEXT 是最小调度输入（items/branch/cwd 等），照此执行，不回显整个输入。\n`;
     return `${text}\n` +
       (config.verify ? `验证要求（配置）：${config.verify}\n` : '') +
-      `最后仅返回一个 <afk-result>JSON</afk-result> 结构化结果；退出码/完成字符串不是业务成功。身份必须逐字匹配本次 context 的 run/attempt/role。所有字段必填，布尔与整数用 JSON 原生类型。\n` +
-      `输出必须是平铺对象：顶层直接包含 run、attempt、role、status、summary、tests、remaining、branch、cwd 及当前角色字段。把下方 contract 的字段替换为实际值后输出；contract/context/repository/target/specs 是输入包装，绝不作为输出的外层键，也不回显整个输入。\n` +
-      JSON.stringify({ contract: { ...resultContract.common, ...(role === 'merger' ? resultContract.merger : resultContract.ticket) }, ...input }, null, 2);
+      footer +
+      JSON.stringify(input, null, 2);
   }
-  function validTests(result) {
-    return Array.isArray(result.tests) && result.tests.every(test => test && typeof test.command === 'string' && test.command.trim() && ['passed', 'failed', 'not-run'].includes(test.status) && typeof test.summary === 'string');
-  }
-  // 分支上是否真有提交（Git 事实，与角色自报的 commits 摘要对照）。
+  // 分支上是否真有提交（Git 事实）。
   async function branchAhead(workspace) {
     try { return Number(await git(['rev-list', '--count', `${target}..${workspace.branch}`], workspace.cwd)) > 0; }
     catch { return false; }
-  }
-  function validateCommon(result, context) {
-    if (result.run !== config.run || result.attempt !== context.attempt || result.role !== context.role || !['passed', 'failed', 'blocked'].includes(result.status) || typeof result.summary !== 'string' || !validTests(result) || !strings(result.remaining)) throw new Error('角色业务结果通用字段无效');
-    if (result.branch !== context.branch || typeof result.cwd !== 'string' || !result.cwd.startsWith('/') || realpathSync(result.cwd) !== realpathSync(context.cwd)) throw new Error('角色业务结果 branch/cwd 与绑定不符');
   }
   async function runRole(role, context, onDispatch = () => {}) {
     if (processes.stopping) return { status: 'stopped', reason: '用户停止' };
@@ -763,7 +753,7 @@ export async function createEngine(config, processes, event = () => {}, observat
     // Merger 按 Batch/Role。同一作用域重新开始完整 cycle 才递增；
     // 被动 inventory、probe 与 SSE 重连都不经过这里，因此不会污染计数。
     const scopeKey = role === 'merger'
-      ? `merger|batch:${context.batch}|${context.mode}`
+      ? `merger|batch:${context.batch}`
       : `${role}|ticket:${context.ticket?.number}`;
     const ordinal = (attemptCounters.get(scopeKey) || 0) + 1;
     attemptCounters.set(scopeKey, ordinal);
@@ -773,7 +763,7 @@ export async function createEngine(config, processes, event = () => {}, observat
     const identity = { ...context, run: config.run, attempt: ordinal, role };
     // planned Attempt 先于 spawn 存在；Invocation/PID 只在实际 spawn 成功后补齐。
     let invocation;
-    observations?.observe('engine', 'attempt-planned', { role, attempt: ordinal, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, { phase: context.mode || role, state: 'planned' });
+    observations?.observe('engine', 'attempt-planned', { role, attempt: ordinal, tickets: context.tickets, ...(Number.isSafeInteger(context.batch) ? { batch: context.batch } : {}) }, { phase: role, state: 'planned' });
     const logPath = join(config.logDir, `${String(attemptId).padStart(5, '0')}-${role}-${context.tickets.join('-')}.stdout.log`);
     await correctWorkspace(context);
     const rendered = await prompt(role, identity);
@@ -785,32 +775,24 @@ export async function createEngine(config, processes, event = () => {}, observat
     // 可以相同，不能用它做跨票反查。
     result.invocation = invocation;
     event('role-result', { role, attempt: identity.attempt, tickets: context.tickets, result });
-    // Provider 层的失败/权限结果不含业务封套，
-    // 不能将其解读为成功的结构化交付结果。
-    if (!Object.hasOwn(result, 'run')) {
-      if (!['failed', 'blocked', 'stopped'].includes(result.status)) throw new Error('Provider 返回未知状态');
-      if (result.status === 'failed' && configurationFailure.test(result.reason || '')) return { ...result, status: 'blocked' };
-      return result;
-    }
-    validateCommon(result, identity);
-    // commits 是“本角色新增提交”的摘要，不是“分支必须由本角色追加”的证明：
-    // 上游 reviewer 模板明确允许“合格则无需新 commit”，纯 Skill/文档仓库里
-    // 常见的一次审查不产生提交。因此只校验字段形状，不再要求非空。
-    if (role !== 'merger' && (result.ticket !== context.ticket.number || !strings(result.commits))) throw new Error('逐票结果 ticket/commits 字段无效');
+    // 全部角色统一：载体层成功候选 + 输出含 <promise>COMPLETE</promise> 即完成候选。
+    // 引擎对 commit 文本、封套、逐票形状零依赖。
+    if (!['passed', 'failed', 'blocked', 'stopped'].includes(result.status)) throw new Error('Provider 返回未知状态');
+    if (result.status === 'failed' && configurationFailure.test(result.reason || '')) return { ...result, status: 'blocked' };
     return result;
   }
   // 提取 main.mts:123–160 的 try/run→commits 门→review→累计 commits→finally。
   // sandbox.run/close 替换本机 runRole/closeWorkspace；AFK 加平铺结果与实际交付检查。
   async function pipeline(ticket, workspace) {
     const context = { ticket, tickets: [ticket.number], ...workspace, target, targetCwd };
-    // 上游门语义：推进只看角色结果里的 commits 摘要与 Git 事实。
+    // 完成信号只裁定 passed/blocked/其他；blocked 进 blocks 供看板与调度。
     const blockedReason = result => {
       if (result.status === 'blocked') {
-        const reason = [result.reason || result.summary, ...(result.tests || []).filter(test => test.status !== 'passed').map(test => `${test.command}：${test.summary}`), ...(result.remaining || [])].filter(Boolean).join('; ');
+        const reason = result.reason || '角色报告权限/配置阻碍';
         blocks.set(ticket.number, reason);
         return reason;
       }
-      if (result.status !== 'passed') return [result.reason || result.summary, ...(result.tests || []).filter(test => test.status !== 'passed').map(test => `${test.command}：${test.summary}`), ...(result.remaining || [])].filter(Boolean).join('; ');
+      if (result.status !== 'passed') return result.reason || '角色未完成';
       return undefined;
     };
     let queuedForMerge = false;
@@ -826,16 +808,16 @@ export async function createEngine(config, processes, event = () => {}, observat
       }
       const implement = await runRole('implementer', context);
       if (implement.status === 'stopped' || processes.stopping) return implement;
-      // Implementer 有提交摘要才进 Reviewer，没有就直接归入本轮结果。
-      if (blockedReason(implement) || !implement.commits.length) return;
+      // 上游门语义：分支有提交（Git 事实）且 Implementer 完成（COMPLETE）才进 Reviewer。
+      if (blockedReason(implement) || !await branchAhead(workspace)) return;
       const review = await runRole('reviewer', { ...context, previous: implement });
       if (review.status === 'stopped' || processes.stopping) return review;
-      // Reviewer 结果直接与 Implementer 提交合并进入待合集。
+      // Reviewer 只改法不改能；其 COMPLETE 即推进待合集。
       if (blockedReason(review)) return;
       queuedForMerge = true;
       return {
         ...review,
-        commits: [...implement.commits, ...review.commits],
+        commits: ['分支提交（Git 事实）'],
         ticket, workspace, review,
       };
     } catch (error) {
@@ -847,56 +829,14 @@ export async function createEngine(config, processes, event = () => {}, observat
     }
   }
 
-  function mergerCandidates(group) {
-    if (group.uncertain) return [];
-    const reasons = waitingReasons(false);
-    if (group.phase !== 'close') return group.tickets.some(item => reasons.has(item.ticket.number)) ? [] : group.tickets;
-    return group.tickets.filter(item => !blocks.has(item.ticket.number) && tickets.get(item.ticket.number)?.state === 'open');
-  }
+  // 整组派发：整组无 waitingReasons 即可派 Merger 整单幂等执行；
+  // close 失败不拆组，下轮整单重跑（已合入由 prepareTicket 快道自然覆盖）。
   function mergerReady(group) {
-    const ready = mergerCandidates(group);
-    group.blockedReason = group.uncertain || (ready.length ? undefined : group.tickets.map(item => `#${item.ticket.number}：${waitingReasons(false).get(item.ticket.number) || 'GitHub 状态未知'}`).join('; '));
-    return ready.length > 0;
-  }
-  function prioritizeCloseGroup() {
-    if (!pending || targetReason || pending.phase !== 'close' || mergerReady(pending)) return;
-    // 一个未知的仅待关闭票不占用唯一 Merger；不可跨越未完成合并现场。
-    for (let index = 0; index < mergeQueue.length; index++) {
-      const next = mergeQueue[index];
-      if (mergerReady(next)) {
-        mergeQueue.splice(index, 1);
-        mergeQueue.unshift(pending);
-        pending = next;
-        return;
-      }
-      if (next.phase !== 'close') return;
-    }
-  }
-  async function inspectMerger(group, reason) {
-    // 坏最终封套不能回放旧 passed。只读取普通 Git/GitHub 事实，不建立快照/HEAD 协议。
-    const evidence = { reason, tickets: [] };
-    try {
-      await correctWorkspace({ cwd: targetCwd, branch: target });
-      // dirty 不再是交付判据（用户既有未提交改动不阻塞 Merger）。仍记录相对
-      // 准备阶段基线的新增路径作为观察事实，便于人工核实过程中是否有新改动。
-      evidence.newChanges = (await dirtyPaths(targetCwd)).filter(path => !targetPreexisting.includes(path));
-      evidence.inProgress = await inProgress(targetCwd);
-      evidence.history = await git(['log', '-10', '--format=%s%n%b'], targetCwd);
-      for (const item of group.tickets) {
-        let merged = false, state = 'unknown', error;
-        try { await git(['merge-base', '--is-ancestor', item.workspace.branch, target], targetCwd); merged = true; }
-        catch (failure) { if (unsafeTermination.test(failure.message)) throw failure; }
-        try { state = (await readIssue(item.ticket.number)).state; }
-        catch (failure) { if (unsafeTermination.test(failure.message)) throw failure; error = failure.message; }
-        evidence.tickets.push({ ticket: item.ticket.number, merged, state, error });
-      }
-    } catch (error) {
-      if (unsafeTermination.test(error.message)) throw error;
-      evidence.error = error.message;
-    }
-    event('merge-reconciled', { batch: group.id, ...evidence });
-    group.uncertain = `Merger 最终结果不可用：${reason}；已读取现场/历史/GitHub，仍需核实验证是否完成，禁止盲目重做`;
-    targetReason = group.uncertain;
+    const reasons = waitingReasons(false);
+    const open = group.tickets.filter(item => tickets.get(item.ticket.number)?.state !== 'closed');
+    const ready = open.length > 0 && open.every(item => !reasons.has(item.ticket.number));
+    group.blockedReason = ready ? undefined : (open.map(item => `#${item.ticket.number}：${reasons.get(item.ticket.number) || 'GitHub 状态未知'}`).join('; ') || '本组 Tickets 已全部关闭');
+    return ready;
   }
   async function recheckTarget() {
     // 仅 in-progress 目标可自动恢复；其他阻碍需要用户核实，绝不自动清除。
@@ -916,73 +856,46 @@ export async function createEngine(config, processes, event = () => {}, observat
   }
   async function mergePending() {
     await recheckTarget();
-    prioritizeCloseGroup();
     if (!pending || targetReason || processes.stopping || !mergerReady(pending)) return;
     const group = pending;
-    const items = mergerCandidates(group).map(item => ({ ...item, ticket: tickets.get(item.ticket.number) || item.ticket }));
-    let dispatched = false;
+    const items = group.tickets.map(item => ({ ...item, ticket: tickets.get(item.ticket.number) || item.ticket }));
     try {
       await correctWorkspace({ cwd: targetCwd, branch: target });
-      if (!group.started && await inProgress(targetCwd)) {
+      if (await inProgress(targetCwd)) {
         targetReason = targetInProgressReason;
         return;
       }
-      // 提取 main.mts:208–221 的单次 merger 调用及 BRANCHES/ISSUES 参数（见 prompt）。
-      // 本机接线 runRole 替代 sandcastle.run；本运行 started/previous/phase 是 D7 续作薄适配。
-      const result = await runRole('merger', { cwd: targetCwd, branch: target, target, tickets: items.map(item => item.ticket.number), mode: group.phase, batch: group.id, items, previous: group.previous, summarySubject: group.summarySubject || null }, () => {
-        // 可信预展开完成、实际调用载体前才进入可能有副作用的边界。
-        dispatched = true;
-        group.started = true;
-      });
+      // 单次收尾：Merger 全权合并、验证、summary、gh close、wt 清理，最后 COMPLETE。
+      // 引擎只做 spawn 与下轮调度，对 commit 文本零依赖，不解析封套、不做祖先核验。
+      const result = await runRole('merger', { cwd: targetCwd, branch: target, target, tickets: items.map(item => item.ticket.number), batch: group.id, items });
       if (result.status === 'stopped' || processes.stopping) return;
-      if (!Object.hasOwn(result, 'run')) {
-        await inspectMerger(group, result.reason || '最终结果缺少合法业务封套');
-        if (result.status === 'blocked') {
-          if (group.phase === 'close') for (const item of items) blocks.set(item.ticket.number, result.reason || 'Merger 权限阻碍');
-          else targetReason = result.reason || 'Merger 权限阻碍';
-        }
+      if (result.status === 'blocked') {
+        targetReason = result.reason || 'Merger 权限阻碍';
+        event('merge-failed', { batch: group.id, reason: targetReason });
         return;
       }
-      // 引擎只做形状与血缘的事实核验：身份逐票对应、分支已成为目标祖先。
-      // verified / summary 不再作为关闭前置阻断；“说关就关”的责任在 Merger。
-      if (!Array.isArray(result.tickets) || result.tickets.length !== items.length) throw new Error('Merger 结果缺少逐票状态');
-      const expected = new Map(items.map(item => [item.ticket.number, item]));
-      for (const item of result.tickets) {
-        const original = expected.get(item.ticket);
-        if (!original || original.workspace.branch !== item.branch || ['merged', 'verified', 'closed'].some(key => typeof item[key] !== 'boolean')) throw new Error('Merger 逐票结果与固定批次不符');
-        expected.delete(item.ticket);
-        if (item.merged) await git(['merge-base', '--is-ancestor', item.branch, target], targetCwd);
+      if (result.status !== 'passed') {
+        // 瞬时失败不设不确定态：留待下轮整单幂等重跑，由全局 max-rounds 有界。
+        event('merge-failed', { batch: group.id, reason: result.reason || 'Merger 未完成' });
+        return;
       }
       await correctWorkspace({ cwd: targetCwd, branch: target });
-      // 用户既有未提交改动必须原样留在工作区：summary commit 不得把基线脏文件
-      // 卷进提交（那会让用户改动凭空消失在工作区、变成别人的提交）。
+      // 基线保护保留（Git 事实，非 commit 文本）：summary 不得吞并用户既有未提交改动。
       const swallowed = (await committedPaths(targetCwd)).filter(path => targetPreexisting.includes(path));
       if (swallowed.length) throw new Error(`summary 提交包含了目标原有的未提交改动：${swallowed.join(', ')}；用户改动必须保留在工作区`);
-      if (typeof result.summaryCreated === 'boolean' && result.summaryCreated) {
-        if (group.phase === 'close') {
-          if (result.summarySubject !== group.summarySubject) throw new Error('close-only 不得重写 summary');
-        } else {
-          group.phase = 'close';
-          group.summarySubject = result.summarySubject;
-        }
+      // merger-result 只读推导供看板：重读 GitHub 关闭状态，不做门控；
+      // 未关闭票留在组内，下轮整单幂等重跑（refresh 剔除已 closed）。
+      const remaining = [];
+      for (const item of items) {
+        let closed = false, error;
+        try { closed = (await readIssue(item.ticket.number)).state === 'closed'; }
+        catch (failure) { if (unsafeTermination.test(failure.message)) throw failure; error = failure.message; }
+        if (!closed) remaining.push(item.ticket.number);
+        observations?.observe('engine', 'merger-result', { ticket: item.ticket.number, tickets: [item.ticket.number], batch: group.id, role: 'merger' }, { closed, error });
       }
-      group.previous = result;
-      if (result.status === 'blocked') {
-        const blockedReason = group.phase === 'close' ? `关闭受阻：${result.summary}；${result.remaining.join('; ')}` : result.summary || 'Merger 权限/现场阻碍';
-        if (group.phase === 'close') {
-          for (const item of result.tickets) if (!item.closed) blocks.set(item.ticket, blockedReason);
-        } else targetReason = blockedReason;
-      }
-      // 合并失败可接续；关闭失败逐票保留，下一轮仅关闭，绝不重跑 merge/test/summary。
-      event('merge-progress', { batch: group.id, phase: group.phase, summarySubject: group.summarySubject, tickets: result.tickets });
-      // 看板逐票状态从 Merger 逐票结果推导：每票独立发布一条观测事实。
-      for (const item of result.tickets) {
-        observations?.observe('engine', 'merger-result', { ticket: item.ticket, tickets: [item.ticket], batch: group.id, role: 'merger' }, { merged: item.merged, verified: item.verified, closed: item.closed, phase: group.phase });
-      }
+      event('merge-completed', { batch: group.id, tickets: items.map(item => item.ticket.number), remaining });
     } catch (error) {
       if (unsafeTermination.test(error.message)) throw error;
-      if (dispatched && !processes.stopping) await inspectMerger(group, error.message);
-      else if ([permission, configurationFailure, workspaceFailure].some(pattern => pattern.test(error.message))) targetReason = error.message;
       event('merge-failed', { batch: group.id, reason: error.message });
     }
   }
@@ -990,7 +903,7 @@ export async function createEngine(config, processes, event = () => {}, observat
   // 握手只等待前置检查及固定范围；逐票上下文读取留在可观察、可取消的运行阶段。
   event('scope', { repository, target, tickets: [...scope], specs: [...specs], waiting: Object.fromEntries(waitingReasons()) });
   return {
-    describe: () => ({ repository, repo: root, target, targetCwd, tickets: [...scope], specs: [...specs], batch, pending: pending && { phase: pending.phase, tickets: pending.tickets.map(item => item.ticket.number) }, queued: mergeQueue.map(group => ({ batch: group.id, tickets: group.tickets.map(item => item.ticket.number) })), recovery: Object.fromEntries(recovery), waiting: Object.fromEntries(waitingReasons()), targetBlocked: targetReason, quarantined }),
+    describe: () => ({ repository, repo: root, target, targetCwd, tickets: [...scope], specs: [...specs], batch, pending: pending && { tickets: pending.tickets.map(item => item.ticket?.number ?? item.number) }, queued: mergeQueue.map(group => ({ batch: group.id, tickets: group.tickets.map(item => item.ticket?.number ?? item.number) })), recovery: Object.fromEntries(recovery), waiting: Object.fromEntries(waitingReasons()), targetBlocked: targetReason, quarantined }),
     releaseAbandonedLocks,
     async run() {
       if (running || finished) throw new Error('Engine 实例只允许运行一次；新 run 由当前 Git/GitHub 事实重新恢复');
@@ -1015,9 +928,8 @@ export async function createEngine(config, processes, event = () => {}, observat
           // 全局最大轮次兜底：达到即正常结束当前 run，不无限烧钱。
           if (batch > maxRounds) return { state: 'completed', tickets: [...scope], batches: batch, roundsCapped: true, maxRounds };
           if (pending) await recheckTarget();
-          prioritizeCloseGroup();
-          // 待合并或 close-only 始终由单个 Merger 继续；
-          // 不重派实现/审查，也不让新批次改变该组 summary。
+          // 待收尾组始终由单个 Merger 整单继续；
+          // 不重派实现/审查，不拆组。
           if (pending && !targetReason && mergerReady(pending)) {
             await mergePending();
           } else {
@@ -1072,16 +984,17 @@ export async function createEngine(config, processes, event = () => {}, observat
               }
             }
             // 上游 main.mts:175–182 的 fulfilled + commits.length > 0 门：
-            // 待合集只收“正常完成且提交非空”的结果。
+            // 待合集只收正常完成且有提交的结果。快道（已是目标祖先）保留
+            // commits 占位摘要以通过此门；Implementer 未完成（无 COMPLETE）
+            // 或分支无 ahead 提交的结果不进待合集。
             const successful = [];
             for (const [index, outcome] of settled.entries()) {
               if (outcome.status !== 'fulfilled' || !outcome.value?.commits?.length) continue;
-              // 已是目标祖先的分支无 ahead 提交，但仍需进 Merger 验证关闭。
               if (!prepared[index].workspace.mergedIntoTarget && !await branchAhead(prepared[index].workspace)) continue;
               successful.push(outcome.value);
             }
             if (successful.length) {
-              const group = { id: batch, phase: 'merge', tickets: successful };
+              const group = { id: batch, tickets: successful };
               if (pending) mergeQueue.push(group);
               else pending = group;
             }

@@ -9,7 +9,6 @@ import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 import { buildInvocation, parseLine, explicitRefusal, authorizationError, roleSelection } from './providers.mjs';
 import { BoundedTail, MAX_TAIL_CHARS } from './bounded-tail.mjs';
-import { findLastTagContent, unwrapFences } from './structured-output.mjs';
 
 export const IDLE_MS = 600_000;
 export const COMPLETION_MS = 60_000;
@@ -438,9 +437,11 @@ export class Processes {
     if (!result.grace && (result.code !== 0 || result.signal)) {
       return { status: 'failed', reason: result.signal ? `外部信号 ${result.signal}` : result.stderr || `退出 ${result.code}` };
     }
-    const raw = findLastTagContent(result.result, 'afk-result');
-    if (raw === undefined) return { status: 'failed', reason: '最终结果缺少结构化 afk-result' };
-    try { return JSON.parse(unwrapFences(raw.trim())); }
-    catch (error) { return { status: 'failed', reason: `结果 JSON 错误：${error.message}` }; }
+    // issue #14：完成信号回归上游语义——输出文本含 <promise>COMPLETE</promise>
+    // 即成功候选。stdout EOF / 退出码 0 单独均不等成功，必须有 COMPLETE 字符串。
+    if (typeof result.result === 'string' && result.result.includes('<promise>COMPLETE</promise>')) {
+      return { status: 'passed', completed: true, run: 'completed', completionDetected: true, result: result.result };
+    }
+    return { status: 'failed', completed: false, reason: '缺少完成信号 <promise>COMPLETE</promise>' };
   }
 }

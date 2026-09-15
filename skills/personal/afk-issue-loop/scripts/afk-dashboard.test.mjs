@@ -51,6 +51,10 @@ case "\${1:-}" in
   --version) printf '%s\\n' 'gh version fixture' ;;
   auth) exit 0 ;;
   repo) printf '%s\\n' '{"nameWithOwner":"owner/repo"}' ;;
+  issue)
+    [ "\${2:-}" = 'close' ] || exit 1
+    printf '%s' 'closed' > "$AFK_ISSUE_STATE_DIR/\$3"
+    ;;
   api)
     endpoint=''
     for arg in "$@"; do case "$arg" in repos/*) endpoint="$arg" ;; esac; done
@@ -103,7 +107,7 @@ let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 const input = JSON.parse(prompt.slice(prompt.lastIndexOf('\\n{') + 1));
 const context = input.context;
-appendFileSync(process.env.AFK_ROLE_LOG, JSON.stringify({ role: context.role, ticket: context.ticket?.number, mode: context.mode, cwd: process.cwd() }) + '\\n');
+appendFileSync(process.env.AFK_ROLE_LOG, JSON.stringify({ role: context.role, ticket: context.ticket?.number, cwd: process.cwd() }) + '\\n');
 // 原始 transport 负载先于 provider-specific 解析进入 Observation journal：
 // text delta、完整 tool-call 参数、未识别事件、stderr 原文都不被过滤或改写。
 const emit = value => process.stdout.write(JSON.stringify(value) + '\\n');
@@ -121,35 +125,14 @@ if (['permission-recovered', 'carrier-failure'].includes(process.env.AFK_ROLE_BE
   process.stderr.write('dashboard fixture 不支持该 AFK_ROLE_BEHAVIOR\\n');
   process.exit(1);
 }
-// 受控场景：Reviewer 结果带一个 not-run 验证。tests 对 Reviewer 是信息性，
- // pipeline 只看 commits 摘要与 Git 事实，不再有门控拒绝。
-const notRun = process.env.AFK_ROLE_BEHAVIOR === 'reviewer-not-run-passed' && context.role === 'reviewer';
-// Merger 行为：把本批分支合入目标并写 summary，使逐票 Merger 结果与 batch
-// identity 可被观察。
-let result;
+// Merger 行为：合入分支、写 summary、逐个 gh close，最后 COMPLETE。逐票 closed
+// 由引擎重读 GitHub 推导（merger-result 观测），agent 不自报封套。
 if (context.role === 'merger') {
-  if (context.mode === 'merge') {
-    for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
-    execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(afk): Dashboard fixture summary'], { cwd: context.cwd });
-  }
-  result = {
-    run: context.run, attempt: context.attempt, role: context.role,
-    status: 'passed', summary: 'fixture 合并完成', tests: [], remaining: [],
-    branch: context.branch, cwd: context.cwd,
-    summaryCreated: true, summarySubject: 'chore(afk): Dashboard fixture summary',
-    tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: false })),
-  };
-} else {
-  result = {
-    run: context.run, attempt: context.attempt, role: context.role,
-    status: 'passed', summary: '复用已有实现，无需新增提交',
-    tests: notRun ? [{ command: 'fixture verify', status: 'not-run', summary: '未执行' }] : [],
-    remaining: [],
-    branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
-    commits: ['已有可交付提交'],
-  };
+  for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+  execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(afk): Dashboard fixture summary'], { cwd: context.cwd });
+  for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
 }
-emit({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' });
+emit({ type: 'result', result: 'fixture 合并完成 <promise>COMPLETE</promise>' });
 `);
   writeExecutable(join(bin, 'claude'), `
 if [ "\${1:-}" = '--version' ]; then printf '%s\\n' 'claude fixture'; exit 0; fi
@@ -342,7 +325,7 @@ test('共享逻辑 Merger 以 batch identity 关联多票，逐票 Merger 结果
     const resultTickets = new Set(results.map(record => record.scope.ticket));
     assert.ok(resultTickets.size >= 1, '逐票 Merger 结果必须携带 ticket scope');
     assert.ok(results.every(record => Number.isSafeInteger(record.scope.ticket)), 'Merger 结果必须逐票关联 Ticket');
-    assert.ok(results.every(record => typeof record.payload.merged === 'boolean' && typeof record.payload.verified === 'boolean' && typeof record.payload.closed === 'boolean'), 'Merger 逐票结果必须带 merged/verified/closed');
+    assert.ok(results.every(record => typeof record.payload.closed === 'boolean'), 'Merger 逐票结果必须带 closed');
     assert.equal(records.some(record => record.kind === 'self-report' || record.kind.startsWith('gate-') || String(record.kind).startsWith('delivery-')), false, '三层观测必须零出现');
   } finally {
     await stopRun(runDir, fixture.env);

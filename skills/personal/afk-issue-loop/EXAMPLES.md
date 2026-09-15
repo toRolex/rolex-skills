@@ -84,7 +84,7 @@ node "<skill绝对路径>/scripts/afk.mjs" start --repo "/absolute/project" --is
 
 ## 固定批次与接力
 
-A 阻塞 C，B 独立。本批选 A、B，并发 Implementer。A 实现结束就接独立 Reviewer，B 继续实现；A 审查通过仍等批末。B 实现成功后同样接独立 Reviewer；全批实现/审查 pipeline settled 且写者结束后，一个 Merger 合并可交付分支，完成验证、写本批一个 summary，再关闭对应 Tickets。下一批刷新依赖才选择 C。
+A 阻塞 C，B 独立。本批选 A、B，并发 Implementer。A 实现结束就接独立 Reviewer，B 继续实现；A 审查通过仍等批末。B 实现成功后同样接独立 Reviewer；全批实现/审查 pipeline settled 且写者结束后，一个 Merger 单次调用完成合并、验证、本批一个 summary、逐个 `gh issue close`、再用 `wt` 清理已合入分支/worktree，最后输出 `<promise>COMPLETE</promise>`。下一批刷新依赖才选择 C。
 
 五票独立就绪时五票同属首批并发；第六票在批中解除 blocked，也要等下一批，不中途补位。一票就绪也可启动。
 
@@ -115,11 +115,11 @@ A 实现失败、B 审查通过：结束 A 当前执行，本批只合 B。A 的
 
 用户说明 #1 是 SPEC，#2 是 Ticket，正文有 Parent #1。读 #1 作需求上下文，处理 #2，无需先补原生父子关联；#2 交付后 Merger 只关闭 #2。
 
-实现者报告无分支改动及 commits，就说明原因，免去空跑 Reviewer 和 Merger。若代码尚未满足 Ticket，下批继续处理；已合并验证且 summary 完成、只剩关闭的情况见下一例。
+实现者报告无分支改动及 commits，就说明原因，免去空跑 Reviewer 和 Merger。若代码尚未满足 Ticket，下批继续处理；Merger 未走完收尾、关闭失败的情况见下一例（整单幂等重跑）。
 
-## 合并后关闭失败
+## 关闭失败整单重跑
 
-Merger 完成本批 A、B 合并及测试，再写一个 summary。随后关闭 A 成功，B 因临时服务错误关闭失败；返回两票实际结果。下一批 B 只交给 Merger 补关闭，免去重复实现、审查和 summary。若拒绝源于权限，则等待用户处理权限，调度者不会换身份代关。
+Merger 单次调用走完本批 A、B 合并及测试、写一个 summary，随后关闭 A 成功，B 因临时服务错误关闭失败；返回两票实际结果。下轮整单幂等重跑：B 已合入则跳过重复合并、沿用已有 summary，由 Merger 继续验证、关闭与 `wt` 清理，不再重复实现与审查。若拒绝源于权限，则等待用户处理权限，调度者不会换身份代关。
 
 ## 合并尚未完成
 

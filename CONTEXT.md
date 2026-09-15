@@ -54,18 +54,16 @@ _Avoid_: 流式调度、Ticket 槽
 批内每票的实现与审查管线均已成功完成或结束失败执行的状态，不代表所有票都成功。
 
 **Merger**:
-批次中负责合并交付成果与交付收尾的角色。
+批次中负责合并、验证、关闭 Issue 与清理分支/worktree 的角色；单次调用完成全部收尾。
+_Avoid_: 引擎代关、两阶段关闭
 
-**仅待关闭（close-only）**:
-合并、验证及批次总结已经完成，只剩对应 Ticket 尚未关闭的交付收尾状态。
+**完成信号**:
+角色输出中的 `<promise>COMPLETE</promise>` 字符串；是角色声明完成的唯一信号。
+_Avoid_: 结构化封套、交付证明
 
 **再次尝试**:
 尚未交付的失败 Ticket 的新一次执行尝试，与既有尝试的失败结果相区分。
 _Avoid_: 本次跳过、模型升级恢复
-
-**完成信号**:
-角色声明进入完成收尾的提示，不等于执行已结束或 Ticket 已交付。
-_Avoid_: 交付证明
 
 **收尾宽限（completion grace）**:
 完成信号之后允许角色继续产生输出、完成尾部工作的等待阶段。
@@ -78,7 +76,7 @@ _Avoid_: 角色总时限
 开放 Ticket 已存在的标准 `afk/issue-N` 分支和／或 Worktrunk worktree；其 commits 与 dirty 进度属于可继承交付事实，不等于本 run 所有。
 
 **恢复分类**:
-新 run 根据当前 GitHub、Git、Worktrunk 与 writer 事实为 Ticket 标记的下一步，如跳过、恢复 worktree、恢复分支、创建、等待、等待活跃写者或继续验证关闭。
+新 run 根据当前 GitHub、Git、Worktrunk 与 writer 事实为 Ticket 标记的下一步，如跳过、恢复 worktree、恢复分支、创建、等待或等待活跃写者。
 
 **活跃写者（active writer）**:
 通过 AFK writer ownership channel 可连接并正向证明其仍负责某 worktree 的 AFK script；只有这种明确证据才使该 Ticket 进入 `waiting-writer`。
@@ -96,17 +94,6 @@ _Avoid_: planned Attempt、尝试次数
 Dashboard 可重放的 append-only 事实记录，拥有 run-level 单调 `seq`；best-effort 写入，不参与调度、Recovery 或 Gate 正确性。
 _Avoid_: 核心事件、events.jsonl
 
-**Self-report**:
-Role 输出封套中的自报状态，不等于 Gate。
-_Avoid_: 交付结论、验收通过
-
-**Gate**:
-engine 对 Role result、测试、Git deliverable 与交付条件的独立接受或拒绝结论；必须显式发布，不能从 Self-report 或 role-end 反推。
-_Avoid_: 角色自报、进程退出码
-
-**Delivery**:
-merge、summary、Issue close 等最终交付阶段与逐 Ticket 结果；独立于 Gate 与进程状态。
-
 **merged-unverified**:
-任务分支提交已成为目标分支祖先，但本次仍需完成目标验证、summary 核实和 Issue 关闭的恢复状态。
+任务分支提交已成为目标分支祖先，但本次仍需完成目标验证和 Issue 关闭的恢复状态。
 _Avoid_: 已交付、已完成

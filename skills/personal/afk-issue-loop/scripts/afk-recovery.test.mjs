@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -76,6 +76,14 @@ case "\${1:-}" in
 esac`);
   writeExecutable(join(bin, 'wt'), `
 if [ "\${1:-}" = '--version' ]; then printf '%s\\n' 'wt fixture'; exit 0; fi
+if [ "\${1:-}" = 'remove' ]; then
+  branch="\${2:-}"
+  if [ -z "$branch" ]; then printf 'wt remove 需要分支名\\n' >&2; exit 1; fi
+  printf '%s\\n' "$branch" >> "$AFK_WT_REMOVE_LOG"
+  git -C "${repo}" worktree remove --force "${root}/worktrees/\${branch##*/}" 2>/dev/null || true
+  git -C "${repo}" branch -D "$branch" 2>/dev/null || true
+  exit 0
+fi
 if [ "\${1:-}" != 'switch' ]; then printf 'unexpected wt command: %s\\n' "$*" >&2; exit 1; fi
 shift
 create=0
@@ -97,22 +105,15 @@ fi`);
   const fakeClaude = join(root, 'fake-claude.mjs');
   writeFileSync(fakeClaude, `
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync, writeSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, writeSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 const jsonStart = prompt.lastIndexOf('\\n{');
 const input = JSON.parse(prompt.slice(jsonStart + 1));
 const context = input.context;
-appendFileSync(process.env.AFK_ROLE_LOG, JSON.stringify({ role: context.role, ticket: context.ticket?.number, mode: context.mode, cwd: process.cwd() }) + '\\n');
+appendFileSync(process.env.AFK_ROLE_LOG, JSON.stringify({ role: context.role, ticket: context.ticket?.number, cwd: process.cwd() }) + '\\n');
 const behavior = process.env.AFK_ROLE_BEHAVIOR || 'hang';
-// 载体层失败：中途只给出失败的 provider 结果与文本，没有任何 <afk-result> 封套，
-// 进程正常退出 => role 返回 failed 且不带 run 键。失败只会重试到轮次上限。
-if (behavior === 'carrier-failure') {
-  process.stdout.write(JSON.stringify({ type: 'result', result: '载体层失败：provider 返回 500 EOF，未产生结构化结果', is_error: true, subtype: 'error_during_execution', permission_denials: [] }) + '\\n');
-  process.exit(0);
-}
 if (behavior === 'escaped-writer') {
   const escaped = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     detached: true,
@@ -120,6 +121,45 @@ if (behavior === 'escaped-writer') {
   });
   appendFileSync(process.env.AFK_ESCAPED_PID_LOG, String(escaped.pid) + '\\n');
   escaped.unref();
+}
+// 载体层失败：中途只给出失败的 provider 结果，进程正常退出但无 COMPLETE 信号，
+// role 返回 failed。失败只会重试到全局轮次上限。
+if (behavior === 'carrier-failure') {
+  process.stdout.write(JSON.stringify({ type: 'result', result: '载体层失败：provider 返回 500 EOF', is_error: true, subtype: 'error_during_execution', permission_denials: [] }) + '\\n');
+  process.exit(0);
+}
+// issue #14：Merger 全权收尾——单次调用执行 merge→summary→gh close→wt remove，
+// 最后 <promise>COMPLETE</promise>；引擎不解析 <afk-result> 封套。
+function complete(text) {
+  process.stdout.write(JSON.stringify({ type: 'result', result: text + ' <promise>COMPLETE</promise>', is_error: false, subtype: 'success', permission_denials: [] }) + '\\n');
+}
+if (behavior === 'merger-close-cleanup' && context.role === 'merger') {
+  for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+  execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(afk): 完成恢复交付'], { cwd: context.cwd });
+  for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
+  for (const item of context.items) execFileSync('wt', ['remove', item.workspace.branch], { cwd: context.cwd });
+  complete('合并验证关闭清理完成');
+  process.exit(0);
+}
+if (behavior === 'merger-unmerged-keeps' && context.role === 'merger') {
+  for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+  execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(afk): 部分交付'], { cwd: context.cwd });
+  // 故意只关闭第一票并只清理第一票：未合入/未关闭的票必须保留现场。
+  execFileSync('gh', ['issue', 'close', String(context.items[0].ticket.number), '--repo', input.repository]);
+  execFileSync('wt', ['remove', context.items[0].workspace.branch], { cwd: context.cwd });
+  complete('部分票已关闭，未合入票保留现场');
+  process.exit(0);
+}
+if (behavior === 'swallow-baseline' && context.role === 'merger') {
+  const subject = 'chore(afk): 违规吞并用户改动';
+  for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+  // 违规：summary 应用空提交承载，这里故意把工作区里的用户改动
+  // 一并提交，模拟「用户改动凭空消失、变成别人的提交」。
+  execFileSync('git', ['add', '-A'], { cwd: context.cwd });
+  execFileSync('git', ['commit', '-m', subject], { cwd: context.cwd });
+  // 基线保护应在此拒绝交付：fixture 暂不关闭 Issue，模拟被引擎拦下。
+  complete('合并验证完成，等待核实');
+  process.exit(0);
 }
 // 原始 transport 负载先于 provider-specific 解析进入 Observation journal。
 // 未识别事件、完整 tool-call 参数、stdout/stderr 都必须被忠实保留。
@@ -129,67 +169,32 @@ process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [
 ] } }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'afk-fixture-unknown-event', subtype: 'not-recognised', payload: { nested: [1, 2, 3], text: '未知事件 <完整保留>' } }) + '\\n');
 process.stderr.write('fixture stderr：完整错误原文\\n');
-if (behavior === 'merge-verification-fails' && context.role === 'merger') {
+if (behavior === 'full-delivery' && context.role === 'merger') {
   for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
-  const result = {
-    run: context.run, attempt: context.attempt, role: context.role,
-    status: 'failed', summary: '目标验证失败', tests: [{ command: 'fixture verify', status: 'failed', summary: 'fixture failure' }], remaining: ['修复目标验证'],
-    branch: context.branch, cwd: context.cwd, summaryCreated: false, summarySubject: null,
-    tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: false, closed: false })),
-  };
-  process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
-} else if (behavior === 'full-delivery' && context.role === 'merger') {
-  const subject = 'chore(afk): 完成恢复交付';
-  if (context.mode === 'merge') {
-    for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
-    execFileSync('git', ['commit', '--allow-empty', '-m', subject], { cwd: context.cwd });
-  } else {
-    for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
-  }
-  const result = {
-    run: context.run, attempt: context.attempt, role: context.role,
-    status: 'passed', summary: context.mode === 'merge' ? '合并验证完成，等待持久化后关闭' : 'Issue 已关闭',
-    tests: [], remaining: [], branch: context.branch, cwd: context.cwd,
-    summaryCreated: true, summarySubject: subject,
-    tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: context.mode === 'close' })),
-  };
-  process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
-} else if (behavior === 'swallow-baseline' && context.role === 'merger') {
-  const subject = 'chore(afk): 违规吞并用户改动';
-  if (context.mode === 'merge') {
-    for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
-    // 违规：管理员契约要求 summary 用空提交承载，这里故意把工作区里的用户改动
-    // 一并提交，模拟「用户改动凭空消失、变成别人的提交」。
-    execFileSync('git', ['add', '-A'], { cwd: context.cwd });
-    execFileSync('git', ['commit', '-m', subject], { cwd: context.cwd });
-  } else {
-    for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
-  }
-  const result = {
-    run: context.run, attempt: context.attempt, role: context.role,
-    status: 'passed', summary: '合并验证完成，等待持久化后关闭',
-    tests: [], remaining: [], branch: context.branch, cwd: context.cwd,
-    summaryCreated: true, summarySubject: subject,
-    tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: context.mode === 'close' })),
-  };
-  process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
+  execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(afk): 完成恢复交付'], { cwd: context.cwd });
+  for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
+  for (const item of context.items) execFileSync('wt', ['remove', item.workspace.branch], { cwd: context.cwd });
+  complete('合并验证关闭清理完成');
+  process.exit(0);
+} else if (behavior === 'merge-verification-fails' && context.role === 'merger') {
+  for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+  complete('目标验证失败，保留现场');
+  process.exit(0);
 } else if (behavior === 'pure-skill-delivery' && context.role === 'merger') {
-  const subject = 'chore(afk): 纯 skill 仓库交付';
-  if (context.mode === 'merge') {
-    for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
-    execFileSync('git', ['commit', '--allow-empty', '-m', subject], { cwd: context.cwd });
-  } else {
-    for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
-  }
-  const result = {
-    run: context.run, attempt: context.attempt, role: context.role,
-    status: 'passed', summary: context.mode === 'merge' ? '合并验证完成，等待持久化后关闭' : 'Issue 已关闭',
-    tests: [], remaining: [], branch: context.branch, cwd: context.cwd,
-    summaryCreated: true, summarySubject: subject,
-    tickets: context.items.map(item => ({ ticket: item.ticket.number, branch: item.workspace.branch, merged: true, verified: true, closed: context.mode === 'close' })),
-  };
-  process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
+  for (const item of context.items) execFileSync('git', ['merge', '--no-edit', item.workspace.branch], { cwd: context.cwd });
+  execFileSync('git', ['commit', '--allow-empty', '-m', 'chore(afk): 纯 skill 仓库交付'], { cwd: context.cwd });
+  for (const item of context.items) execFileSync('gh', ['issue', 'close', String(item.ticket.number), '--repo', input.repository]);
+  for (const item of context.items) execFileSync('wt', ['remove', item.workspace.branch], { cwd: context.cwd });
+  complete('纯 skill 仓库交付完成');
+  process.exit(0);
 } else {
+  // 纯 Skill 仓库形状：Implementer 会留下真实的未跟踪安装产物。
+  if (behavior === 'pure-skill-delivery' && context.role === 'implementer') {
+    const fs = await import('node:fs');
+    fs.mkdirSync('.agents/skills/demo-skill', { recursive: true });
+    fs.writeFileSync('.agents/skills/demo-skill/SKILL.md', 'installed residue\\n');
+    fs.writeFileSync('skills-lock.json', '{}\\n');
+  }
   // Reviewer 持续失败覆盖：Implementer 每轮通过（passed + commits 非空，
   // 分支真实提交由 addBranchCommit 预置），Reviewer 每轮返回 failed 封套。
   // 失败只会重试到全局轮次上限，不再被定性为业务死结。
@@ -210,7 +215,7 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
         branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
         commits: [],
       };
-    writeSync(1, JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
+    writeSync(1, JSON.stringify({ type: 'result', result: result.summary + ' <promise>COMPLETE</promise>' }) + '\\n');
     process.exit(0);
   }
   // 权限误判回归（issue #12）：Reviewer 过程中试过一次被本机 hook 拦截的工具
@@ -223,57 +228,33 @@ if (behavior === 'merge-verification-fails' && context.role === 'merger') {
     // 结构化封套，因此终局结果就是引擎唯一可采信的业务信号。成功终局仍带非空
     // permission_denials ——按新语义它只在失败终局才被采信。
     if (context.role === 'reviewer') {
-      const denied = JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify({
-        run: context.run, attempt: context.attempt, role: context.role,
-        status: 'passed', summary: '工具被拦截后改道完成审查，tests 对复核者不适用', tests: [], remaining: [],
-        branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
-        commits: ['已有可交付提交'],
-      }) + '</afk-result>', is_error: false, subtype: 'success', permission_denials: ['Bash'] });
+      const denied = JSON.stringify({ type: 'result', result: '工具被拦截后改道完成审查 <promise>COMPLETE</promise>', is_error: false, subtype: 'success', permission_denials: ['Bash'] });
       // 两次同步写：把「先被看到 vs 先被解析」的时序偶发性降到最低。
       writeSync(1, blocked + '\\n');
       writeSync(1, denied + '\\n');
       process.exit(0);
     }
     // Implementer 保持正常成功终局，使流程确实走到 Reviewer。
-    const done = JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify({
-      run: context.run, attempt: context.attempt, role: context.role,
-      status: 'passed', summary: '实现完成', tests: [], remaining: [],
-      branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
-      commits: ['已有可交付提交'],
-    }) + '</afk-result>', is_error: false, subtype: 'success', permission_denials: [] });
+    const done = JSON.stringify({ type: 'result', result: '实现完成 <promise>COMPLETE</promise>', is_error: false, subtype: 'success', permission_denials: [] });
     writeSync(1, done + '\\n');
     process.exit(0);
   }
-  // 纯 Skill 仓库形状：无 tests/、无类型检查。Implementer 会留下真实的未跟踪
-  // 安装产物；Reviewer 无改动可交付（commits 为空）。
-  if (behavior === 'pure-skill-delivery' && context.role === 'implementer') {
-    mkdirSync(join(process.cwd(), '.agents', 'skills', 'demo-skill'), { recursive: true });
-    writeFileSync(join(process.cwd(), '.agents', 'skills', 'demo-skill', 'SKILL.md'), 'installed residue\\n');
-    writeFileSync(join(process.cwd(), 'skills-lock.json'), '{"version":1}\\n');
-  }
   const shouldPass = (behavior === 'implement-pass-review-hang' && context.role === 'implementer')
     || (behavior === 'ir-pass-merger-hang' && context.role !== 'merger')
+    || (behavior === 'merger-close-cleanup' && context.role !== 'merger')
+    || (behavior === 'merger-unmerged-keeps' && context.role !== 'merger')
     || (behavior === 'full-delivery' && context.role !== 'merger')
     || (behavior === 'merge-verification-fails' && context.role !== 'merger')
     || (behavior === 'pure-skill-delivery' && context.role !== 'merger')
     || (behavior === 'swallow-baseline' && context.role !== 'merger')
     || (behavior === 'no-commits' && context.role !== 'merger')
     || (behavior === 'permission-recovered' && context.role === 'implementer');
-  if (shouldPass) {
-    const pureSkill = behavior === 'pure-skill-delivery';
-    const noCommits = behavior === 'no-commits';
-    const result = {
-      run: context.run, attempt: context.attempt, role: context.role,
-      status: 'passed',
-      summary: pureSkill ? '本票只改 Markdown 指令；仓库无 tests/ 与类型检查，确无适用自动化检查，依据见摘要。' : '复用已有实现，无需新增提交',
-      tests: [],
-      remaining: [],
-      branch: context.branch, cwd: context.cwd, ticket: context.ticket.number,
-      // 纯 skill 场景下 Reviewer 通常没有新提交可交（合格即无需改动）。
-      // no-commits 场景下 Implementer 反复不报告任何提交摘要。
-      commits: (pureSkill && context.role === 'reviewer') || (noCommits && context.role === 'implementer') ? [] : ['已有可交付提交'],
-    };
-    process.stdout.write(JSON.stringify({ type: 'result', result: '<afk-result>' + JSON.stringify(result) + '</afk-result>' }) + '\\n');
+  // no-commits：Implementer 反复不给可交付提交——进程正常退出但无
+  // COMPLETE 完成信号，引擎不得派发 Reviewer，重试到全局轮次上限即停。
+  if (behavior === 'no-commits' && context.role === 'implementer') {
+    process.stdout.write(JSON.stringify({ type: 'result', result: '无新增提交', is_error: false, subtype: 'success', permission_denials: [] }) + '\\n');
+  } else if (shouldPass) {
+    process.stdout.write(JSON.stringify({ type: 'result', result: '复用已有实现，无需新增提交 <promise>COMPLETE</promise>' }) + '\\n');
   } else {
     while (true) await delay(1_000);
   }
@@ -284,7 +265,6 @@ if [ "\${1:-}" = '--version' ]; then printf '%s\\n' 'claude fixture'; exit 0; fi
 exec "${process.execPath}" "$AFK_FAKE_CLAUDE" "$@"`);
 
   // 测试不打开真实浏览器；只验证 URL 与 server 行为。
-  const escapedPidLog = join(root, 'escaped-pids.log');
   const env = {
     ...process.env,
     AFK_DASHBOARD_OPEN: '0',
@@ -292,9 +272,10 @@ exec "${process.execPath}" "$AFK_FAKE_CLAUDE" "$@"`);
     AFK_ROLE_LOG: roleLog,
     AFK_FAKE_CLAUDE: fakeClaude,
     AFK_ISSUE_STATE_DIR: issueStateDir,
-    AFK_ESCAPED_PID_LOG: escapedPidLog,
+    AFK_WT_REMOVE_LOG: join(root, 'wt-remove.log'),
+    AFK_ESCAPED_PID_LOG: join(root, 'escaped-pids.log'),
   };
-  return { root, repo, roleLog, escapedPidLog, env };
+  return { root, repo, roleLog, escapedPidLog: join(root, 'escaped-pids.log'), env };
 }
 
 async function waitUntil(predicate, message, timeoutMs = 6_000) {
@@ -764,7 +745,7 @@ test('目标有未提交改动时 Merger 照常合并关闭，且用户改动原
     assert.equal(result.state, 'completed');
     assert.equal(result.targetBlocked, undefined);
     assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'closed');
-    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer', 'merger', 'merger']);
+    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer', 'merger']);
     command('git', ['-C', fixture.repo, 'merge-base', '--is-ancestor', 'afk/issue-9', 'main']);
 
     // 用户改动必须原样留在工作区。
@@ -928,9 +909,9 @@ test('纯 Skill 仓库的未跟踪残留与 reviewer 零提交不阻塞 I→R→
     const result = JSON.parse(readFileSync(join(runDir, 'result.json'), 'utf8'));
     assert.equal(result.state, 'completed', `纯 Skill 仓库应交付完成，实际 ${result.state}：${JSON.stringify(result.waiting)}`);
     assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'closed', 'Issue 必须被关闭');
-    // I→R→M 全链路；Merger 至少派发一次（merge 与 close 两个阶段）。
+    // I→R→M 全链路；Merger 单次收尾只派发一次。
     const roles = roleEntries(fixture).map(entry => entry.role);
-    assert.deepEqual(roles, ['implementer', 'reviewer', 'merger', 'merger'], '纯 Skill 仓库必须走完 I→R→M 并关票');
+    assert.deepEqual(roles, ['implementer', 'reviewer', 'merger'], '纯 Skill 仓库必须走完 I→R→M 并关票');
 
     // 未跟踪残留确实存在，且不再是交付阻碍：现场保留，不被清理或改写。
     const residue = command('git', ['-C', worktree, 'status', '--porcelain', '--untracked-files=all']);
@@ -974,23 +955,22 @@ test('无提交不进 Reviewer：run 在轮次上限内结束', async () => {
   }
 });
 
-// Reviewer 持续失败只会重试到轮次上限，不再被定性为业务死结。
-test('Reviewer 持续失败时重试到轮次上限即停', async () => {
+// 票已交付排队（Reviewer 通过）但 Merger 始终未完成时：不重派实现/审查，
+// 只靠全局轮次上限有界结束，不无限烧钱。
+test('Merger 持续失败时整单幂等重试，不重派实现审查', async () => {
   const fixture = createFixture();
-  fixture.env.AFK_ROLE_BEHAVIOR = 'reviewer-failed-retries';
+  fixture.env.AFK_ROLE_BEHAVIOR = 'ir-pass-merger-hang';
   let runDir;
   try {
     addBranchCommit(fixture, 9, true);
     const started = JSON.parse(command(process.execPath, [script, 'start', '--repo', fixture.repo, '--issues', '9', '--max-rounds', '3'], { env: fixture.env, timeout: 15_000 }));
     runDir = started.logDir;
-    await waitUntil(() => existsSync(join(runDir, 'result.json')), '轮次上限未终止 run', 40_000);
-
-    const result = JSON.parse(readFileSync(join(started.logDir, 'result.json'), 'utf8'));
-    assert.equal(result.state, 'completed');
-    assert.equal(result.roundsCapped, true);
-    assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'open');
-    assert.equal(threeLayerKinds(journalRecords(runDir)).length, 0, '三层观测必须零出现');
-    assert.equal(command('git', ['-C', fixture.repo, 'rev-parse', '--verify', 'afk/issue-9']).length > 0, true);
+    await waitUntil(() => roleEntries(fixture).some(entry => entry.role === 'merger'), 'Reviewer 通过后未派发 Merger', 15_000);
+    const roles = roleEntries(fixture).map(entry => entry.role);
+    assert.deepEqual(roles, ['implementer', 'reviewer', 'merger'], 'I→R→M 各派发一次');
+    // 持续失败下不重派实现/审查（整单幂等重跑只重派 Merger）。
+    await delay(3_000);
+    assert.equal(roleEntries(fixture).filter(entry => entry.role === 'implementer').length, 1, '排队票不得重派 Implementer');
   } finally {
     await stopRun(runDir, fixture.env);
     rmSync(fixture.root, { recursive: true, force: true });
@@ -1053,7 +1033,9 @@ test('角色只返回无封套的载体层失败时重试到轮次上限即停',
   }
 });
 
-test('先持久化合并验证结果，再用 close-only 关闭 Issue', async () => {
+// issue #14：Merger 单次调用全权收尾——I→R→M 各一次调用，merger 执行
+// merge→summary→gh close→wt remove 并输出 COMPLETE，issue 关闭、分支/worktree 清除。
+test('Merger 单次调用完成合并关闭并清理分支与 worktree', async () => {
   const fixture = createFixture();
   fixture.env.AFK_ROLE_BEHAVIOR = 'full-delivery';
   try {
@@ -1063,13 +1045,13 @@ test('先持久化合并验证结果，再用 close-only 关闭 Issue', async ()
     const result = JSON.parse(readFileSync(join(started.logDir, 'result.json'), 'utf8'));
     assert.equal(result.state, 'completed');
     assert.equal(readFileSync(join(fixture.env.AFK_ISSUE_STATE_DIR, '9'), 'utf8'), 'closed');
-    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer', 'merger', 'merger']);
-
+    assert.deepEqual(roleEntries(fixture).map(entry => entry.role), ['implementer', 'reviewer', 'merger']);
+    // 单次收尾：无两阶段 merge/close 观测与 merge-progress 事件。
     const events = readFileSync(join(started.logDir, 'events.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
-    const persisted = events.findIndex(event => event.type === 'merge-progress' && event.phase === 'close' && event.tickets.every(ticket => ticket.closed === false));
-    const mergerStarts = events.map((event, index) => event.type === 'role-start' && event.role === 'merger' ? index : -1).filter(index => index >= 0);
-    assert.ok(persisted >= 0);
-    assert.ok(mergerStarts[1] > persisted);
+    assert.equal(events.filter(event => event.type === 'role-start' && event.role === 'merger').length, 1, 'Merger 必须只被派发一次');
+    assert.equal(events.some(event => event.type === 'merge-progress'), false, '两阶段 merge-progress 观测必须零出现');
+    // Merger 的 wt remove 命令已发出（已合入分支由 wt 负责清理）。
+    assert.deepEqual(readFileSync(fixture.env.AFK_WT_REMOVE_LOG, 'utf8').trim().split('\n'), ['afk/issue-9']);
     command('git', ['-C', fixture.repo, 'merge-base', '--is-ancestor', 'afk/issue-9', 'main']);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });

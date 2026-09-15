@@ -16,7 +16,7 @@
 
 Reviewer 在同一现场直接修复、测试并提交，不与 Implementer 往返；已有代码合格可无新增 commit。实现/审查失败或无提交摘要均使本票本批 settled；settled 表示管线结束，包含失败，不等于通过。
 
-全批 settled 是 barrier。待合集只收“正常完成且提交非空”（上游 fulfilled + commits.length > 0，同义：分支相对目标确有提交）；有待合集、未完成目标合并或待关闭票时，启动唯一 Merger，否则免去 Merger。Merger 单次调用完成合并、验证、关闭三件事；关闭指令在 prompt 里，引擎只做形状与血缘的事实核验（身份逐票对应、分支已成为目标祖先），不再以前置条件阻断关闭。
+全批 settled 是 barrier。待合集只收“正常完成且提交非空”（上游 fulfilled + commits.length > 0，同义：分支相对目标确有提交）；有待合集、未完成目标合并或待关闭票时，启动唯一 Merger，否则免去 Merger。Merger 单次调用完成合并、验证、summary、逐个 `gh issue close`、再用 `wt` 清理已合入分支/worktree，最后输出 `<promise>COMPLETE</promise>`；脚本只做 spawn 与下轮调度。
 
 批末刷新固定范围内 open Tickets 及依赖，继续下一批，直至全局最大轮次（默认 10）。全部给定 Tickets 关闭才算完成；只剩权限、范围外前置、不可用现场、writer 冲突、目标 in-progress 等用户待办时，记录具体阻碍并结束自动推进，不冒充交付。网络抖动、瞬时失败只会重试到轮次上限，不再被定性为业务死结。
 
@@ -40,7 +40,7 @@ writer 采用 liveness-first：只有 writer ownership channel 可连接、且�
 
 多个 worktree、错误仓库绑定、locked/prunable、Git conflict/merge/rebase 等非 writer 阻碍继续沿用既有语义，不因 writer 策略变化而放宽。
 
-任务分支已成为目标祖先时记为 `merged-unverified`，跳过重复实现与 merge，交 Merger 继续目标验证、summary 核实和关闭。目标工作区存在未提交改动**不阻止 Merger**：Git merge 对会丢失工作区改动的场景自身 fail-closed（本地修改与合并内容重叠、或未跟踪文件将被合并覆盖时拒绝并中止，且不改动用户文件），非重叠的脏改动可安全合并并原样保留。因此只有目标处于未完成的 merge/rebase/冲突时才保留现场等待用户；引擎另核实本批 summary 提交未吞并目标原有的未提交改动，避免用户改动变成别人的提交。
+任务分支已成为目标祖先时记为 `merged-unverified`，跳过重复实现与 merge，交 Merger 只做目标验证和关闭，不再重复合并。目标工作区存在未提交改动**不阻止 Merger**：Git merge 对会丢失工作区改动的场景自身 fail-closed（本地修改与合并内容重叠、或未跟踪文件将被合并覆盖时拒绝并中止，且不改动用户文件），非重叠的脏改动可安全合并并原样保留。因此只有目标处于未完成的 merge/rebase/冲突时才保留现场等待用户；`targetPreexisting` 基线保护仍在（summary 不得吞并目标原有的未提交改动）。
 
 ## 就绪选择与全阻塞停止
 
@@ -70,13 +70,11 @@ writer 采用 liveness-first：只有 writer ownership channel 可连接、且�
 
 合并冲突、测试失败先由 Merger 修复再继续。若仍无法解决，保留目标当前内容并报告；目标仍有未解决冲突或失败修改时，先处理该目标问题，再继续后续批次的合并。
 
-已合并通过的部分保留，未交付分支保留待续做；目标合并尚待修复的票由 Merger 继续处理现有合并进度，无需重做实现。每批成员固定，上批未完成的 merge/close 仍属于原批，不把新成功分支混入其 summary。目标可处理时，优先由 Merger 续做旧批合并或补关闭，暂不启动新 Implementer；只有目标存在明确用户阻碍时，现场可用的独立票才可先继续实现与审查，其成功集按原固定批次排队。Merger 按原批分组串行交付，各批仅有一次 summary。剩余任务全部有明确阻碍时记录 waiting-user 并结束自动推进。同次运行保留完整合并队列；跨运行不恢复旧内存队列，而按分支祖先关系重建 `merged-unverified`，或对未合并成果重新执行当前 I/R。关闭职责由引擎实际加载的 [Merger prompt](reference/merger-prompt.md)规定，结构化结果仍由 [引擎契约](scripts/engine.mjs)核验，补关闭边界见下节。
+已合并通过的部分保留，未交付分支保留待续做；目标合并尚待修复的票由 Merger 继续处理现有合并进度，无需重做实现。每批成员固定，上批未完成的 merge/close 仍属于原批，不把新成功分支混入其 summary。目标可处理时，优先由 Merger 续做旧批合并或补关闭，暂不启动新 Implementer；只有目标存在明确用户阻碍时，现场可用的独立票才可先继续实现与审查，其成功集按原固定批次排队。Merger 按原批分组串行交付，各批仅有一次 summary。剩余任务全部有明确阻碍时记录 waiting-user 并结束自动推进。同次运行保留完整合并队列；跨运行不恢复旧内存队列，而按分支祖先关系重建 `merged-unverified`，或对未合并成果重新执行当前 I/R。Merger 职责见实际加载的 [Merger prompt](reference/merger-prompt.md)：完成判定只看 `<promise>COMPLETE</promise>` 字符串与载体层进程语义，不设形状门；关闭失败的整单下轮幂等重跑（已合入沿用），见下节。
 
-## 仅剩关闭
+## 关闭失败整单重跑
 
-若分支合并、验证及批次 summary 已完成，只有 Issue 关闭失败，下一批交给 Merger 只补关闭。根据当前分支改动、提交及已有执行结果确认是这类情况，避免再次实现、审查、合并或创建重复 summary。
-
-单票关闭失败仍继续其他可关闭票。close-only 不重复验证；已有 summary 沿用。角色可能已产生副作用但结果损坏时，结合 Git 历史、现场和 GitHub 核实，能确定则续作，不能确定则报告待核实项；不靠历史 passed 猜成功，不增加目标内容快照、HEAD 钉死或 summary 标题计数证明。
+Merger 单次调用未走完（合并、验证、summary、关闭、`wt` 清理任一步未完成），下轮整单幂等重跑：已合入分支跳过重复合并、沿用已有 summary，直接由 Merger 继续验证、关闭与清理；未合入分支保留现场并上报 remaining。单票关闭失败仍继续其他可关闭票。角色可能已产生副作用但结果损坏时，结合 Git 历史、现场和 GitHub 核实，能确定则续作，不能确定则报告待核实项；不靠历史 passed 猜成功，不增加目标内容快照、HEAD 钉死或 summary 标题计数证明。
 
 关闭权限尚未恢复时等待用户，其余独立工作继续。调度者只接收和核对结果，Issue 关闭始终由 Merger 执行。
 
