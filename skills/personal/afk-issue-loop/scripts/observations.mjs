@@ -57,16 +57,21 @@ export class ObservationJournal {
   // 合并记录展开为原始行：合并 payload 以 '\n' 拼接，与缓冲写入互逆，
   // split('\n') 逐行还原原文且顺序不变，供下游重放还原。
   static expandRawPayload(record) {
-    if (record?.kind !== 'raw-payload') return [record?.payload];
+    if (record?.kind !== 'raw-payload' && record?.kind !== 'stderr') return [record?.payload];
     return String(record?.payload ?? '').split('\n');
   }
 
   observe(source, kind, scope = {}, payload = null) {
     if (!this.#complete) return;
-    if (batchEnabled() && kind === 'raw-payload' && source?.startsWith('provider/') && typeof payload === 'string') {
-      return this.#bufferRaw(source, scope, payload);
+    if (batchEnabled() && typeof payload === 'string') {
+      if (kind === 'raw-payload' && source?.startsWith('provider/')) {
+        return this.#bufferBatch(source, kind, scope, payload);
+      }
+      if (kind === 'stderr' && source === 'process/stderr') {
+        return this.#bufferBatch(source, kind, scope, payload);
+      }
     }
-    // 非 raw-payload：先落盘缓冲，保证顺序语义（缓冲行不得排到后续事件之后）。
+    // 非 raw-payload / 非 stderr 或 scope 变化等：先落盘缓冲，保证顺序语义（缓冲行不得排到后续事件之后）。
     try {
       this.#flushPending();
     } catch { /* best-effort：落盘失败已在内部降级，继续写当前记录。 */ }
@@ -86,15 +91,15 @@ export class ObservationJournal {
     } catch { return null; }
   }
 
-  #bufferRaw(source, scope, line) {
+  #bufferBatch(source, kind, scope, line) {
     try {
       const scopeKey = this.#scopeKey(scope);
-      if (scopeKey === null) return this.#writeRecord(source, 'raw-payload', scope, line);
-      if (this.#pending && (this.#pending.source !== source || this.#pending.scopeKey !== scopeKey)) {
+      if (scopeKey === null) return this.#writeRecord(source, kind, scope, line);
+      if (this.#pending && (this.#pending.source !== source || this.#pending.kind !== kind || this.#pending.scopeKey !== scopeKey)) {
         this.#flushPending();
       }
       if (!this.#pending) {
-        this.#pending = { source, scopeKey, scope, lines: [], bytes: 0, timer: undefined };
+        this.#pending = { source, kind, scopeKey, scope, lines: [], bytes: 0, timer: undefined };
         this.#pending.timer = setTimeout(() => { try { this.#flushPending(); } catch { /* best-effort */ } }, BATCH_FLUSH_MS);
         this.#pending.timer.unref?.();
       }
@@ -107,7 +112,7 @@ export class ObservationJournal {
       return null;
     } catch {
       // best-effort：合并路径任何异常不得让 run 失败，回退逐条写入。
-      try { return this.#writeRecord(source, 'raw-payload', scope, line); } catch { return null; }
+      try { return this.#writeRecord(source, kind, scope, line); } catch { return null; }
     }
   }
 
@@ -120,7 +125,7 @@ export class ObservationJournal {
     if (pending.lines.length === 0) return;
     // 降级语义：写入失败时 #writeRecord 置 incomplete，后续 observe 不再写入。
     // payload 保持字符串（join 还原），下游 includes/join 消费不变；单行批次与旧逐条形态完全一致。
-    this.#writeRecord(pending.source, 'raw-payload', pending.scope, pending.lines.join('\n'));
+    this.#writeRecord(pending.source, pending.kind, pending.scope, pending.lines.join('\n'));
   }
 
   #writeRecord(source, kind, scope, payload) {

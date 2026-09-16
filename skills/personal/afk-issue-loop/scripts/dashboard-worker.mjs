@@ -23,9 +23,34 @@ const headers = {
   // 页面不得加载任何外部脚本、字体、样式、图片或 telemetry。
   'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 };
-const completeness = () => existsSync(statePath)
-  ? JSON.parse(readFileSync(statePath, 'utf8'))
-  : { completeness: 'incomplete', reason: 'observation-state.json 缺失' };
+let cachedCompleteness = null;
+let lastCompletenessCheck = 0;
+let lastCompletenessMtime = -1;
+const COMPLETENESS_CACHE_MS = 250;
+
+const completeness = () => {
+  const now = Date.now();
+  if (cachedCompleteness && (now - lastCompletenessCheck < COMPLETENESS_CACHE_MS)) {
+    return cachedCompleteness;
+  }
+  lastCompletenessCheck = now;
+  try {
+    if (!existsSync(statePath)) {
+      cachedCompleteness = { completeness: 'incomplete', reason: 'observation-state.json 缺失' };
+      lastCompletenessMtime = -1;
+      return cachedCompleteness;
+    }
+    const stat = statSync(statePath);
+    if (stat.mtimeMs === lastCompletenessMtime && cachedCompleteness) {
+      return cachedCompleteness;
+    }
+    lastCompletenessMtime = stat.mtimeMs;
+    cachedCompleteness = JSON.parse(readFileSync(statePath, 'utf8'));
+    return cachedCompleteness;
+  } catch (error) {
+    return { completeness: 'incomplete', reason: error.message || '读取 observation-state.json 失败' };
+  }
+};
 const SNAPSHOT_DEFAULT_LIMIT = 500;
 const SNAPSHOT_MAX_LIMIT = 5000;
 const SSE_REPLAY_GAP_LIMIT = 5000;
@@ -146,6 +171,7 @@ const timer = setInterval(() => {
     for (const record of records) {
       if (record.seq <= observed) continue;
       observed = record.seq;
+      const sseChunk = `id: ${record.seq}\ndata: ${JSON.stringify(record)}\n\n`;
       for (const client of [...clients]) {
         if (client.cursor >= record.seq) continue;
         if (client.res.writableLength > MAX_CLIENT_BUFFER) {
@@ -153,7 +179,7 @@ const timer = setInterval(() => {
           try { client.res.destroy(); } catch {}
           continue;
         }
-        try { client.res.write(`id: ${record.seq}\ndata: ${JSON.stringify(record)}\n\n`); client.cursor = record.seq; }
+        try { client.res.write(sseChunk); client.cursor = record.seq; }
         catch { clients.delete(client); try { client.res.destroy(); } catch {} }
       }
     }

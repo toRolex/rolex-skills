@@ -9,6 +9,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { ObservationJournal } from './observations.mjs';
+import { page } from './dashboard-page.mjs';
 
 const script = resolve(dirname(fileURLToPath(import.meta.url)), 'afk.mjs');
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
@@ -1067,6 +1068,73 @@ test('性能回归：大 journal 下 snapshot 有界/空闲零重读/SSE 增量/
     if (worker?.child) { try { worker.child.kill('SIGTERM'); } catch {} }
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('stderr 批量合并与可逆性还原', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'afk-stderr-test-'));
+  try {
+    const journal = new ObservationJournal(root, 'stderr-test-run');
+    journal.observe('process/stderr', 'stderr', { role: 'implementer', attempt: 1, invocation: 1 }, 'line 1 of stderr');
+    journal.observe('process/stderr', 'stderr', { role: 'implementer', attempt: 1, invocation: 1 }, 'line 2 of stderr');
+    journal.observe('process/stderr', 'stderr', { role: 'implementer', attempt: 1, invocation: 1 }, 'line 3 of stderr');
+    journal.flush();
+
+    const text = readFileSync(join(root, 'observations.jsonl'), 'utf8').trim();
+    const lines = text.split('\n').map(l => JSON.parse(l));
+    const stderrRecords = lines.filter(r => r.kind === 'stderr');
+    assert.equal(stderrRecords.length, 1, '同 scope 连续 stderr 应合并为 1 条记录');
+    assert.equal(stderrRecords[0].payload, 'line 1 of stderr\nline 2 of stderr\nline 3 of stderr');
+
+    const expanded = ObservationJournal.expandRawPayload(stderrRecords[0]);
+    assert.deepEqual(expanded, ['line 1 of stderr', 'line 2 of stderr', 'line 3 of stderr'], 'expandRawPayload 应精确还原逐行 stderr');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('性能守卫：SSE 广播多客户端复用同一序列化结果', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'afk-broadcast-test-'));
+  const token = 'perf-token-bc';
+  const runId = 'perf-bc-run';
+  writeFileSync(join(root, 'observation-state.json'), JSON.stringify({ completeness: 'complete' }));
+  writeSyntheticJournal(root, 10);
+  let worker;
+  try {
+    worker = await spawnWorker(root, runId, token);
+    const origin = `http://127.0.0.1:${worker.port}`;
+
+    // 两个客户端同时监听
+    const c1 = curlSseToFile(`${origin}/events?token=${token}&after=10`, join(root, 'sse-c1.txt'), 3);
+    const c2 = curlSseToFile(`${origin}/events?token=${token}&after=10`, join(root, 'sse-c2.txt'), 3);
+    await delay(300);
+
+    writeSyntheticJournal(root, 2, 11);
+    const [res1, res2] = await Promise.all([c1, c2]);
+    const ids1 = sseIds(res1);
+    const ids2 = sseIds(res2);
+    assert.deepEqual(ids1, [11, 12], '客户端 1 必须收到新追加的两条记录');
+    assert.deepEqual(ids2, [11, 12], '客户端 2 必须收到新追加的两条记录');
+  } finally {
+    if (worker?.child) { try { worker.child.kill('SIGTERM'); } catch {} }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('前端页面 DOM 生成：copySlots 泄漏消除与直接渲染', () => {
+  const html = page('test-run', {
+    run: 'test-run',
+    observations: [
+      { seq: 1, observedAt: new Date().toISOString(), source: 'provider/claude', kind: 'text-delta', scope: { role: 'implementer', attempt: 1, invocation: 1 }, payload: { text: 'hello world' } }
+    ],
+    total: 1,
+    truncatedFrom: 0,
+    lastSeq: 1,
+    completeness: { completeness: 'complete' },
+    final: false,
+  });
+  // 确认 copySlots 机制已被直接文本渲染替代，页面中不再生成 copySlots / data-copy-key
+  assert.equal(html.includes('copySlots'), false, 'page 脚本中不应残留 copySlots Map');
+  assert.equal(html.includes('data-copy-key'), false, '渲染 HTML 中不应有 data-copy-key');
 });
 
 test('resolve-selection 不创建 run、Dashboard 或浏览器副作用', async () => {

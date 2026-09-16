@@ -13,10 +13,10 @@ export function page(run, data = null) {
   @media(max-width:390px){.layout{padding:8px}.panel-heading{align-items:flex-start;flex-direction:column;gap:5px}.panel-heading small{text-align:left}.inspector-panel .panel-heading{align-items:stretch}.plain{align-self:flex-start}.ticket-lane{margin:7px}.agent-top{display:block}.agent-time{display:block;margin-top:3px;white-space:normal}.signal{max-width:100%}}
   @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
   </style></head><body><header><h1>AFK Run Dashboard</h1><div class="state" id="state">连接中 · ${escHtml(run)}</div></header><div id="warning"></div><main class="layout" id="app" aria-busy="true"><section class="panel board-panel" aria-labelledby="kanban-heading"><div class="panel-heading"><h2 id="kanban-heading">Ticket Kanban</h2><small>加载 snapshot…</small></div><div class="empty-board">正在加载 snapshot（仅取尾部），看板稍后呈现…</div></section><section class="panel inspector-panel" id="output-panel" aria-labelledby="output-title"><div class="panel-heading"><div><h2 id="output-title">Run Observation Inspector</h2><small>Selected Agent Output Inspector · 进程事实与 Merger 逐票结果</small></div><button class="plain" type="button" data-follow-toggle aria-pressed="true">Follow tail</button></div><div class="output-scroll" tabindex="0"><div class="output-empty">正在加载 snapshot（仅取尾部），输出稍后呈现…</div></div></section></main><script>
-  const initial=${initial};let records=[],selectedKey=null,last=0,follow=true,copyIndex=0,copySlots=new Map(),viewTargets=new Map();
+  const initial=${initial};let records=[],selectedKey=null,last=0,follow=true,viewTargets=new Map();
   // 有界渲染：Inspector 最多保留 VIEW_LIMIT 个 <li>；records 数组最多保留
   // STORE_LIMIT 条（仅供 Inspector 行过滤），看板展示态走 summaries（见下）。
-  const VIEW_LIMIT=500,STORE_LIMIT=2000;
+  const VIEW_LIMIT=500,STORE_LIMIT=2000,STORE_TRIM_OVERFLOW=256;
   // hiddenBefore：records[0] 之前被服务端截断掉的条数（snapshot.truncatedFrom
   // 语义：返回首条 seq；seq 从 1 连续编号时 hiddenBefore = truncatedFrom-1）。
   // domHidden：当前 Inspector 视图因 DOM 裁剪未显示的条数（全量 render 时重置）。
@@ -70,7 +70,8 @@ export function page(run, data = null) {
     }
     const sc=r.scope||{};
     if(sc.role==='merger'&&Number.isSafeInteger(sc.batch)){
-      let b=batchInfo.get(sc.batch);if(!b){b={attempts:[],invocations:[]};batchInfo.set(sc.batch,b)}
+      let b=batchInfo.get(sc.batch);if(!b){b={attempts:[],invocations:[],tickets:new Set()};batchInfo.set(sc.batch,b)}
+      for(const tid of recordTickets(r))if(Number.isSafeInteger(tid))b.tickets.add(tid);
       if(r.kind==='attempt-planned'&&Number.isSafeInteger(sc.attempt)&&!b.attempts.includes(sc.attempt))b.attempts.push(sc.attempt);
       if(r.kind==='invocation-started'&&Number.isSafeInteger(sc.attempt)&&Number.isSafeInteger(sc.invocation)){const t='Attempt '+sc.attempt+' / Invocation '+sc.invocation;if(!b.invocations.includes(t))b.invocations.push(t)}
     }
@@ -92,10 +93,8 @@ export function page(run, data = null) {
   // 逐票 Merger 结果：摘要里记的是该票最新 merger-result，不依赖尾部窗口。
   function mergerResultFor(ticket){return summaries.get(ticket)?.result||null}
   function ticketOutcome(ticket){const item=mergerResultFor(ticket);if(!item)return'none';if(item.closed)return'closed';return'open'}
-  function copy(value,className){const key=String(++copyIndex);copySlots.set(key,value==null?'':String(value));return '<span class="'+className+'" data-copy-key="'+key+'"></span>'}
-  // 只填充 root 内尚未填充的 [data-copy-key] 节点（新增节点），不碰已填充节点。
-  function fillCopies(root){for(const node of root.querySelectorAll('[data-copy-key]:not([data-copy-filled])')){node.textContent=copySlots.get(node.dataset.copyKey)||'';node.setAttribute('data-copy-filled','1')}}
-  function applyCopies(){fillCopies(app)}
+  function copy(value,className){return '<span class="'+className+'">'+esc(value==null?'':String(value))+'</span>'}
+  function applyCopies(){}
   function lastOf(own,match=()=>true){for(let i=own.length-1;i>=0;i--)if(match(own[i]))return own[i];return null}
   function relativeTime(value){const time=Date.parse(value);if(!Number.isFinite(time))return value||'尚无时间';const seconds=Math.round((Date.now()-time)/1000);const future=seconds<0;const amount=Math.abs(seconds);let text;if(amount<60)text=amount+' 秒';else if(amount<3600)text=Math.round(amount/60)+' 分钟';else if(amount<86400)text=Math.round(amount/3600)+' 小时';else text=Math.round(amount/86400)+' 天';return future?text+'后':text+'前'}
   function agentFor(ticket,role){const a=summaries.get(ticket)?.agents[role];if(!a)return null;const own=synthOwn(a.process,a.summary,a.procAt);return{ticket,role,attempt:a.attempt,own,key:'agent:'+ticket+':'+role,last:a.last}}
@@ -137,8 +136,39 @@ export function page(run, data = null) {
   // ---- SSE 增量路径：只追加 1 个 <li> + 最小更新受影响票道，绝不全量重建。
   function noteText(){return '更早的 '+domHidden+' 条记录未显示（共 '+(hiddenBefore+storeTrimmed+records.length)+' 条，仅显示尾部）'}
   function refreshNote(){const note=app.querySelector('#truncated-note');if(note)note.textContent=noteText()}
+  let scrollPending=false;
+  function scheduleScrollFollow(scroll){
+    if(scrollPending||!follow)return;
+    scrollPending=true;
+    window.requestAnimationFrame(()=>{
+      scrollPending=false;
+      if(follow&&scroll)scroll.scrollTop=scroll.scrollHeight;
+    });
+  }
+  function appendDeltaText(li,text){
+  const span=li.querySelector('.payload');
+  let chunks=li._deltaChunks;
+  if(!chunks){
+    chunks=li._deltaChunks=[];
+    li._deltaLen=0;
+    const initialText=span?span.textContent:'';
+    if(initialText){chunks.push(initialText);li._deltaLen+=initialText.length}
+  }
+  const nlIdx=text.indexOf('\\n');
+  if(nlIdx!==-1){
+    chunks.push(text.slice(0,nlIdx));
+    const head=chunks.join('');
+    li._deltaChunks=null;
+    if(span)span.textContent=head;
+    li.dataset.frozen='1';
+    return text.slice(nlIdx+1);
+  }
+  chunks.push(text);
+  li._deltaLen+=text.length;
+  if(span)span.textContent=chunks.join('');
+  return null;
+}
   function enforceLineCap(ol){let trimmed=false;while(ol.children.length>VIEW_LIMIT){ol.removeChild(ol.firstChild);domHidden++;trimmed=true}if(trimmed)refreshNote()}
-  function appendDeltaText(li,text){const span=li.querySelector('[data-copy-key]');const key=span?.dataset.copyKey;const prev=key?copySlots.get(key)||'':span?span.textContent:'';const merged=prev+text;if(merged.includes('\\n')){const parts=merged.split('\\n');const head=parts.slice(0,-1).join('\\n');if(key)copySlots.set(key,head);if(span)span.textContent=head;li.dataset.frozen='1';return parts.at(-1)}if(key)copySlots.set(key,merged);if(span)span.textContent=merged;return null}
   function appendLine(r){
     const target=currentTarget();
     if(!matchesTarget(r,target))return;
@@ -149,13 +179,13 @@ export function page(run, data = null) {
       const prevLi=ol.lastElementChild;
       if(prevLi&&prevLi.dataset.delta==='1'&&prevLi.dataset.frozen!=='1'&&prevLi.dataset.invocation===String(r.scope?.invocation)){
         const rest=appendDeltaText(prevLi,r.payload.text);
-        if(rest===null){if(follow)scroll.scrollTop=scroll.scrollHeight;return}
-        const li=document.createElement('li');li.className='line';li.dataset.delta='1';li.dataset.frozen='0';li.dataset.invocation=String(r.scope?.invocation);li.innerHTML=lineInner({...r,text:rest,frozen:false});ol.appendChild(li);fillCopies(li);enforceLineCap(ol);if(follow)scroll.scrollTop=scroll.scrollHeight;return;
+        if(rest===null){if(follow)scheduleScrollFollow(scroll);return}
+        const li=document.createElement('li');li.className='line';li.dataset.delta='1';li.dataset.frozen='0';li.dataset.invocation=String(r.scope?.invocation);li.innerHTML=lineInner({...r,text:rest,frozen:false});ol.appendChild(li);enforceLineCap(ol);if(follow)scheduleScrollFollow(scroll);return;
       }
     }
     const li=document.createElement('li');li.className='line';
     if(r.kind==='text-delta'&&typeof r.payload?.text==='string'){li.dataset.delta='1';li.dataset.frozen=r.frozen?'1':'0';li.dataset.invocation=String(r.scope?.invocation)}
-    li.innerHTML=lineInner(r.text!==undefined?r:{...r,text:r.payload?.text,frozen:false});ol.appendChild(li);fillCopies(li);enforceLineCap(ol);if(follow)scroll.scrollTop=scroll.scrollHeight;
+    li.innerHTML=lineInner(r.text!==undefined?r:{...r,text:r.payload?.text,frozen:false});ol.appendChild(li);enforceLineCap(ol);if(follow)scheduleScrollFollow(scroll);
   }
   function updateLane(ticket){
     const lane=app.querySelector('.ticket-lane[data-ticket="'+ticket+'"]');
@@ -163,7 +193,7 @@ export function page(run, data = null) {
     if(!lane){
       // 新票：按 seq 排序插入对应位置，并更新看板计数。
       const scroll=app.querySelector('.kanban-scroll');if(!scroll||!app.querySelector('.ticket-lane')){render();return}
-      const tmp=document.createElement('div');tmp.innerHTML=laneHtml(ticket);const node=tmp.firstChild;fillCopies(node);
+      const tmp=document.createElement('div');tmp.innerHTML=laneHtml(ticket);const node=tmp.firstChild;
       const lanes=[...scroll.querySelectorAll('.ticket-lane')];let placed=false;
       for(const l of lanes){if(Number(l.dataset.ticket)>ticket){scroll.insertBefore(node,l);placed=true;break}}
       if(!placed)scroll.appendChild(node);
@@ -171,18 +201,96 @@ export function page(run, data = null) {
       if(activeKey)restoreFocus({type:'select',value:activeKey});
       return;
     }
-    const tmp=document.createElement('div');tmp.innerHTML=laneHtml(ticket);const node=tmp.firstChild;fillCopies(node);
-    lane.replaceWith(node);
+    const implementer=agentFor(ticket,'implementer');
+    const reviewer=agentFor(ticket,'reviewer');
+    const merger=mergerFor(ticket);
+    const cells=lane.children;
+    // cells[0]: .lane-ticket, cells[1]: Implementer, cells[2]: Reviewer, cells[3]: Merger
+    const sm=cells[0]?.querySelector('small');
+    if(sm){const stageTxt='阶段展示态 · '+stageSummary(implementer,reviewer,merger,ticket);if(sm.textContent!==stageTxt)sm.textContent=stageTxt}
+    const btn=cells[0]?.querySelector('.ticket-button');
+    if(btn)btn.setAttribute('aria-pressed',String(selectedKey==='ticket:'+ticket));
+
+    function patchAgentCell(cell,agent,stage){
+      if(!agent){
+        if(!cell.querySelector('.empty-stage')){
+          const emptyContent=stage==='reviewer'?(reviewerEmpty(implementer)):renderEmpty(stage==='merger'?(reviewer?'等待 Merger 派发':'等待 Reviewer'):'尚未派发');
+          cell.innerHTML=emptyContent;
+        }
+        return;
+      }
+      const existingBtn=cell.querySelector('.lane-agent');
+      if(!existingBtn){cell.innerHTML=renderLaneAgent(agent,ticket);return}
+      const key=registerTarget(agent.key,{type:agent.role==='merger'?'merger':'agent',ticket,role:agent.role,attempt:agent.attempt,batch:agent.batch});
+      existingBtn.setAttribute('data-select-key',key);
+      existingBtn.setAttribute('aria-pressed',String(selectedKey===key));
+      const title=agent.role==='merger'?'Merger · Batch '+agent.batch:(roleLabel(agent.role)+' · 第 '+agent.attempt+' 次 Attempt');
+      const attemptText=agent.role==='merger'&&!Number.isSafeInteger(agent.attempt)?' · 尚无真实 Attempt':'';
+      const fullTitle=title+attemptText;
+      existingBtn.setAttribute('aria-label','工单 #'+ticket+'，'+fullTitle+'，选择 Inspector');
+      const strong=existingBtn.querySelector('.agent-top strong');if(strong&&strong.textContent!==fullTitle)strong.textContent=fullTitle;
+      const time=existingBtn.querySelector('.agent-time');
+      if(time){time.setAttribute('datetime',agent.last||'');const rel=relativeTime(agent.last);if(time.textContent!==rel)time.textContent=rel}
+      const sum=existingBtn.querySelector('.agent-summary');
+      const sumText=cardSummary(agent);
+      if(sum&&sum.textContent!==sumText)sum.textContent=sumText;
+      const f=facets(agent.own);
+      const sig=existingBtn.querySelector('.signal');
+      if(sig){
+        sig.className='signal tone-'+tone(f.process);
+        const sigText='Process · '+f.process;
+        if(sig.textContent!==sigText)sig.textContent=sigText;
+      }
+    }
+    if(cells[1])patchAgentCell(cells[1],implementer,'implementer');
+    if(cells[2])patchAgentCell(cells[2],reviewer,'reviewer');
+    if(cells[3]){
+      // Merger cell contains agent + merger result card
+      const curMergerBtn=cells[3].querySelector('.lane-agent');
+      if(merger&&!curMergerBtn){cells[3].innerHTML=renderMergerCell(reviewer,merger,ticket)}
+      else if(!merger&&curMergerBtn){cells[3].innerHTML=renderMergerCell(reviewer,merger,ticket)}
+      else if(merger){patchAgentCell(cells[3],merger,'merger')}
+      const item=mergerResultFor(ticket);
+      const curCard=cells[3].querySelector('.merger-result-card');
+      if(item&&!curCard){
+        const cardDiv=document.createElement('div');
+        cardDiv.innerHTML=renderMergerResult(ticket);
+        if(cardDiv.firstChild)cells[3].appendChild(cardDiv.firstChild);
+      }else if(item&&curCard){
+        const strong=curCard.querySelector('strong');
+        const stText='Merger 逐票结果 · '+ticketOutcome(ticket);
+        if(strong&&strong.textContent!==stText)strong.textContent=stText;
+        const copySpan=curCard.querySelector('.merger-result-copy');
+        const detail='closed='+item.closed+(item.error?(' error='+item.error):'');
+        if(copySpan&&copySpan.textContent!==detail)copySpan.textContent=detail;
+      }else if(!item&&curCard){
+        curCard.remove();
+      }
+    }
     if(activeKey)restoreFocus({type:'select',value:activeKey});
   }
   function affectedTickets(r){
     const set=new Set(recordTickets(r));
     if(r.scope?.role==='merger'&&Number.isSafeInteger(r.scope?.batch)){
-      for(const [id,s] of summaries)if(s.batch===r.scope.batch)set.add(id);
+      const b=batchInfo.get(r.scope.batch);
+      if(b)for(const id of b.tickets)set.add(id);
+      else for(const [id,s] of summaries)if(s.batch===r.scope.batch)set.add(id);
     }
     return set;
   }
-  function ingest(r){if(!Number.isSafeInteger(r.seq)||r.seq<=last)return;last=r.seq;observe(r);records.push(r);if(records.length>STORE_LIMIT){storeTrimmed+=records.length-STORE_LIMIT;records.splice(0,records.length-STORE_LIMIT)}for(const id of affectedTickets(r))updateLane(id);appendLine(r)}
+  function ingest(r){
+    if(!Number.isSafeInteger(r.seq)||r.seq<=last)return;
+    last=r.seq;
+    observe(r);
+    records.push(r);
+    if(records.length>STORE_LIMIT+STORE_TRIM_OVERFLOW){
+      const overflow=records.length-STORE_LIMIT;
+      storeTrimmed+=overflow;
+      records.splice(0,overflow);
+    }
+    for(const id of affectedTickets(r))updateLane(id);
+    appendLine(r);
+  }
   function setFollow(next){follow=next;app.querySelector('[data-follow-toggle]')?.setAttribute('aria-pressed',String(follow));if(follow){const scroll=app.querySelector('.output-scroll');if(scroll)scroll.scrollTop=scroll.scrollHeight}}
   app.addEventListener('click',event=>{const selectable=event.target.closest('[data-select-key]');if(selectable){selectedKey=selectable.dataset.selectKey;render();return}const toggle=event.target.closest('[data-follow-toggle]');if(toggle)setFollow(!follow)});
   app.addEventListener('keydown',event=>{if(event.key!=='ArrowDown'&&event.key!=='ArrowUp')return;const current=event.target.closest('[data-select-key]');if(!current)return;const items=[...app.querySelectorAll('[data-select-key]')];const index=items.indexOf(current);if(index<0)return;event.preventDefault();items[Math.min(items.length-1,Math.max(0,index+(event.key==='ArrowDown'?1:-1)))].focus()});
@@ -194,12 +302,65 @@ export function page(run, data = null) {
   // SNAPSHOT_MAX_LIMIT）把头部摘要补齐；补入走 observe(r,true)（seq 守卫，
   // 不覆盖 ingest 已观测的新状态），不进 records、不碰 Inspector DOM。
   // 补完后 render() 一次刷新看板（滚动/焦点由 captureViewState 保持）。
+  // 分帧处理记录队列：避免几百条记录同步处理冻结主线程
+  function processFramed(list,onItem,onDone,chunkSize=50,budgetMs=12){
+    if(!list||!list.length){onDone?.();return}
+    let idx=0;
+    function runChunk(){
+      const start=Date.now();
+      while(idx<list.length){
+        onItem(list[idx++]);
+        if(idx%chunkSize===0&&(Date.now()-start)>=budgetMs){
+          if(typeof window!=='undefined'&&window.requestAnimationFrame){
+            window.requestAnimationFrame(runChunk);
+          }else{
+            setTimeout(runChunk,0);
+          }
+          return;
+        }
+      }
+      onDone?.();
+    }
+    runChunk();
+  }
   const BACKFILL_CHUNK=5000;let backfilling=false;
-  function backfillHead(){if(backfilling||!hiddenBefore)return;backfilling=true;const stop=records.length?records[0].seq:Infinity;let cursor=0;(async()=>{try{while(cursor<stop-1&&cursor<hiddenBefore){const response=await fetch('./snapshot?token='+tokenParam()+'&after='+cursor+'&limit='+BACKFILL_CHUNK);const value=await response.json();const obs=value.observations||[];if(!obs.length)break;for(const r of obs){if(records.length&&r.seq>=stop)break;observe(r,true)}cursor=obs[obs.length-1].seq;if(obs.length<BACKFILL_CHUNK)break}}catch{}backfilling=false;render()})()}
+  function backfillHead(){
+    if(backfilling||!hiddenBefore)return;
+    backfilling=true;
+    const stop=records.length?records[0].seq:Infinity;
+    let cursor=0;
+    (async()=>{
+      try{
+        while(cursor<stop-1&&cursor<hiddenBefore){
+          const response=await fetch('./snapshot?token='+tokenParam()+'&after='+cursor+'&limit='+BACKFILL_CHUNK);
+          const value=await response.json();
+          const obs=value.observations||[];
+          if(!obs.length)break;
+          await new Promise(resolve=>{
+            processFramed(obs,r=>{
+              if(records.length&&r.seq>=stop)return;
+              observe(r,true);
+            },resolve,100,10);
+          });
+          cursor=obs[obs.length-1].seq;
+          if(obs.length<BACKFILL_CHUNK)break;
+        }
+      }catch{}
+      backfilling=false;
+      render();
+    })();
+  }
   function tokenParam(){return encodeURIComponent(new URLSearchParams(location.search).get('token'))}
   function loadSnapshot(){return fetch('./snapshot?token='+tokenParam()).then(response=>response.json()).then(value=>{applySnapshot(value)}).catch(()=>{document.querySelector('#state').textContent='stale · snapshot unavailable';render()})}
-  // truncated 事件：服务端未重放全部历史，用 snapshot?after=last 对齐 lastSeq。
-  function resync(lastSeq){fetch('./snapshot?token='+tokenParam()+'&after='+last+'&limit=500').then(response=>response.json()).then(value=>{for(const r of value.observations)ingest(r);if(Number.isSafeInteger(lastSeq)&&lastSeq>last)last=lastSeq;showCompleteness(value.completeness)}).catch(()=>{})}
+  // truncated 事件：服务端未重放全部历史，用 snapshot?after=last 对齐 lastSeq。分帧 ingest 避免卡死。
+  function resync(lastSeq){
+    fetch('./snapshot?token='+tokenParam()+'&after='+last+'&limit=500').then(response=>response.json()).then(value=>{
+      processFramed(value.observations||[],ingest,()=>{
+        if(Number.isSafeInteger(lastSeq)&&lastSeq>last)last=lastSeq;
+        showCompleteness(value.completeness);
+      });
+    }).catch(()=>{});
+  }
   function connect(){const es=new EventSource('./events?token='+tokenParam()+'&after='+last);es.onopen=()=>document.querySelector('#state').textContent='live · '+${escJson(run)};es.onmessage=event=>{document.querySelector('#state').textContent='live · '+${escJson(run)};ingest(JSON.parse(event.data))};es.addEventListener('truncated',event=>{try{resync(JSON.parse(event.data).lastSeq)}catch{resync()}});es.addEventListener('final',()=>{document.querySelector('#state').textContent='final · frozen';es.close()});es.onerror=()=>document.querySelector('#state').textContent='stale · reconnecting'}
   if(initial){applySnapshot(initial);if(!initial.final)connect()}else loadSnapshot().then(connect);
   </script></body></html>`;

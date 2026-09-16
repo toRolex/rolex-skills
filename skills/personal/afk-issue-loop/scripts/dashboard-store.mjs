@@ -132,7 +132,11 @@ export function openJournal(journalPath) {
     },
     readRange(after, limit) {
       ensureSynced();
-      return records.filter(record => record.seq > after).slice(0, limit);
+      // 尾部反向定位：after 通常接近末尾，从后往前查找第一条 seq <= after
+      // 避免全量 filter，达到 O(尾部条数)
+      let i = records.length;
+      while (i > 0 && Number(records[i - 1].seq) > after) i--;
+      return records.slice(i, i + limit);
     },
     // 广播热路径专用：游标 after 通常就在尾部附近，从尾部反向扫描，
     // 遇到第一条 seq <= after 即停止，复杂度为 O(新增条数) 而非 O(总条数)。
