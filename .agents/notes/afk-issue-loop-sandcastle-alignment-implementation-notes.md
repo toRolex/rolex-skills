@@ -1,6 +1,8 @@
 # afk-issue-loop 对齐 sandcastle —— implementation notes
 
-> 历史记录：本文描述 issue #5 的 watchdog / 零自动重试方案。恢复与状态部分已被 [`docs/adr/0003-afk-issue-loop-native-dag-recovery.md`](../adr/0003-afk-issue-loop-native-dag-recovery.md) supersede；现行协议见 `skills/personal/afk-issue-loop/SKILL.md` 与 `REFERENCE.md`。
+> 迁移注记（#16 / ADR 0014）：本文原位于 `docs/plans/afk-issue-loop-sandcastle-alignment-notes.md`，随存量因果笔记统一迁入 `.agents/notes/`，正文原样保留，仅按新位置修正内部引用。文中 `docs/afk-failures/issue-{N}.md` 与 `scripts/tests.sh` 是当时交付清单里的路径记录（今已不存在或不在此位置），作为历史陈述不改写。
+
+> 历史记录：本文描述 issue #5 的 watchdog / 零自动重试方案。恢复与状态部分已被 [`docs/adr/0003-afk-issue-loop-native-dag-recovery.md`](../../docs/adr/0003-afk-issue-loop-native-dag-recovery.md) supersede；现行协议见 `skills/personal/afk-issue-loop/SKILL.md` 与 `skills/personal/afk-issue-loop/REFERENCE.md`。
 
 Issue: https://github.com/toRolex/rolex-skills/issues/5
 Plan: `docs/plans/afk-issue-loop-sandcastle-alignment.html`

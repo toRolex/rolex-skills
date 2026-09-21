@@ -1,5 +1,7 @@
 # Implementation Notes
 
+> 命名注记（#16 / ADR 0014）：本笔记原名 `docs/plans/implementation-notes.md`，迁移时按硬约定补 `<task-slug>` 前缀重命名为 `.agents/notes/personal-skills-batch-commit-implementation-notes.md`，正文原样保留。
+
 ## 任务
 
 将当前工作区的未提交更改按逻辑边界分批提交。

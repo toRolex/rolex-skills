@@ -54,4 +54,4 @@ main 没有保护时，GitHub Flow 会变成混乱的集中式提交。最小配
 
 GitHub Flow 是 Trunk-Based 的入门版：先把分支保护 + PR Review + CI 跑稳，再考虑去掉 PR 强约束、压短分支寿命、引入 feature flag。
 
-完整对比见 [`comparing-workflows.md`](comparing-workflows.md)。
+完整对比见 [`gitflow.md`](gitflow.md) 的对比矩阵与选型决策表。

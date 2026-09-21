@@ -22,13 +22,14 @@ bash scripts/link-skills.sh
 
 **每个仓库一次，在首次使用其他工程 skill 之前**。如果 `/triage`、`/to-spec`、`/to-tickets` 开始猜你的 issue 在哪或应用不存在的标签，说明还没跑过它。只有切换 issue tracker 或从头开始时才需要重新运行。
 
-## 三个决策
+## 四个决策
 
 - **Issue tracker** — 问题在哪跟踪。GitHub、GitLab、本地 markdown、或其他
 - **Triage 标签** — 仅在安装了 triage skill 时询问。默认用标准名称
 - **领域文档** — 默认单上下文（一个 `CONTEXT.md` + `docs/adr/`），发现 monorepo 信号时提供多上下文选项
+- **Implementation notes** — 实现决策与因果记录存放位置，固定为 `.agents/notes/`
 
-输出是 `docs/agents/` 下的一组文件，加上 `CLAUDE.md` 或 `AGENTS.md` 中的 `## Agent skills` 区块。
+输出是 `docs/agents/` 下的一组文件，加上 `CLAUDE.md` 或 `AGENTS.md` 中的 `## Agent skills` 区块；该区块内声明 implementation notes 落在 `.agents/notes/`。
 
 ## 在流程中的位置
 

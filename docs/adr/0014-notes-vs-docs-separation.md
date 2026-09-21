@@ -6,7 +6,7 @@
 1. **面向使用者与维护者的系统说明**：描述系统当前如何工作、各模块契约与外部接口。
 2. **面向下一次尝试与后续开发者的实现笔记**：记录为什么选择该方案、舍弃了什么替代方案、遇到哪些 edge case 以及如何偏离初版计划。
 
-此���，`pre-implement` 将 implementation notes 散落在各个仓库自定义位置（例如本仓库曾存放在 `docs/plans/`），导致 `docs/` 目录职责被严重混淆。使用者查阅功能规格时容易被历史尝试、过程踩坑和过程决策淹没；同时 Agent 在启动新任务时也无法在确定位置检索既往经验与决策沉淀。
+此前，`pre-implement` 将 implementation notes 散落在各个仓库自定义位置（例如本仓库曾存放在 `docs/plans/`），导致 `docs/` 目录职责被严重混淆。使用者查阅功能规格时容易被历史尝试、过程踩坑和过程决策淹没；同时 Agent 在启动新任务时也无法在确定位置检索既往经验与决策沉淀。
 
 ## Decision
 
@@ -20,7 +20,7 @@
 2. **`.agents/notes/` 记录“因果”**：
    - 目标读者：未来执行类似或后续任务的 Agent 与开发者。
    - 核心问题：“当初为什么这样做？舍弃了什么？踩了什么坑？”
-   - 准则：记录技术选型权衡、执行决策、偏离计划的理由（Deviations），专供下一次尝试或后��迭代学习与复用。
+   - 准则：记录技术选型权衡、执行决策、偏离计划的理由（Deviations），专供下一次尝试或后续迭代学习与复用。
    - 路径硬约定：统一存放在仓库根目录下的 `.agents/notes/<task-slug>-implementation-notes.md`，不存在则自动创建，不再使用模糊的既有约定回退探测。
 
 3. **仓库脚手架（`setup-rolex-skills`）统一声明**：
@@ -34,7 +34,7 @@
 
 ## Consequences
 
-- 存量所有 `docs/plans/*-implementation-notes.md` 全部迁移至 `.agents/notes/`，并修复全库反向链接。
+- 存量所有因果笔记——`docs/plans/*-implementation-notes.md`，含历史命名的 `docs/plans/*-notes.md` 与 `docs/plans/implementation-notes.md`——全部迁移至 `.agents/notes/`，并修复全库反向链接。
 - `pre-implement` 强制以 `.agents/notes/` 为唯一标准落盘路径。
 - `setup-rolex-skills` 模板与输出新增 `### Implementation notes` 小节。
 - `docs/` 目录恢复纯粹的事实契约属性。
