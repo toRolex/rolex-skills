@@ -9,7 +9,7 @@
 - 上游：[mattpocock/sandcastle](https://github.com/mattpocock/sandcastle/tree/e99f832f26dc9d245c019a9ddd19fa5dee792427)。固定 commit：`e99f832f26dc9d245c019a9ddd19fa5dee792427`，包版本 `0.12.0`。
 - 本轮重新读取该 commit 的 recursive Git tree，`truncated=false`；本地归档的256个普通文件 Git blob 均与该 tree 一致。符号链接不计入这256个普通文件；此检查不是签名认证。
 - MIT，Copyright (c) 2026 Matt Pocock。全文保留在 [LICENSE.sandcastle](../../skills/personal/afk-issue-loop/scripts/LICENSE.sandcastle)，分发提取或改编源码时一并保留。
-- 下列行号均指固定上游，而非 main/latest。运行源码目录为 [scripts/](../../skills/personal/afk-issue-loop/scripts/)。本轮验收与偏差见[实现记录](../plans/afk-sandcastle-reuse-implementation-notes.md)。
+- 下列行号均指固定上游，而非 main/latest。运行源码目录为 [scripts/](../../skills/personal/afk-issue-loop/scripts/)。本轮验收与偏差见[实现记录](../../.agents/notes/afk-sandcastle-reuse-implementation-notes.md)。
 
 ## 必要依赖闭包
 
@@ -76,4 +76,4 @@
 - 监管确认原 POSIX 进程组与继承管道。脱组且保留管道的未结束可有界检测并隔离；**不保证发现所有瞬时脱组并关闭继承管道的后代**，不把 killpg 称为完整进程树安全证明。
 - 沿用原 Git 身份；不写全局身份或 safe.directory、不自动 fetch/pull/push/PR、不批准 Worktrunk hooks、不清理无关现场。
 
-真实 CLI、默认时钟长测与受控缩时 fixture 分开记于[本轮实现记录](../plans/afk-sandcastle-reuse-implementation-notes.md)。参数核查、源码提取和静态检查本身均不等于完整运行验收通过。
+真实 CLI、默认时钟长测与受控缩时 fixture 分开记于[本轮实现记录](../../.agents/notes/afk-sandcastle-reuse-implementation-notes.md)。参数核查、源码提取和静态检查本身均不等于完整运行验收通过。

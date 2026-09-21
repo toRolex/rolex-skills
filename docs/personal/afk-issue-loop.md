@@ -34,7 +34,7 @@ node "<skill绝对路径>/scripts/afk.mjs" stop --run "/absolute/project/.afk/lo
 - 启动握手最多 120 秒，普通前置命令默认 30 秒，均非角色总时长。监管核对 POSIX 原进程组及继承 pipe，不承诺所有脱组且无 pipe 后代已退出；未确认则保留现场，不交接。
 - `started` 仅是启动成功，不是交付成功。后续用 status 和运行日志查看全部交付、失败或用户待办。`stop` 返回 `stopping` 只是请求受理，确认最终 `stopped` 才复用现场；未知状态保留，不盲目按 PID 操作。无系统重启恢复。
 
-三个真实 CLI 适配、后代终止及独立生命周期仍须按公开 start/status/stop 逐项验收；#7 的 [历史实施记录](../plans/afk-local-cli-orchestrator-implementation-notes.md) 不自动算 #8 验收通过，短时 fixture 也不能替代 600/60 真实时间长测。现行决定见 [ADR 0005](../adr/0005-afk-sandcastle-source-reuse.md)。
+三个真实 CLI 适配、后代终止及独立生命周期仍须按公开 start/status/stop 逐项验收；#7 的 [历史实施记录](../../.agents/notes/afk-local-cli-orchestrator-implementation-notes.md) 不自动算 #8 验收通过，短时 fixture 也不能替代 600/60 真实时间长测。现行决定见 [ADR 0005](../adr/0005-afk-sandcastle-source-reuse.md)。
 
 详见 [执行规范](../../skills/personal/afk-issue-loop/SKILL.md) 与 [上游差异](../research/sandcastle-vs-afk-sequence.md)。
 

@@ -23,4 +23,4 @@
 
 启动握手最多120秒，普通前置与模板预展开默认30秒，均非角色总时长。停止和日志异常仍须尽力终止受管执行；POSIX原进程组及继承pipe结束确认不能证明所有脱组且无pipe后代均已结束，未知则保留现场、报告受限。
 
-源码来源、许可证与必要闭包见 [来源研究](afk-local-cli-source-provenance.md)。历史 [#7实施记录](../plans/afk-local-cli-orchestrator-implementation-notes.md)、旧三CLI结果与旧长测原样保留，不自动成为#8通过证据。三种真实CLI的启动、模型、输出、结果及取消需各自走公开入口；受控fixture与真实时间长测分别验收。本表描述决定，不声明全部运行条件已验证。
+源码来源、许可证与必要闭包见 [来源研究](afk-local-cli-source-provenance.md)。历史 [#7实施记录](../../.agents/notes/afk-local-cli-orchestrator-implementation-notes.md)、旧三CLI结果与旧长测原样保留，不自动成为#8通过证据。三种真实CLI的启动、模型、输出、结果及取消需各自走公开入口；受控fixture与真实时间长测分别验收。本表描述决定，不声明全部运行条件已验证。

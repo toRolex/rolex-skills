@@ -45,3 +45,8 @@ Issue 以 GitHub issue 形式存在，所有操作用 `gh` CLI。详见 `docs/ag
 ### Domain docs
 
 单上下文：根目录 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
+
+### Implementation notes
+
+实现决策与因果记录存放在 `.agents/notes/`，记录选型决策、踩坑与偏离，供下一次尝试学习。
+

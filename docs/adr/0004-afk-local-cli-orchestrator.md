@@ -8,4 +8,4 @@
 
 保留固定最多四票、逐票独立审查接力、全批 settled barrier、单 Merger、每批一次 summary 后关 Ticket、失败下批复用及 close-only；角色总时长与总批次均无上限。依赖以原生 blocked-by 为准，输入范围固定，SPEC 仅上下文。模型省略沿用所选 CLI 本机配置，执行 Provider 不由宿主猜测。无原生调度兼容模式、completion grace、运行时包下载或持久化任务恢复账本。
 
-本决策 supersede [ADR 0001](0001-afk-issue-loop-main-context-budget.md) 的主会话调度、plan 与固定模型，及 [ADR 0002](0002-afk-issue-loop-sandcastle-failure-timeout.md) 的活性近似、[ADR 0003](0003-afk-issue-loop-native-dag-recovery.md) 的范围扩展、自动关 SPEC 和原阶段恢复；旧文全文保留，仅标注替代范围。实际实现和三种 CLI 的验收状态见 [实施记录](../plans/afk-local-cli-orchestrator-implementation-notes.md)，本决策不替代公开入口测试。
+本决策 supersede [ADR 0001](0001-afk-issue-loop-main-context-budget.md) 的主会话调度、plan 与固定模型，及 [ADR 0002](0002-afk-issue-loop-sandcastle-failure-timeout.md) 的活性近似、[ADR 0003](0003-afk-issue-loop-native-dag-recovery.md) 的范围扩展、自动关 SPEC 和原阶段恢复；旧文全文保留，仅标注替代范围。实际实现和三种 CLI 的验收状态见 [实施记录](../../.agents/notes/afk-local-cli-orchestrator-implementation-notes.md)，本决策不替代公开入口测试。

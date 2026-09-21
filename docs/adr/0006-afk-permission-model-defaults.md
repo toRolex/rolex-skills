@@ -12,4 +12,4 @@ Pi 0.85.1 CLI 列表缺少分级 effort 能力；RPC/完整 SDK 服务会进入�
 
 这证明的是**声明式注册模型唯一与声明能力**，不是认证可用、远端实际支持或扩展全覆盖。未知版本、非法/不可读配置、不能枚举、无匹配/歧义、effort 不支持/未知均 fail-closed；底层异常不透传，避免泄漏敏感配置。动态来源存在时用户仍可明确完整模型/effort 走未验证路径。此限制相较最初“当前全部可用模型”要求收窄，依据后续协调决策记录；不增加 OS 隔离框架。
 
-自然语言仍由 skill 启动者理解；Pi Luna 复用公开 `resolve-selection` 与 start 的同一路径，不另写匹配器。预览不替代 start 的重新解析，任务正文不参与选择。受控 argv/三角色固定测试与真实 CLI、认证、自然语言路由实测分别记录；证据及限制见 [本次实施记录](../plans/afk-pi-intent-resolution-implementation-notes.md)。
+自然语言仍由 skill 启动者理解；Pi Luna 复用公开 `resolve-selection` 与 start 的同一路径，不另写匹配器。预览不替代 start 的重新解析，任务正文不参与选择。受控 argv/三角色固定测试与真实 CLI、认证、自然语言路由实测分别记录；证据及限制见 [本次实施记录](../../.agents/notes/afk-pi-intent-resolution-implementation-notes.md)。

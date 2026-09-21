@@ -11,6 +11,7 @@ disable-model-invocation: true
 - **Issue tracker**：issue 存放位置（默认 GitHub；也原生支持本地 markdown）
 - **Triage 标签**：五个标准 triage 角色使用的标签字符串
 - **领域文档**：`CONTEXT.md` 和 ADR 的位置，以及消费规则
+- **Implementation notes**：实现决策与因果记录存放位置（固定为 `.agents/notes/`）
 
 这是一个 prompt 驱动的 skill，不是确定性脚本。探索、展示发现、与用户确认、然后写入。
 
@@ -97,6 +98,10 @@ disable-model-invocation: true
 ### Domain docs
 
 [一句话摘要布局："单上下文" 或 "多上下文"]。详见 `docs/agents/domain.md`。
+
+### Implementation notes
+
+实现决策与因果记录存放在 `.agents/notes/`，记录决策、取舍与偏离，供下一次尝试学习。
 ```
 
 仅当 `triage` 已安装且 Section B 运行时才包含 `### Triage labels` 子区块并写入 `docs/agents/triage-labels.md`。

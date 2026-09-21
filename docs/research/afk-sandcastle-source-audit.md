@@ -460,7 +460,7 @@ F12—F17、F23已列缺口；下表列其余改动，包括合理删减。
 - `L/P` = `/Users/rolex/Documents/Codes/githubProject/MyProject/rolex-skills/skills/personal/afk-issue-loop/scripts/providers.mjs`
 - `L/X` = `/Users/rolex/Documents/Codes/githubProject/MyProject/rolex-skills/skills/personal/afk-issue-loop/scripts/processes.mjs`
 - `L/S` = `/Users/rolex/Documents/Codes/githubProject/MyProject/rolex-skills/skills/personal/afk-issue-loop/scripts/structured-output.mjs`
-- `L/Notes` = `/Users/rolex/Documents/Codes/githubProject/MyProject/rolex-skills/docs/plans/afk-role-prompt-files-implementation-notes.md`
+- `L/Notes` = `/Users/rolex/Documents/Codes/githubProject/MyProject/rolex-skills/.agents/notes/afk-role-prompt-files-implementation-notes.md`
 - `L/Source` = `/Users/rolex/Documents/Codes/githubProject/MyProject/rolex-skills/docs/research/afk-local-cli-source-provenance.md`
 
 ##### 上游，全部相对同一固定目录
