@@ -103,5 +103,5 @@ disable-model-invocation: true
 这些是本仓库相比 matt pocock skills 的差异化内容，原创 skill 位于 `skills/personal/`：
 
 - **6 个原创技能**：覆盖 Git 工作流（`/safe-pull`、`/clean-branches`、`/git-flow-conventions`、`/publish-release`）、AFK 批量处理（`/afk-issue-loop`）、QA 计划（`/qa-plan`）。
-- **浏览器工具**：每次会话首次使用浏览器/搜索工具前必须先 `Skill("browser-tools")`。`WebSearch` 有 bug，走其他搜索途径。Playwright 默认 `--headed --persistent`。
+- **浏览器工具**：每次会话首次使用浏览器/搜索工具前必须先 `Skill("browser-tools")`，由它路由到 ego-browser / OpenCLI / firecrawl / anysearch / CloakBrowser。`WebSearch` 有 bug，走其他搜索途径。
 - **强模型顾问**：目标不清、高影响多方案、关键权衡不明时，调用 `Agent(subagent_type="strong-model-consultant")`，顾问返回决策后再继续执行。

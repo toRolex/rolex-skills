@@ -1,0 +1,41 @@
+{
+  "skill_name": "browser-tools",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我需要从 linux.do 抓取最新的热门话题列表。这个网站有 Cloudflare Turnstile 保护，普通的浏览器自动化工具会被拦截。请告诉我应该用什么工具，以及具体怎么操作。不要实际执行，给出行之有效的方案即可。",
+      "expected_output": "推荐使用 CloakBrowser 来绕过 Cloudflare Turnstile，并给出具体步骤",
+      "files": [],
+      "expectations": [
+        "推荐使用 CloakBrowser 绕过 Cloudflare Turnstile",
+        "明确识别 Cloudflare Turnstile 为反爬保护机制",
+        "没有推荐普通自动化浏览器作为首选方案（或明确说不适合）",
+        "给出了具体可执行的操作步骤或引用了 scripts/scrape-linuxdo.py"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "我的网站首页加载很慢，用户反馈说 First Contentful Paint 要等好几秒。我需要用浏览器工具做一个性能分析，找到具体的瓶颈在哪里。应该用什么工具？具体怎么做？不要实际执行，给出方案即可。",
+      "expected_output": "推荐用 ego-browser 的 cdp() 直连 CDP 做性能分析，提到 Performance 相关指标",
+      "files": [],
+      "expectations": [
+        "推荐使用 ego-browser 的 cdp() 直连 CDP domain 做性能诊断",
+        "提到 Performance.getMetrics 或 CDP Performance domain",
+        "提到 Core Web Vitals 相关指标（FCP、LCP、TBT 等）",
+        "给出了具体的诊断步骤（而非笼统建议）"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "我想在 Boss直聘上搜索北京的 Golang 开发岗位。这个网站以前我用自动化浏览器打开总是变成 about:blank。应该先查什么？用什么工具最合适？不要实际执行，给出完整的操作方案。",
+      "expected_output": "先检查 OpenCLI 是否有 boss 的 adapter，有则直接用；没有则用 CloakBrowser launch_context。明确说明普通 CDP 直连会被检测",
+      "files": [],
+      "expectations": [
+        "提到先检查 OpenCLI 是否有 boss adapter（opencli list 或类似）",
+        "明确说明 CDP 直连会被检测拦截（about:blank / DOM 清空）",
+        "提供了备选方案（CloakBrowser launch_context）",
+        "给出了完整的优先级决策链（adapter → CloakBrowser → 其他）"
+      ]
+    }
+  ]
+}

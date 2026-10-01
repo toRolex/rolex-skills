@@ -128,6 +128,7 @@ flowchart LR
 | [tdd](skills/engineering/tdd/SKILL.md) | 测试驱动开发（Test-Driven Development）。当用户希望以测试先行（test-first）的方式构建功能或修复 bug、提到 "red-green-refactor"，或需要集成测试时使用。 |
 | [wizard](skills/engineering/wizard/SKILL.md) | 生成一个交互式 bash wizard，引导人类一步步完成只有他们能执行的步骤。用于开通基础设施、设置凭据或 CI secrets、在一个不熟悉的第三方 dashboard 中操作，或运行一次性迁移或切换。不要为 agent 自己能执行的步骤调用它。 |
 | [brainstorm](skills/Thariq/brainstorm/SKILL.md) | 在一个充满 unknown knowns 的领域发散：列举可能性、产出多个截然不同的方向供用户反应。当用户要求 brainstorm、头脑风暴多个方案，或 grilling 中发现剩下的决策要看到实物才能定时使用。 |
+| [browser-tools](skills/personal/browser-tools/SKILL.md) | 浏览器与网页任务的路由器：硬约束前置 → adapter gate → 任务形态分类，落到 ego-browser / OpenCLI / firecrawl / anysearch / CloakBrowser 唯一叶子并交接。当需要打开/操作网页、网页搜索或深度调研、读取 URL / 批量抓取 / 监控、访问反爬站点、页面诊断，或抓取/搜索工具报错需要回退时使用。 |
 | [clean-branches](skills/personal/clean-branches/SKILL.md) | "清理本地和远程已合并的 Git 分支。扫描所有本地分支和远程 tracking branches，标记已合并入当前分支的分支，一次性列表让用户勾选确认后删除并验证结果。使用场景包括：分支太多要清理、合并后残留、worktree 未清理、远程 stale branches。当用户提到 清理分支/删分支/整理分支/clean branches/branch cleanup/prune branches/git clean 时务必使用。对于合并后残留的发布分支、废弃的功能分支、已修复的 bugfix 分支尤其适用。" |
 | [git-flow-conventions](skills/personal/git-flow-conventions/SKILL.md) | Git Flow 分支与提交规范参考。 |
 | [pre-implement](skills/Thariq/pre-implement/SKILL.md) | 在计划或讨论结束、开始实际交付任务时调用：新建并维护 implementation notes，逐步记录实现决策；偏离 plan、spec 时记录 Deviations。 |
