@@ -14,26 +14,26 @@ npx skills@latest add toRolex/rolex-skills
 
 ## Skills
 
-各 bucket 完整列表见其 README：[engineering](skills/engineering/README.md) · [productivity](skills/productivity/README.md) · [personal](skills/personal/README.md) · [Thariq](skills/Thariq/README.md)（[misc](skills/misc/README.md) 保留但不推广）。
+各 bucket 完整列表见其 README：[engineering](skills/engineering/README.md) · [productivity](skills/productivity/README.md) · [personal](skills/personal/README.md) · [Thariq](skills/Thariq/README.md)（[misc](skills/misc/README.md) 保留但不推广）。使用顺序与流向见 [Skill 使用地图](docs/skill-map.md)。
 
 有些技能会调用其他技能。请同时安装以下技能：
 
 | Skill | 同时安装 |
 |---|---|
-| `productivity/grill-me` | `productivity/grilling` |
-| `engineering/grill-with-docs` | `productivity/grilling` |
-| `engineering/triage` | `productivity/grilling` |
-| `engineering/improve-codebase-architecture` | `productivity/grilling` |
-| `engineering/wayfinder` | `productivity/grilling`, `engineering/prototype` |
-| `engineering/implement` | `engineering/tdd` |
-| `engineering/implement-spec` | `engineering/to-spec`, `engineering/to-tickets` |
-| `engineering/retro` | （建议在 `/implement` 或 `/implement-spec` 之后运行） |
-| `engineering/setup-rolex-skills` | `engineering/to-spec`, `engineering/to-tickets` |
-| `Thariq/unknowns` | `Thariq/blind-spot-pass`, `Thariq/brainstorm`, `productivity/grilling`, `engineering/domain-modeling`, `engineering/prototype` |
-| `Thariq/brainstorm` | `engineering/prototype`（独立使用时另建议 `productivity/grilling`，可选） |
-| `Thariq/pre-implement` | （可选：读取 `productivity/grilling` 的结论） |
+| `grill-me` | `grilling` |
+| `grill-with-docs` | `grilling` |
+| `triage` | `grilling` |
+| `improve-codebase-architecture` | `grilling` |
+| `wayfinder` | `grilling`, `prototype` |
+| `implement` | `tdd` |
+| `implement-spec` | `to-spec`, `to-tickets` |
+| `retro` | （建议在 `/implement` 或 `/implement-spec` 之后运行） |
+| `setup-rolex-skills` | `to-spec`, `to-tickets` |
+| `unknowns` | `blind-spot-pass`, `brainstorm`, `grilling`, `domain-modeling`, `prototype` |
+| `brainstorm` | `prototype`（独立使用时另建议 `grilling`，可选） |
+| `pre-implement` | （可选：读取 `grilling` 的结论） |
 
-不确定用哪个？`engineering/ask-rolex` 是路由器，会按当前情境路由到具体 skill。
+不确定用哪个？`ask-rolex` 是路由器，会按当前情境路由到具体 skill。
 
 部分 skill 可手动以 `/名字` 调用，例如 `/grill-me`、`/teach-me`、`/afk-issue-loop`；其余由模型在匹配场景时自动触发，例如 [personal/github-api-rate-limits](skills/personal/github-api-rate-limits/SKILL.md)——在 gh CLI / GitHub API 的分页、循环、批量请求中遵守 REST 与 GraphQL 两条独立的 rate limit 预算。
 
