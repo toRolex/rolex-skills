@@ -6,7 +6,7 @@ cd rolex-skills
 bash scripts/link-skills.sh
 ```
 
-[源码](https://github.com/toRolex/rolex-skills/tree/main/skills/personal/git-flow-conventions)
+[源码](https://github.com/toRolex/rolex-skills/tree/main/skills/misc/git-flow-conventions)
 
 ## 功能
 

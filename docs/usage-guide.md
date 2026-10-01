@@ -13,8 +13,9 @@
 | **On-ramps** | 3 | `wayfinder`, `triage`, `improve-codebase-architecture` |
 | **Standalone** | 6 | `prototype`, `diagnosing-bugs`, `research`, `resolving-merge-conflicts`, `domain-modeling`, `codebase-design` |
 | **Productivity** | 5 | `grilling`, `grill-me`, `handoff`, `teach`, `writing-great-skills` |
-| **Personal（原创）** | 6 | `safe-pull`, `clean-branches`, `git-flow-conventions`, `publish-release`, `afk-issue-loop`, `qa-plan` |
+| **Personal（原创）** | 4 | `afk-issue-loop`, `clean-branches`, `ask-advisor`, `vertical-slice-review` |
 | **Thariq（文章启发）** | 7 | `unknowns`, `blind-spot-pass`, `brainstorm`, `to-plan`, `pre-implement`, `to-pitch`, `quiz-me` |
+| **Misc（不推广）** | 4 | `safe-pull`, `git-flow-conventions`, `publish-release`, `qa-plan` |
 | **Router** | 1 | `ask-rolex` |
 | **Internal Engines** | 2 | `tdd`（implement 内部）、`grilling`（grill-with-docs 等内部）、`domain-modeling` / `codebase-design`（共享词汇层） |
 
@@ -66,11 +67,16 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 
 | Skill | 触发 | 职责 |
 |-------|------|------|
-| `safe-pull` | `/safe-pull` 或自动 | 安全 git pull + rebase。检查远程 → stash → rebase → 恢复 → 推送 |
 | `clean-branches` | 自动 | 清理已合并的本地和远程分支，也清理残留 worktree |
+| `afk-issue-loop` | `/afk-issue-loop [issue numbers]` | 启动独立本地脚本；以 CLI 和 worktree 将全部就绪 Tickets 一次定批并发实现、审查，不补位，批末汇总合并关闭（默认 open `ready-for-agent`），返回日志与停止命令 |
+
+#### Misc（很少使用，不推广）
+
+| Skill | 触发 | 职责 |
+|-------|------|------|
+| `safe-pull` | `/safe-pull` 或自动 | 安全 git pull + rebase。检查远程 → stash → rebase → 恢复 → 推送 |
 | `git-flow-conventions` | 自动 | Git Flow 分支命名、commit 格式、PR 流程、发版规范 |
 | `publish-release` | `/publish-release` 或自动 | 从 develop 发版：bump 版本、更新 changelog、打 tag、合并到 main |
-| `afk-issue-loop` | `/afk-issue-loop [issue numbers]` | 启动独立本地脚本；以 CLI 和 worktree 将全部就绪 Tickets 一次定批并发实现、审查，不补位，批末汇总合并关闭（默认 open `ready-for-agent`），返回日志与停止命令 |
 | `qa-plan` | `/qa-plan` | 从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue |
 
 #### Shared Vocabulary（共享词汇层）
@@ -189,10 +195,10 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 | **调研技术方案** | `research` → 审阅 → `grill-with-docs` → 进入主链路 |
 | **重构模块** | `improve-codebase-architecture` → 拷问 → `to-spec` → `implement` |
 | **批量处理 Issue** | `afk-issue-loop`（独立脚本固定批次处理；确认 started 后可结束会话，status/stop 见[用法](personal/afk-issue-loop.md)） |
-| **发版** | `publish-release`（从 develop 一键发版） |
-| **同步代码** | `safe-pull`（自动 stash + rebase） |
+| **发版（不常用）** | `publish-release`（从 develop 一键发版，misc） |
+| **同步代码（不常用）** | `safe-pull`（自动 stash + rebase，misc） |
 | **清理分支** | `clean-branches`（删除已合并分支） |
-| **出 QA 计划** | `qa-plan`（从 commit 生成测试计划） |
+| **出 QA 计划（不常用）** | `qa-plan`（从 commit 生成测试计划，misc） |
 | **合并冲突** | `resolving-merge-conflicts`（merge 过程中触发） |
 | **快速验证想法** | `prototype` → 如果可行 → 进入主链路 |
 | **长会话交接** | `handoff` → 新会话读取 |

@@ -42,13 +42,9 @@
     {
       "name": "原创工具",
       "source": "./",
-      "description": "原创技能。安全 pull、清理分支、Git Flow 规范、一键发版、生成测试计划、按原生依赖批量处理 Ticket",
+      "description": "原创技能。清理分支、按原生依赖批量处理 Ticket",
       "skills": [
-        "./skills/personal/safe-pull",
         "./skills/personal/clean-branches",
-        "./skills/personal/git-flow-conventions",
-        "./skills/personal/publish-release",
-        "./skills/personal/qa-plan",
         "./skills/personal/afk-issue-loop"
       ]
     },
