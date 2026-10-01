@@ -2,7 +2,7 @@
 
 ## 一、Skill 全景
 
-源码按三大类组织：**engineering/**、**productivity/** 和 **personal/**。
+源码按四大类组织：**engineering/**、**productivity/**、**personal/** 和 **Thariq/**。
 
 ### 总览
 
@@ -14,6 +14,7 @@
 | **Standalone** | 6 | `prototype`, `diagnosing-bugs`, `research`, `resolving-merge-conflicts`, `domain-modeling`, `codebase-design` |
 | **Productivity** | 5 | `grilling`, `grill-me`, `handoff`, `teach`, `writing-great-skills` |
 | **Personal（原创）** | 6 | `safe-pull`, `clean-branches`, `git-flow-conventions`, `publish-release`, `afk-issue-loop`, `qa-plan` |
+| **Thariq（文章启发）** | 7 | `unknowns`, `blind-spot-pass`, `brainstorm`, `to-plan`, `pre-implement`, `to-pitch`, `quiz-me` |
 | **Router** | 1 | `ask-rolex` |
 | **Internal Engines** | 2 | `tdd`（implement 内部）、`grilling`（grill-with-docs 等内部）、`domain-modeling` / `codebase-design`（共享词汇层） |
 

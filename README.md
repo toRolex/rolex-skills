@@ -101,11 +101,11 @@ flowchart LR
 | [wayfinder](skills/engineering/wayfinder/SKILL.md) | 把一大块工作（超过一个 agent 会话能容纳的体量）规划为 issue tracker 上共享的 decision tickets 的 map，然后逐个解决它们，直到通往 destination 的路清晰可见。 |
 | [afk-issue-loop](skills/personal/afk-issue-loop/SKILL.md) | 启动独立本地脚本处理指定 Tickets（默认 open `ready-for-agent`）：全部就绪票一次定批并发、不补位、CLI 实现与审查、批末汇总合并关闭；确认启动后可结束发起会话，日志可查、运行可停止。 |
 | [ask-advisor](skills/personal/ask-advisor/SKILL.md) | 显式把当前决策点交给强模型顾问（strong-model-consultant），获取决策建议。 |
-| [blind-spot-pass](skills/personal/blind-spot-pass/SKILL.md) | 找出用户的 unknown unknowns 并向用户解释。当用户要求 blind spot pass 时使用。 |
+| [blind-spot-pass](skills/Thariq/blind-spot-pass/SKILL.md) | 找出用户的 unknown unknowns 并向用户解释。当用户要求 blind spot pass 时使用。 |
 | [qa-plan](skills/personal/qa-plan/SKILL.md) | 根据最近一批 commit 生成 step-by-step QA 测试计划，并保存为 GitHub issue。用户通过 /qa-plan 调用。 |
-| [quiz-me](skills/personal/quiz-me/SKILL.md) | 就一次变更出报告和测验，满分通过才 merge。 |
-| [to-pitch](skills/personal/to-pitch/SKILL.md) | 打包 prototype、spec、implementation notes 成一份争取 buy-in 和批准的文档。 |
-| [to-plan](skills/personal/to-plan/SKILL.md) | 写一份供审阅的 implementation plan，最可能变的决策置顶，机械性工作沉底。 |
+| [quiz-me](skills/Thariq/quiz-me/SKILL.md) | 就一次变更出报告和测验，满分通过才 merge。 |
+| [to-pitch](skills/Thariq/to-pitch/SKILL.md) | 打包 prototype、spec、implementation notes 成一份争取 buy-in 和批准的文档。 |
+| [to-plan](skills/Thariq/to-plan/SKILL.md) | 写一份供审阅的 implementation plan，最可能变的决策置顶，机械性工作沉底。 |
 | [vertical-slice-review](skills/personal/vertical-slice-review/SKILL.md) | 审查 ticket 拆解方案是否符合 vertical slice 方法论：逐条判定是否贯穿 schema/API/UI/tests、能否独立 demo、大小能否放进一个 context window，读代码库验证、必要时重拆，并调用 strong-model-consultant 复核。 |
 | [grill-me](skills/productivity/grill-me/SKILL.md) | 一场无情的追问，用来打磨计划或设计。 |
 | [handoff](skills/productivity/handoff/SKILL.md) | 将当前对话压缩为 handoff 文档，供另一个 agent 接续。 |
@@ -127,10 +127,10 @@ flowchart LR
 | [resolving-merge-conflicts](skills/engineering/resolving-merge-conflicts/SKILL.md) | 当你需要解决进行中的 git merge/rebase 冲突时使用。 |
 | [tdd](skills/engineering/tdd/SKILL.md) | 测试驱动开发（Test-Driven Development）。当用户希望以测试先行（test-first）的方式构建功能或修复 bug、提到 "red-green-refactor"，或需要集成测试时使用。 |
 | [wizard](skills/engineering/wizard/SKILL.md) | 生成一个交互式 bash wizard，引导人类一步步完成只有他们能执行的步骤。用于开通基础设施、设置凭据或 CI secrets、在一个不熟悉的第三方 dashboard 中操作，或运行一次性迁移或切换。不要为 agent 自己能执行的步骤调用它。 |
-| [brainstorm](skills/personal/brainstorm/SKILL.md) | 在一个充满 unknown knowns 的领域发散：列举可能性、产出多个截然不同的方向供用户反应。当用户要求 brainstorm、头脑风暴多个方案，或 grilling 中发现剩下的决策要看到实物才能定时使用。 |
+| [brainstorm](skills/Thariq/brainstorm/SKILL.md) | 在一个充满 unknown knowns 的领域发散：列举可能性、产出多个截然不同的方向供用户反应。当用户要求 brainstorm、头脑风暴多个方案，或 grilling 中发现剩下的决策要看到实物才能定时使用。 |
 | [clean-branches](skills/personal/clean-branches/SKILL.md) | "清理本地和远程已合并的 Git 分支。扫描所有本地分支和远程 tracking branches，标记已合并入当前分支的分支，一次性列表让用户勾选确认后删除并验证结果。使用场景包括：分支太多要清理、合并后残留、worktree 未清理、远程 stale branches。当用户提到 清理分支/删分支/整理分支/clean branches/branch cleanup/prune branches/git clean 时务必使用。对于合并后残留的发布分支、废弃的功能分支、已修复的 bugfix 分支尤其适用。" |
 | [git-flow-conventions](skills/personal/git-flow-conventions/SKILL.md) | Git Flow 分支与提交规范参考。 |
-| [pre-implement](skills/personal/pre-implement/SKILL.md) | 在计划或讨论结束、开始实际交付任务时调用：新建并维护 implementation notes，逐步记录实现决策；偏离 plan、spec 时记录 Deviations。 |
+| [pre-implement](skills/Thariq/pre-implement/SKILL.md) | 在计划或讨论结束、开始实际交付任务时调用：新建并维护 implementation notes，逐步记录实现决策；偏离 plan、spec 时记录 Deviations。 |
 | [publish-release](skills/personal/publish-release/SKILL.md) | 当用户说发版/发布/release/publish/bump version/tag，或准备发布新版本时使用。自动检测 Git Flow（存在 develop）与 Trunk-based（无 develop）两种分支模型，走对应发版流程。 |
 | [safe-pull](skills/personal/safe-pull/SKILL.md) | Git Flow 分支与提交规范参考。 |
 | [grilling](skills/productivity/grilling/SKILL.md) | 对 plan、decision 或 idea 进行无休止的追问。当用户想要压力测试他们的思考，或使用任何 'grill' 触发短语时使用。 |

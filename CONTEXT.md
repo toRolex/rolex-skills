@@ -8,7 +8,7 @@ mattpocock/skills 的中文改编版：按 bucket 组织的 agent skill 集合�
 一个可调用的工作流或参考知识单元。User-invoked 仅由人调用，Model-invoked 也可由模型调用。
 
 **Bucket**:
-Skill 的推广分组；engineering、productivity、personal 为已推广组，misc 为保留但不推广组。
+Skill 的推广分组；engineering、productivity、personal、Thariq 为已推广组，misc 为保留但不推广组。
 
 ### 领域文档与笔记隔离
 
