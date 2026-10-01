@@ -16,20 +16,25 @@ disable-model-invocation: true
 
 0. **分支：任务在陌生地带吗？** 如果它落在 codebase 里你没碰过的区域，或者一个你不熟悉的领域（一种没接触过的技术、一类没做过的设计），先跑一次 **`/blind-spot-pass`**（user-invoked，手动触发）：让 agent 把你的 **unknown unknowns** 翻出来讲清楚，再带着它们进入步骤 1。熟悉的领域直接跳过——它的价值与你的盲区成正比。
 0.5. **分支：判断标准是看到才认得的吗？** 如果你不知道有哪些可能，或者标准说不出来但看到能认出（审美、口味、"就要这个感觉"），先 **`/brainstorm`** 发散：列举介入点，或产出多个截然不同的方向交给 prototype 供你反应。grilling 中途发现剩下的决策要看到实物才能定时，也会转手调用它。
-1. **`/grill-with-docs`** 通过 interview 打磨想法。只要你在**工作目录**里工作，就从这里开始：它是有状态的，会把学到的东西保留在 `CONTEXT.md` 和 ADR 中。（没有工作目录？改用 `/grill-me`，见 Standalone。两者运行同一个 `/grilling` 原语；`grill-with-docs` 是会留下书面痕迹的那个，所以只要有仓库可以留下痕迹，它就是两者中更好的那个。）
+1. **`/grill-with-docs`** 通过 interview 打磨想法。只要你在**工作目录**里工作，就从这里开始：它是有状态的，会把学到的东西保留在 `GLOSSARY.md` 和 ADR 中。（没有工作目录？改用 `/grill-me`，见 Standalone。两者运行同一个 `/grilling` 原语；`grill-with-docs` 是会留下书面痕迹的那个，所以只要有仓库可以留下痕迹，它就是两者中更好的那个。）
 2. **分支：你能在对话中解决每个问题吗？** 如果一个问题需要可运行的答案（状态、业务逻辑、一个你必须亲眼看到的 UI），就绕行一个 prototype，用 **`/handoff`** 双向桥接（prototype 住在自己的目录里，这正是 `/handoff` 的用途；见 Phase boundaries）：
    - **`/handoff`** 转出，然后针对那个文件开一个新的 session，
    - **`/prototype`** 用 throwaway 代码回答那个问题，
    - **`/handoff`** 把你学到的东西转回来，并从原始想法线程引用它。
 3. **分支：这是多 session 构建吗？** 想在动手前先审阅关键决策，就在 spec 之前跑一次 **`/to-plan`**：它把最可能变的决策（data model、type interface、UX flow）置顶供你反应，机械性重构沉底。
-   - **是** → **`/to-spec`**（把线程变成一份 spec），然后 **`/to-tickets`** 把它拆成 tracer-bullet tickets，每个都声明自己的 **blocking edges**。在本地 tracker 上，就是 `.scratch/<feature>/issues/` 下每个 ticket 一个文件，按 blocker 优先手工推进；在真实的 tracker 上，这些 edges 变成原生的阻塞链接，所以任何 blocker 都已完成的 ticket 都可以被拿走：对每个 ticket 启动 **`/implement`**，**每两个之间 `/clear` context**。每个 ticket 都是自包含的，所以上一个 ticket 的 context 是可以随手丢弃的。
-   - **否** → **`/implement`** 就在这里、在同一个 context window 里构建。
+   - **是** → **`/to-spec`**（把线程变成一份 spec），然后 **`/to-tickets`** 把它拆成 tracer-bullet tickets，每个都声明自己的 **blocking edges**。然后用两种方式之一推进 tickets：
+     - 对每个 ticket 跑 **`/implement`**，**每两个之间 `/clear` context**。在本地 tracker 上，就是 `.scratch/<feature>/issues/` 下每个 ticket 一个文件，按 blocker 优先手工推进；在真实的 tracker 上，这些 edges 变成原生的阻塞链接，所以任何 blocker 都已完成的 ticket 都可以被拿走。每个 ticket 都是自包含的，所以上一个 ticket 的 context 是可以随手丢弃的。
+     - 用 **`/implement-spec`** 一次跑完整个 spec。它把 tickets 读成一张 **task graph**，在就绪的 **frontier** 上并行跑 implementer subagent，把所有东西落到一个 **integration branch** 上。当你更想编排整个构建、而不是亲自驱动每个 ticket 时，用它。
 
-   无论走哪条路，**`/implement`** 构建每个 issue 时都在内部驱动 **`/tdd`**（一次一个 red → green 切片），然后在 commit 之前用 **`/code-review`** 收尾，对 diff 做一次双轴 review（Standards + Spec）。当你只想以 test-first 的方式构建一个具体行为、不需要完整 spec 时，单独使用 **`/tdd`**；当你想针对某个 fixed point review 一个 branch 或 PR 时，单独使用 **`/code-review`**。
+   无论走哪条路，代码都是靠 **`/tdd`**（一次一个 red → green 切片）构建、用 **`/code-review`**（对 diff 做一次双轴 review：Standards + Spec）收尾的。`/implement` 对每个 ticket 都运行这两者；`/implement-spec` 的每个 implementer 各自驱动 `/tdd`，最后在 integration branch 上跑一次 `/code-review`。当你只想以 test-first 的方式构建一个具体行为、不需要完整 spec 时，单独使用 **`/tdd`**；当你想针对某个 fixed point review 一个 branch 或 PR 时，单独使用 **`/code-review`**。
+
+   当工作以 pull request 的形式提交时，**`/pr`** 负责打磨 body：展示这次改动的最小可视化（diagram、diff-sketch 或文件树）、证明它可用的 before/after 证据，以及单向/双向门（one-way/two-way door）判断。它是 model-invoked 的，所以 agent 每次写 PR 时都会伸手去够它。
+
+4. **`/retro`** 闭环。一次构建之后——尤其是走得磕磕绊绰的那次——它回看这个 session，针对 agent 的**环境**而不是代码提出改进：navigation 指针、自动化检查、`/code-review` 强制执行的 coding standards、steering 文件、工具链。机械性错误变成确定性检查；判断性取舍变成 coding standards。下一次构建就从一个更好的环境开始。
 
 ### context hygiene
 
-把步骤 1–3 保持在**一个不间断的 context window** 里（在 `/to-tickets` 完成之前不要 compact 或 clear），这样 grilling、spec 和 tickets 都建立在同一套思考之上。每个 `/implement` 随后从 ticket 出发、全新开始。
+把步骤 1–3 保持在**一个不间断的 context window** 里（在 `/to-tickets` 完成之前不要 compact 或 clear），这样 grilling、spec 和 tickets 都建立在同一套思考之上。每个 `/implement` 随后从 ticket 出发、全新开始。`/retro` 要在它所回看的那个 session 里、clear 之前运行；clear 之后，就让它指向那个 session 的日志。
 
 这个做法的上限是 **[smart zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone)**：模型仍能敏锐推理的 context window（在最新模型上约 150k tokens）。如果 session 在 `/to-tickets` 之前逼近这个上限，不要在降级状态下硬撑；在最近的 phase boundary 处 **`/compact`**，然后继续（见 Phase boundaries）。
 
@@ -57,7 +62,7 @@ disable-model-invocation: true
 
 两个 model-invoked 的参考，运行在其他 skill 的_下层_，各自是自己词汇的唯一权威来源。当问题出在**词语**而不是流程上时，直接伸手去拿它们；或者让上面的 skill 把它们拉进来。
 
-- **`/domain-modeling`**：打磨项目的_领域_语言：挑战一个模糊的术语，解决一个过载的词（一个 "account" 干三份活），把难以逆转的 decision 记录成一条 ADR。它是 `/grill-with-docs` 驱动的主动纪律，让 `CONTEXT.md` 保持为一份干净的 glossary。
+- **`/domain-modeling`**：打磨项目的_领域_语言：挑战一个模糊的术语，解决一个过载的词（一个 "account" 干三份活），把难以逆转的 decision 记录成一条 ADR。它是 `/grill-with-docs` 驱动的主动纪律，让 `GLOSSARY.md` 保持为一份干净的 glossary。
 - **`/codebase-design`** 是用于设计模块_形状_的 deep module 词汇（module、interface、depth、seam、adapter、leverage、locality）：大量行为藏在干净 seam 上的一个小 interface 后面。`/tdd` 和 `/improve-codebase-architecture` 都讲这门语言。
 
 ## Phase boundaries
@@ -76,14 +81,13 @@ disable-model-invocation: true
 
 完全脱离 main flow。
 
-- **`/grill-me`**：和 `/grill-with-docs` 同样不留情面的 interview，但**无状态**：它不在本地保存任何东西，也不构建 `CONTEXT.md`。当你**不在工作目录里**工作时使用它（打磨一份计划、一个设计、一段文字，任何底下没有 repo 的东西）。如果你在工作目录里，就改用 `/grill-with-docs`：它运行同样的 interview 并留下书面痕迹，所以严格来说它是更好的那个。
+- **`/grill-me`**：和 `/grill-with-docs` 同样不留情面的 interview，但**无状态**：它不在本地保存任何东西，也不构建 `GLOSSARY.md`。当你**不在工作目录里**工作时使用它（打磨一份计划、一个设计、一段文字，任何底下没有 repo 的东西）。如果你在工作目录里，就改用 `/grill-with-docs`：它运行同样的 interview 并留下书面痕迹，所以严格来说它是更好的那个。
 - **`/grilling`** 是 interview 原语本身：轮次（rounds）、frontier，事实是 agent 的职责，decision 是你的。`/grill-me` 和 `/grill-with-docs` 是两个具名的进入方式，`/triage`、`/wayfinder` 和 `/improve-codebase-architecture` 内部都在运行它。只有当你想直接要一场不带任何包装的 interview 时，才直接伸手去拿它。
-- **`/resolving-merge-conflicts`** 逐个 hunk 地处理进行中的 merge 或 rebase 冲突，按**意图**解决（追溯到每一侧各自的 primary source），而不是挑拣代码行，然后完成整个操作。它从不运行 `--abort`。它是 standalone，独立于每一条 flow：当你已经身陷冲突之中时使用它。
 - **`/prototype`** 是一个小的、throwaway 的程序，回答一个设计问题：这个状态模型感觉对吗，或者这个 UI 应该长什么样。throwaway 是对代码书写方式的一种约束，而不是销毁它的承诺：答案会融入真实的代码，prototype 本身则作为 **primary source** 保存在 main 之外的 `prototype/<name>` 分支上，由实现 issue 指向它。它是 main flow 第 2 步里的那个绕行，但任何时候一个设计问题难以在纸面上定夺，都可以使用它。
 - **`/research`**：把阅读的跑腿活委托给一个 **background agent**：它对照 **primary sources** 调查一个问题，然后在仓库里留下一份带引用的 Markdown 文件。它阅读的时候你继续干活。它产出的文件，是要带_进_ main flow、供 `/grill-with-docs` 使用的东西，因为 research 喂养思考，而不是取代思考。
 - **`/to-questionnaire`**：当挡住你的东西不在你脑子里、也不在代码库里，而是在**别人的**脑子里时，这个 skill 会写一份问卷给他们去填。它是 `/grill-me` 的反面：它不是就那个主题采访你，而是采访你关于**发送（send）**（发给谁、你需要拿回什么），并把问题对准那个缺口。拿回来的东西，是 `/grill-with-docs` 或 `/to-spec` 的素材。
 - **`/wizard`** 用于那些只有**人类**才能完成的步骤：开通基础设施、设置凭据或 CI secrets、在一个陌生的第三方 dashboard 里点来点去、运行一次性的迁移或切换。它生成一个交互式 bash 脚本，打开每个 URL、捕获每个值，并写进 `.env` 和 GitHub secrets，这样那套流程就不再是每次都需要你向 agent 重新解释的东西了。它是 model-invoked 的，所以 agent 一撞上只有你能通过的墙，就会伸手去够它。如果 agent 能自己做，它就应该自己做；这个 skill 是为真正有 human in the loop 的情况准备的。
-- **`/wait-what`** 是针对一条没能落地的消息的矫正。在对话中途、任何其他 skill 内部使用它，agent 会用你缺失的 context、用通俗易懂的语言、用 `CONTEXT.md` 的词汇，重新讲解它刚刚说的话。它是事后生效的；`/grill-with-docs` 是事前的治愈，因为早早约定好的共享语言，才正是阻止行话出现的东西。
+- **`/wait-what`** 是针对一条没能落地的消息的矫正。在对话中途、任何其他 skill 内部使用它，agent 会用你缺失的 context、用通俗易懂的语言、用 `GLOSSARY.md` 的词汇，重新讲解它刚刚说的话。它是事后生效的；`/grill-with-docs` 是事前的治愈，因为早早约定好的共享语言，才正是阻止行话出现的东西。
 - **`/teach-me`**：跨多个 session 学习一个概念，把当前目录当作一个有状态的工作区。
 - **`/writing-for-agents`** 是编写 agent 消费的文档时的参考：skills、AGENTS.md、被指向的文档。
 - **`/writing-great-skills`**：编写和编辑 skill 的参考指南。

@@ -9,9 +9,9 @@
 | 分类 | 数量 | Skill |
 |------|------|-------|
 | **Bootstrap** | 1 | `setup-rolex-skills` |
-| **Main Chain** | 5 | `grill-with-docs` → `to-spec` → `to-tickets` → `implement` → `code-review` |
+| **Main Chain** | 7 | `grill-with-docs` → `to-spec` → `to-tickets` → `implement` 或 `implement-spec` → `code-review` → `pr` → `retro` |
 | **On-ramps** | 3 | `wayfinder`, `triage`, `improve-codebase-architecture` |
-| **Standalone** | 6 | `prototype`, `diagnosing-bugs`, `research`, `resolving-merge-conflicts`, `domain-modeling`, `codebase-design` |
+| **Standalone** | 5 | `prototype`, `diagnosing-bugs`, `research`, `domain-modeling`, `codebase-design` |
 | **Productivity** | 5 | `grilling`, `grill-me`, `handoff`, `teach-me`, `writing-great-skills` |
 | **Personal（原创）** | 4 | `afk-issue-loop`, `clean-branches`, `ask-advisor`, `vertical-slice-review` |
 | **Thariq（文章启发）** | 7 | `unknowns`, `blind-spot-pass`, `brainstorm`, `to-plan`, `pre-implement`, `to-pitch`, `quiz-me` |
@@ -35,7 +35,7 @@ grill-with-docs → to-spec → to-tickets → implement → code-review
 
 | Skill | 触发 | 职责 |
 |-------|------|------|
-| `grill-with-docs` | `/grill-with-docs` | **方案拷问 + 持久化文档**。逐问题拷问设计树，同时写入 `CONTEXT.md`（术语表）和 `docs/adr/`（架构决策记录） |
+| `grill-with-docs` | `/grill-with-docs` | **方案拷问 + 持久化文档**。逐问题拷问设计树，同时写入 `GLOSSARY.md`（术语表）和 `docs/adr/`（架构决策记录） |
 | `to-spec` | `/to-spec` | **合成 Spec/PRD**。将已对齐的理解转化为规范文档，发布到 Issue Tracker |
 | `to-tickets` | `/to-tickets` | **拆分为 Ticket**。将 Spec 分解为垂直切片的可执行 Ticket，每 Ticket 声明阻塞关系 |
 | `implement` | `/implement` | **执行实现**。逐一实现 Ticket，内部驱动 `tdd` 引擎，完成 typecheck + 全量测试 + code-review 后提交 |
@@ -58,7 +58,6 @@ grill-with-docs → to-spec → to-tickets → implement → code-review
 | `prototype` | `/prototype` 或自动 | 快速 disposable 原型验证，回答设计问题后丢弃 |
 | `diagnosing-bugs` | `/diagnosing-bugs` 或自动 | 严谨 Bug 诊断：建立 tight loop → 假设排序 → 修复 → 回归测试 |
 | `research` | `/research` 或自动 | 基于一手资料的研究，输出带引用的 Markdown |
-| `resolving-merge-conflicts` | 自动 | 按意图（而非文本）解决合并冲突 |
 | `wizard` | 自动 | 生成交互式 bash wizard，引导人类完成只有他们能执行的步骤（开通基础设施、设置凭据/CI secrets、一次性迁移） |
 
 #### Personal（原创）
@@ -83,7 +82,7 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 
 | Skill | 触发 | 职责 | 被调用者 |
 |-------|------|------|----------|
-| `domain-modeling` | `/domain-modeling` 或自动 | 领域统一语言：更新 `CONTEXT.md` 术语表和 ADR | grill-with-docs, triage, improve-codebase-architecture |
+| `domain-modeling` | `/domain-modeling` 或自动 | 领域统一语言：更新 `GLOSSARY.md` 术语表和 ADR | grill-with-docs, triage, improve-codebase-architecture |
 | `codebase-design` | `/codebase-design` 或自动 | 深度模块设计词汇（module/interface/depth/seam） | tdd, to-spec, improve-codebase-architecture |
 
 #### Productivity
@@ -167,7 +166,6 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
                   │  prototype → 验证设计后喂给 to-spec
                   │  research  → 结果喂给 grill-with-docs
                   │  diagnosing-bugs → 修复 + 回归测试
-                  │  resolving-merge-conflicts → 冲突中
                   │  clean-branches → 合并后清理
                   │  safe-pull → 日常同步
                   │
@@ -199,7 +197,7 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 | **同步代码（不常用）** | `safe-pull`（自动 stash + rebase，misc） |
 | **清理分支** | `clean-branches`（删除已合并分支） |
 | **出 QA 计划（不常用）** | `qa-plan`（从 commit 生成测试计划，misc） |
-| **合并冲突** | `resolving-merge-conflicts`（merge 过程中触发） |
+| **合并冲突** | （上游已废弃：agent 直接处理进行中的 merge/rebase 冲突，无需专门 skill） |
 | **快速验证想法** | `prototype` → 如果可行 → 进入主链路 |
 | **长会话交接** | `handoff` → 新会话读取 |
 | **不确定用哪个** | `ask-rolex` |
@@ -222,7 +220,7 @@ main
 | `feat` | 新功能 |
 | `fix` | Bug 修复 |
 | `spec` | Spec/PRD |
-| `docs` | ADR/CONTEXT.md 更新 |
+| `docs` | ADR/GLOSSARY.md 更新 |
 | `refactor` | 架构改进 |
 | `test` | 仅添加测试 |
 | `chore` | 配置 |

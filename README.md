@@ -1,6 +1,6 @@
 # Rolex Skills
 
-我在用的 AI agent skill 合集，共 38 个：一部分改编自 [mattpocock/skills](https://github.com/mattpocock/skills)，一部分受 [Thariq 的 quadrant walk 方法](https://x.com/trq212/status/2073100352921215386) 启发。
+我在用的 AI agent skill 合集，共 40 个：一部分改编自 [mattpocock/skills](https://github.com/mattpocock/skills)，一部分受 [Thariq 的 quadrant walk 方法](https://x.com/trq212/status/2073100352921215386) 启发。
 
 ## 快速开始
 
@@ -24,6 +24,8 @@ npx skills@latest add toRolex/rolex-skills
 | `engineering/improve-codebase-architecture` | `productivity/grilling` |
 | `engineering/wayfinder` | `productivity/grilling`, `engineering/prototype` |
 | `engineering/implement` | `engineering/tdd` |
+| `engineering/implement-spec` | `engineering/to-spec`, `engineering/to-tickets` |
+| `engineering/retro` | （建议在 `/implement` 或 `/implement-spec` 之后运行） |
 | `engineering/setup-rolex-skills` | `engineering/to-spec`, `engineering/to-tickets` |
 | `Thariq/unknowns` | `Thariq/blind-spot-pass`, `Thariq/brainstorm`, `productivity/grilling`, `engineering/domain-modeling`, `engineering/prototype` |
 | `Thariq/brainstorm` | `engineering/prototype`（独立使用时另建议 `productivity/grilling`，可选） |

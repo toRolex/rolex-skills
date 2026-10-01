@@ -5,14 +5,16 @@ Daily code work skills.
 ## User-invoked
 
 - **[ask-rolex](./ask-rolex/SKILL.md)**：询问哪个 skill 或流程适合当前场景，是整个仓库的路由器。
-- **[grill-with-docs](./grill-with-docs/SKILL.md)**：深入访谈，同时构建项目领域模型，更新 `CONTEXT.md` 和 ADR。
+- **[grill-with-docs](./grill-with-docs/SKILL.md)**：深入访谈，同时构建项目领域模型，更新 `GLOSSARY.md` 和 ADR。
 - **[setup-rolex-skills](./setup-rolex-skills/SKILL.md)**：配置本仓库的工程 skill（issue tracker、triage 标签、领域文档布局）。每个仓库首次使用前运行一次。
 - **[to-spec](./to-spec/SKILL.md)**：将当前对话转化为 spec 并发布到 issue tracker。
 - **[to-tickets](./to-tickets/SKILL.md)**：将计划或 spec 拆分为 tracer-bullet tickets，标注阻塞关系。
 - **[implement](./implement/SKILL.md)**：按 spec/tickets 构建，内部驱动 `/tdd`，完成后运行 `/code-review`。
+- **[implement-spec](./implement-spec/SKILL.md)**：把 `/to-spec` 和 `/to-tickets` 的产出实现为代码：integration branch 上以任务图并行推进 implementer subagent。
 - **[triage](./triage/SKILL.md)**：将 issue 按 triage 角色状态机处理。
 - **[wayfinder](./wayfinder/SKILL.md)**：为超大工作量绘制共享的调研 ticket 地图。
 - **[improve-codebase-architecture](./improve-codebase-architecture/SKILL.md)**：扫描代码库寻找 deepening 机会，生成 HTML 报告。
+- **[retro](./retro/SKILL.md)**：对 coding session 做复盘，从 navigation、automated checks、coding standards 等类别提出环境改进建议。
 
 ## Model-invoked
 
@@ -23,5 +25,5 @@ Daily code work skills.
 - **[domain-modeling](./domain-modeling/SKILL.md)**：主动构建和打磨项目领域模型。
 - **[codebase-design](./codebase-design/SKILL.md)**：深度模块设计的共享词汇和原则。
 - **[code-review](./code-review/SKILL.md)**：双轴 review：Standards（代码规范）+ Spec（需求匹配）。
-- **[resolving-merge-conflicts](./resolving-merge-conflicts/SKILL.md)**：解决进行中的 git merge/rebase 冲突。
+- **[pr](./pr/SKILL.md)**：用 diagram/diff-sketch/template 撰写 PR body，包含 Summary、Evidence、Merge Danger 三段。
 - **[wizard](./wizard/SKILL.md)**：生成交互式 bash wizard，引导人类完成只有他们能执行的步骤（开通基础设施、设置凭据/CI secrets、一次性迁移）。
