@@ -33,7 +33,7 @@ jobs:
       - name: Create Version Pull Request
         uses: changesets/action@v1
         with:
-          version: pnpm changeset version
+          version: pnpm run version
           publish: pnpm changeset tag
           commit: "chore: version skills"
           title: "chore: version skills"
