@@ -14,7 +14,7 @@ bash scripts/link-skills.sh
 
 `grill-with-docs` 对你的计划或设计进行无休止的追问，一次一个问题，直到你和 agent 达成共同理解——同时把你的术语和决策写下来。
 
-普通访谈会随 session 结束而蒸发；这个 skill **留下文档痕迹**。每个术语在确定的瞬间就写入 `CONTEXT.md` 词汇表，难以逆转的决策记录为 ADR。对齐的成果不会只停留在你脑子里。
+普通访谈会随 session 结束而蒸发；这个 skill **留下文档痕迹**。每个术语在确定的瞬间就写入 `GLOSSARY.md` 词汇表，难以逆转的决策记录为 ADR。对齐的成果不会只停留在你脑子里。
 
 ## 何时使用
 
@@ -24,7 +24,7 @@ bash scripts/link-skills.sh
 
 ## 前置条件
 
-本 skill 会在你的仓库中写入文件：`CONTEXT.md`（术语表）和 `docs/adr/`（架构决策记录）。两者都是惰性创建的——只在有东西要写时才创建。
+本 skill 会在你的仓库中写入文件：`GLOSSARY.md`（术语表）和 `docs/adr/`（架构决策记录）。两者都是惰性创建的——只在有东西要写时才创建。
 
 ## 访谈机制
 
@@ -35,7 +35,7 @@ bash scripts/link-skills.sh
 ## 效果良好的标志
 
 - 一次只问一个问题，而不是一次性抛问卷
-- 术语在确定时就写入 `CONTEXT.md`
+- 术语在确定时就写入 `GLOSSARY.md`
 - 自己能查代码解决的问题不问你
 - ADR 保持稀缺
 

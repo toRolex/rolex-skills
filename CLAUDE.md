@@ -44,7 +44,7 @@ Issue 以 GitHub issue 形式存在，所有操作用 `gh` CLI。详见 `docs/ag
 
 ### Domain docs
 
-单上下文：根目录 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
+单上下文：根目录 `GLOSSARY.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
 
 ### Implementation notes
 

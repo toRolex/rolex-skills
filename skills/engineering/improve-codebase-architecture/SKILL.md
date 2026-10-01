@@ -11,7 +11,7 @@ disable-model-invocation: true
 本命令以项目的 domain model 为依据，并建立在共享的设计词汇之上：
 
 - 调用 Skill 工具，传入 "codebase-design"，获取架构词汇（**module**、**interface**、**depth**、**seam**、**adapter**、**leverage**、**locality**）及其原则（deletion test、「interface 就是测试面」、「一个 adapter = 假想的 seam，两个 = 真实的」）。在每一条建议里都精确使用这些术语，不要滑向「component」「service」「API」或「boundary」。
-- `CONTEXT.md` 里的领域语言为好的 seam 提供了命名；`docs/adr/` 里的 ADR 记录了本命令不应重新审议的 decision。
+- `GLOSSARY.md` 里的领域语言为好的 seam 提供了命名；`docs/adr/` 里的 ADR 记录了本命令不应重新审议的 decision。
 
 ## 流程
 
@@ -22,7 +22,7 @@ disable-model-invocation: true
 - 如果用户指明了方向（某个 module、子系统或痛点），就顺着它走，跳过下面的推断。
 - 否则，往回翻一段较长的 commit 历史（`git log --oneline`），找出代码库的 hot spots（那些反复出现的文件和区域），让这些路径最先抓住你的注意力。如果改动很分散、没有明显的 hot spot，就放宽范围。
 
-先阅读你将要触及的领域的项目 domain glossary（`CONTEXT.md`）和任何 ADR。
+先阅读你将要触及的领域的项目 domain glossary（`GLOSSARY.md`）和任何 ADR。
 
 然后用 `subagent_type=Explore` 的 Agent 工具走一遍代码库。不要死守僵化的启发式规则；要有机地探索，并记下你感到 friction 的地方：
 
@@ -51,7 +51,7 @@ report 的布局和样式用 **Tailwind via CDN**，在图形/流程/时序能�
 
 在 report 末尾加一节 **Top recommendation**：你会先处理哪个 candidate，为什么。
 
-**领域用 CONTEXT.md 的词汇，架构用 `/codebase-design` 的词汇。** 如果 `CONTEXT.md` 定义了「Order」，就称它为「the Order intake module」，不要说「the FooBarHandler」，也不要说「the Order service」。
+**领域用 GLOSSARY.md 的词汇，架构用 `/codebase-design` 的词汇。** 如果 `GLOSSARY.md` 定义了「Order」，就称它为「the Order intake module」，不要说「the FooBarHandler」，也不要说「the Order service」。
 
 **ADR 冲突**：如果某个 candidate 与现有 ADR 矛盾，只有当 friction 真实到值得重新审视该 ADR 时才把它提出来。在卡片里清楚地标注（例如一个警告提示：「_与 ADR-0007 矛盾，但因为……值得重新打开_」）。不要罗列 ADR 禁止的每一个理论上的重构。
 
@@ -65,7 +65,7 @@ report 的布局和样式用 **Tailwind via CDN**，在图形/流程/时序能�
 
 随着 decision 逐渐成形，副作用要即时处理；调用 Skill 工具，传入 "domain-modeling"，让 domain model 始终保持最新：
 
-- **给深化后的 module 起了个 `CONTEXT.md` 里没有的概念名？** 把这个术语加进 `CONTEXT.md`。如果文件还不存在，就顺手创建它。
-- **对话中把一个模糊的术语厘清了？** 就地更新 `CONTEXT.md`。
+- **给深化后的 module 起了个 `GLOSSARY.md` 里没有的概念名？** 把这个术语加进 `GLOSSARY.md`。如果文件还不存在，就顺手创建它。
+- **对话中把一个模糊的术语厘清了？** 就地更新 `GLOSSARY.md`。
 - **用户用一个有分量的理由拒绝了 candidate？** 主动提供一个 ADR，措辞可以是：「_要我把它记成一条 ADR，让以后的架构审查不再重复建议它吗？_」只有当这个理由确实会被未来的探索者用来避免重复建议同一件事时才提出；跳过一时性的理由（「现在不值得」）和不言自明的理由。
 - **想为深化后的 module 探索备选的 interface？** 调用 Skill 工具，传入 "codebase-design"，用它的 design-it-twice 并行 sub-agent 模式。

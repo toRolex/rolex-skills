@@ -27,7 +27,7 @@
 - Agent 3："为最常见的调用者优化：让默认情况变得微不足道。"
 - Agent 4（如果适用）："围绕 ports & adapters 设计，以处理跨 seam 的依赖。"
 
-把 [SKILL.md](SKILL.md) 词汇和 CONTEXT.md 词汇都包含在 brief 中，这样每个 sub-agent 的命名都与 architecture 语言和项目的领域语言一致。
+把 [SKILL.md](SKILL.md) 词汇和 GLOSSARY.md 词汇都包含在 brief 中，这样每个 sub-agent 的命名都与 architecture 语言和项目的领域语言一致。
 
 每个 sub-agent 输出：
 

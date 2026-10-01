@@ -1,11 +1,11 @@
 ---
 name: domain-modeling
-description: 构建并打磨项目的 domain model。在讨论代码库术语、编写或编辑 CONTEXT.md、或记录或编辑 ADR 时使用。
+description: 构建并打磨项目的 domain model。在讨论代码库术语、编写或编辑 GLOSSARY.md、或记录或编辑 ADR 时使用。
 ---
 
 # Domain Modeling
 
-在设计中主动构建并打磨项目的 domain model。这是一门 *主动* 的功夫：质疑术语、编造 edge case 场景，并在 glossary 和 decisions 一经成形时立刻把它们写下来。（仅仅 *读* `CONTEXT.md` 来取词汇并不是这个 skill：那是任何 skill 都能做到的一行习惯。这个 skill 适用于你在*改变*模型，而不只是消费它。）
+在设计中主动构建并打磨项目的 domain model。这是一门 *主动* 的功夫：质疑术语、编造 edge case 场景，并在 glossary 和 decisions 一经成形时立刻把它们写下来。（仅仅 *读* `GLOSSARY.md` 来取词汇并不是这个 skill：那是任何 skill 都能做到的一行习惯。这个 skill 适用于你在*改变*模型，而不只是消费它。）
 
 ## 文件结构
 
@@ -13,7 +13,7 @@ description: 构建并打磨项目的 domain model。在讨论代码库术语、
 
 ```
 /
-├── CONTEXT.md
+├── GLOSSARY.md
 ├── docs/
 │   └── adr/
 │       ├── 0001-event-sourced-orders.md
@@ -21,29 +21,29 @@ description: 构建并打磨项目的 domain model。在讨论代码库术语、
 └── src/
 ```
 
-如果根目录存在 `CONTEXT-MAP.md`，说明仓库有多个 contexts。map 会指出每个 context 所在的位置：
+如果根目录存在 `GLOSSARY-MAP.md`，说明仓库有多个 contexts。map 会指出每个 context 所在的位置：
 
 ```
 /
-├── CONTEXT-MAP.md
+├── GLOSSARY-MAP.md
 ├── docs/
 │   └── adr/                          ← system-wide decisions
 ├── src/
 │   ├── ordering/
-│   │   ├── CONTEXT.md
+│   │   ├── GLOSSARY.md
 │   │   └── docs/adr/                 ← context-specific decisions
 │   └── billing/
-│       ├── CONTEXT.md
+│       ├── GLOSSARY.md
 │       └── docs/adr/
 ```
 
-懒创建文件：只在你有东西要写时才创建。如果不存在 `CONTEXT.md`，在第一个术语被确定时创建它。如果不存在 `docs/adr/`，在第一个 ADR 需要时创建它。
+懒创建文件：只在你有东西要写时才创建。如果不存在 `GLOSSARY.md`，在第一个术语被确定时创建它。如果不存在 `docs/adr/`，在第一个 ADR 需要时创建它。
 
 ## 会话期间
 
 ### 用 glossary 提出质疑
 
-当用户使用一个与 `CONTEXT.md` 中现有语言冲突的术语时，立刻指出来。「你的 glossary 把 'cancellation' 定义为 X，但你看起来想说的是 Y。到底是哪个？」
+当用户使用一个与 `GLOSSARY.md` 中现有语言冲突的术语时，立刻指出来。「你的 glossary 把 'cancellation' 定义为 X，但你看起来想说的是 Y。到底是哪个？」
 
 ### 打磨模糊的语言
 
@@ -57,11 +57,11 @@ description: 构建并打磨项目的 domain model。在讨论代码库术语、
 
 当用户描述某件事如何运作时，检查代码是否一致。如果发现矛盾，就把它摆出来：「你的代码取消的是整个 Orders，但你刚才说可以部分取消。哪个才是对的？」
 
-### 就地更新 CONTEXT.md
+### 就地更新 GLOSSARY.md
 
-当一个术语被确定时，就地更新 `CONTEXT.md`。不要攒起来：随时发生随时记录。使用 [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md) 中的格式。
+当一个术语被确定时，就地更新 `GLOSSARY.md`。不要攒起来：随时发生随时记录。使用 [GLOSSARY-FORMAT.md](./GLOSSARY-FORMAT.md) 中的格式。
 
-`CONTEXT.md` 应该完全不含实现细节。不要把 `CONTEXT.md` 当作 spec、草稿本或实现决策的仓库。它只是一个 glossary，仅此而已。
+`GLOSSARY.md` 应该完全不含实现细节。不要把 `GLOSSARY.md` 当作 spec、草稿本或实现决策的仓库。它只是一个 glossary，仅此而已。
 
 ### 审慎地提供 ADRs
 

@@ -45,7 +45,7 @@
 | spec template | spec 的章节模板 | ✅ 模板标题保留英文，见下 |
 | user story | 用户故事——"作为 <角色>，我想 <功能>，以便 <收益>" | ✅ 保留 |
 | ADR | Architecture Decision Record，架构决策记录 | ✅ 保留 |
-| CONTEXT.md / CONTEXT-MAP.md | 领域术语库 / 多上下文地图 | ✅ 保留 |
+| GLOSSARY.md / GLOSSARY-MAP.md | 领域术语库 / 多上下文地图（原 CONTEXT.md，上游 09-17 改名） | ✅ 保留 |
 | glossary | 术语表 | ✅ 保留 |
 | domain glossary | 项目领域术语库 | ✅ 保留 |
 | domain model | 领域模型 | ✅ 保留 |

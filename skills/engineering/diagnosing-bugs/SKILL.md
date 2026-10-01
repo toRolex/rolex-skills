@@ -7,7 +7,7 @@ description: 针对硬 bug 和 performance regression 的诊断循环。当用�
 
 针对硬 bug 的规范流程。只有在明确有理由时才跳过某个阶段。
 
-探索代码库时，阅读 `CONTEXT.md`（如果存在）以建立相关模块清晰的 mental model，并检查你正在改动的区域附近的 ADR。
+探索代码库时，阅读 `GLOSSARY.md`（如果存在）以建立相关模块清晰的 mental model，并检查你正在改动的区域附近的 ADR。
 
 ## 脱敏（Redact）
 

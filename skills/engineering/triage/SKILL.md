@@ -73,7 +73,7 @@ maintainer 调用 `/triage` 并用自然语言描述他们想要什么。解读�
 
 3. **验证声明。** 在进一步 grilling 之前，检查声明是否成立。对于 bug，按 reporter 的步骤复现。对于 PR，确认 diff 做了它声称的事情：检出它，运行相关测试或命令。报告发生了什么：验证通过（附代码路径）、失败、或细节不足（强烈的 `needs-info` 信号）。经过验证的确认能生成更强的 agent brief。
 
-4. **Grill（如果需要）。** 如果请求需要细化，调用 Skill 工具两次，分别传入 "grilling" 和 "domain-modeling"，一轮问题一轮问题地将其追问成形，同时锐化领域术语，并随着决策落地就地更新 `CONTEXT.md`/ADR。
+4. **Grill（如果需要）。** 如果请求需要细化，调用 Skill 工具两次，分别传入 "grilling" 和 "domain-modeling"，一轮问题一轮问题地将其追问成形，同时锐化领域术语，并随着决策落地就地更新 `GLOSSARY.md`/ADR。
 
 5. **应用结果：**
    - `ready-for-agent`：发布 agent brief 评论（[AGENT-BRIEF.md](AGENT-BRIEF.md)）。

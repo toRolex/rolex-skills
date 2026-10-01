@@ -7,7 +7,7 @@ description: 测试驱动开发（Test-Driven Development）。当用户希望�
 
 TDD 就是 red → green 循环。本 skill 是让这个循环产出值得保留的测试的参考指南：什么是好测试、测试放在哪里、有哪些 anti-patterns、以及循环的规则。每个部分在每个周期都适用：在循环开始前和进行中查阅它们，而不是之后。
 
-浏览代码库时，先读 `CONTEXT.md`（如果存在），让测试名称和 interface 词汇与项目的领域语言（domain language）一致，并尊重你正在接触的区域的 ADR。
+浏览代码库时，先读 `GLOSSARY.md`（如果存在），让测试名称和 interface 词汇与项目的领域语言（domain language）一致，并尊重你正在接触的区域的 ADR。
 
 ## 什么是好测试
 
