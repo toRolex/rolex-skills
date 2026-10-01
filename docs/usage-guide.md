@@ -12,7 +12,7 @@
 | **Main Chain** | 5 | `grill-with-docs` → `to-spec` → `to-tickets` → `implement` → `code-review` |
 | **On-ramps** | 3 | `wayfinder`, `triage`, `improve-codebase-architecture` |
 | **Standalone** | 6 | `prototype`, `diagnosing-bugs`, `research`, `resolving-merge-conflicts`, `domain-modeling`, `codebase-design` |
-| **Productivity** | 5 | `grilling`, `grill-me`, `handoff`, `teach`, `writing-great-skills` |
+| **Productivity** | 5 | `grilling`, `grill-me`, `handoff`, `teach-me`, `writing-great-skills` |
 | **Personal（原创）** | 4 | `afk-issue-loop`, `clean-branches`, `ask-advisor`, `vertical-slice-review` |
 | **Thariq（文章启发）** | 7 | `unknowns`, `blind-spot-pass`, `brainstorm`, `to-plan`, `pre-implement`, `to-pitch`, `quiz-me` |
 | **Misc（不推广）** | 4 | `safe-pull`, `git-flow-conventions`, `publish-release`, `qa-plan` |
@@ -93,7 +93,7 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 | `grilling` | `/grilling` 或自动 | **Primitive** | 拷问原语：一次一问的设计树访谈，被多个 skill 内部调用 |
 | `grill-me` | `/grill-me` | **User Frontend** | 无持久化文档的轻量拷问 |
 | `handoff` | `/handoff` | **Handoff** | 会话压缩：生成交接文档供新 Agent 接手 |
-| `teach` | `/teach` | **Learning** | 跨 session 的长期教学 workspace |
+| `teach-me` | `/teach-me` | **Learning** | 跨 session 的长期教学 workspace |
 | `writing-great-skills` | `/writing-great-skills` | **Reference** | 编写/编辑 Skill 的标准框架 |
 | `writing-for-agents` | `/writing-for-agents` 或自动 | **Reference** | 面向 agent 的文档写作：skill、AGENTS.md、CLAUDE.md |
 | `to-questionnaire` | `/to-questionnaire` | **Document** | 把无法独自回答的决策变成问卷，交给别人填写 |
@@ -203,7 +203,7 @@ Rolex 原创的个人 skill，与上游 mattpocock/skills 无关。
 | **快速验证想法** | `prototype` → 如果可行 → 进入主链路 |
 | **长会话交接** | `handoff` → 新会话读取 |
 | **不确定用哪个** | `ask-rolex` |
-| **学习新技术** | `teach` |
+| **学习新技术** | `teach-me` |
 
 ## 四、Git 规范
 

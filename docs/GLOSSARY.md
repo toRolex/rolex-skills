@@ -232,7 +232,7 @@
 | recommended answer | 推荐答案（问题模板字段） | ✅ 保留 |
 | frontier | 前提已定、现在可问的 decisions | ✅ 已收录 |
 
-### 教学（teach）
+### 教学（teach-me）
 
 | 英文术语（规范） | 定义 | 状态 |
 |---|---|---|
@@ -263,7 +263,7 @@
 
 - **写作家族术语未统一**：`writing-for-agents` 把整批定义性术语译成中文（context load→上下文负载、leading word→引导词、completion criterion→完成标准、legwork→苦功 等），而同一批术语在 `writing-great-skills/SKILL.md` 和 `SKILL-MECHANICS.md` 保留英文，且在英文 `GLOSSARY.md` 中有定义——需重译 `writing-for-agents` 对齐（已修复，见下方「2026-08 写作家族术语对齐」）。
 - **wait-what 误译**：上游 `ASD-STE100 Simplified Technical English` 被译成「《中文技术文档写作风格指南》」，应为「ASD-STE100 Simplified Technical English（简化技术英语）」；`ubiquitous language` 被译成「通用语言」，应改回英文。
-- **grilling / teach 术语保留良好**：design tree、rounds、lesson、mission、zone of proximal development、fluency/storage strength 等均已保留英文，无需修改。
+- **grilling / teach-me 术语保留良好**：design tree、rounds、lesson、mission、zone of proximal development、fluency/storage strength 等均已保留英文，无需修改。
 - **to-questionnaire** 的 `questionnaire`/`gap` 译中文（低风险，可改可不改）。
 
 ### 2026-08 写作家族术语对齐

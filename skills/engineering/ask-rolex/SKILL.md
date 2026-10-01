@@ -84,7 +84,7 @@ disable-model-invocation: true
 - **`/to-questionnaire`**：当挡住你的东西不在你脑子里、也不在代码库里，而是在**别人的**脑子里时，这个 skill 会写一份问卷给他们去填。它是 `/grill-me` 的反面：它不是就那个主题采访你，而是采访你关于**发送（send）**（发给谁、你需要拿回什么），并把问题对准那个缺口。拿回来的东西，是 `/grill-with-docs` 或 `/to-spec` 的素材。
 - **`/wizard`** 用于那些只有**人类**才能完成的步骤：开通基础设施、设置凭据或 CI secrets、在一个陌生的第三方 dashboard 里点来点去、运行一次性的迁移或切换。它生成一个交互式 bash 脚本，打开每个 URL、捕获每个值，并写进 `.env` 和 GitHub secrets，这样那套流程就不再是每次都需要你向 agent 重新解释的东西了。它是 model-invoked 的，所以 agent 一撞上只有你能通过的墙，就会伸手去够它。如果 agent 能自己做，它就应该自己做；这个 skill 是为真正有 human in the loop 的情况准备的。
 - **`/wait-what`** 是针对一条没能落地的消息的矫正。在对话中途、任何其他 skill 内部使用它，agent 会用你缺失的 context、用通俗易懂的语言、用 `CONTEXT.md` 的词汇，重新讲解它刚刚说的话。它是事后生效的；`/grill-with-docs` 是事前的治愈，因为早早约定好的共享语言，才正是阻止行话出现的东西。
-- **`/teach`**：跨多个 session 学习一个概念，把当前目录当作一个有状态的工作区。
+- **`/teach-me`**：跨多个 session 学习一个概念，把当前目录当作一个有状态的工作区。
 - **`/writing-for-agents`** 是编写 agent 消费的文档时的参考：skills、AGENTS.md、被指向的文档。
 - **`/writing-great-skills`**：编写和编辑 skill 的参考指南。
 - **`/afk-issue-loop [issue numbers]`**：在 `/to-tickets` 或 triage 后，需要无人值守批量交付时，建议用户手动调用。入口仅解析输入并启动独立本地脚本，报告 started、运行身份、日志和 stop；脚本通过 CLI 执行当前全部就绪票的固定批次、不补位，逐票独立审查，批末单 Merger 汇总关闭；剩余全 blocked 且无在途或可推进交付时报告并结束。确认启动后可结束发起会话，启动不等于交付。输入、Provider 配置与失败续做边界见 [执行规范](../../personal/afk-issue-loop/SKILL.md)。

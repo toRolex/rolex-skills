@@ -109,7 +109,7 @@ flowchart LR
 | [vertical-slice-review](skills/personal/vertical-slice-review/SKILL.md) | 审查 ticket 拆解方案是否符合 vertical slice 方法论：逐条判定是否贯穿 schema/API/UI/tests、能否独立 demo、大小能否放进一个 context window，读代码库验证、必要时重拆，并调用 strong-model-consultant 复核。 |
 | [grill-me](skills/productivity/grill-me/SKILL.md) | 一场无情的追问，用来打磨计划或设计。 |
 | [handoff](skills/productivity/handoff/SKILL.md) | 将当前对话压缩为 handoff 文档，供另一个 agent 接续。 |
-| [teach](skills/productivity/teach/SKILL.md) | 在教学工作区内教授用户一项新技能或概念。 |
+| [teach-me](skills/productivity/teach-me/SKILL.md) | 在教学工作区内教授用户一项新技能或概念。 |
 | [to-questionnaire](skills/productivity/to-questionnaire/SKILL.md) | 把一个你无法完全回答的决策，变成一个让其他人填写的问题单。 |
 | [wait-what](skills/productivity/wait-what/SKILL.md) | 停下。上一条消息没有说清楚：重新讲一遍。 |
 | [writing-great-skills](skills/productivity/writing-great-skills/SKILL.md) | 技能写作词汇与可预测流程原则。 |
