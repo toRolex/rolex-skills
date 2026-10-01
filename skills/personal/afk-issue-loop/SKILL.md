@@ -16,8 +16,9 @@ argument-hint: "[issue-number ...] [provider/model/target]"
 3. 用户指定目标传 `--target`，否则脚本选择已有 develop、其次 main。按下方「模型选择」确定顶层 `--provider`、`--model`、`--effort` 与（如有）按角色的 `--<role>-provider/-model/-effort`；项目验证要求可传 `--verify`。
 4. 从项目约定确定优先级标签，按高到低传 `--priority-labels`；没有约定就省略，全部同级按编号。本仓库目前没有现存项目优先级映射，不能把示例标签当约定。
 5. 不为正常恢复传 `--reuse`。脚本根据当前 GitHub、标准 `afk/issue-N` 分支、Worktrunk worktree 与 writer socket 事实自动分类：closed 跳过；唯一已有 worktree 原地恢复；只有分支时恢复同一分支 worktree；两者都没有才新建。writer 采用 liveness-first：只有明确检测到同一 worktree 的 AFK writer 仍在运行才使该票等待，stale socket、历史 PID 与不完整事件不阻止开工。`--reuse N` 仅保留显式归属兼容信息，不能绕过活跃写者、锁定、quarantine 或非标准现场边界。
+6. 启动前按 [github-api-rate-limits](../github-api-rate-limits/SKILL.md) 预检 REST bucket，估算下一批请求消耗并确认余量足够。
 
-完成条件：目标路径、固定输入及有效模型选择明确；所需 Node >=22、Git、Worktrunk、GitHub CLI、所选执行 CLI 与授权已准备。平台为 macOS/Linux；编排器用 Node 内置模块，Pi 自动选择还读取已安装 Pi 0.85.1 的纯目录/配置校验模块，不安装依赖；缺项或 Worktrunk hooks 审批由用户完成，不自动安装、绕过外层权限或传 `--yes`。
+完成条件：目标路径、固定输入及有效模型选择明确；所需 Node >=22、Git、Worktrunk、GitHub CLI、所选执行 CLI 与授权已准备；REST 预算已满足下一批请求消耗。平台为 macOS/Linux；编排器用 Node 内置模块，Pi 自动选择还读取已安装 Pi 0.85.1 的纯目录/配置校验模块，不安装依赖；缺项或 Worktrunk hooks 审批由用户完成，不自动安装、绕过外层权限或传 `--yes`。
 
 ### 模型选择
 

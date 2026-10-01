@@ -12,3 +12,4 @@ Rolex 原创的个人 skill——本仓库相比上游 mattpocock/skills 的差�
 ## Model-invoked
 
 - **[clean-branches](./clean-branches/SKILL.md)** — 清理已合并 Git 分支（本地 + 远程 + 残留 worktree）。
+- **[github-api-rate-limits](./github-api-rate-limits/SKILL.md)** — 在 gh CLI / GitHub API 的分页、循环、批量请求中遵守 REST 与 GraphQL 两条独立的 rate limit 预算。
