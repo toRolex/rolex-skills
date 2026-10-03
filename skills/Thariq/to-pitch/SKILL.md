@@ -14,5 +14,6 @@ disable-model-invocation: true
 1. 收集输入：prototype、spec、implementation-notes.md。其中 Deviations 是给专家看的关键部分。
 2. 开头放 demo（GIF 或截图），先让人看到东西在动。
 3. 按目的地格式化：Slack 消息、共享文档或 PR 描述。
+4. 分支：用户提到 remote、手机、Tailscale 时 → 读 [REMOTE.md](./REMOTE.md)，按其流程交付；否则到此为止。
 
-完成标准：粘贴即发。
+完成标准：普通路径 = 粘贴即发；remote 分享 = REMOTE.md 的完成标准。

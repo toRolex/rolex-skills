@@ -21,6 +21,16 @@ _Avoid_: 历史决策过程、探索踩坑、废弃尝试
 _Avoid_: 混入 docs/、无规则随处散落
 
 
+### to-pitch 交付
+
+**remote 分享**:
+to-pitch 的一条交付路径：单页 HTML 经本机 Tailscale 起服务，由手机直接访问。
+_Avoid_: 远程分享、手机版
+
+**普通路径**:
+to-pitch 的默认交付路径：按目的地格式化，粘贴即发。
+_Avoid_: 默认路径、标准路径
+
 ### afk-issue-loop 编排
 
 **启动者**:
