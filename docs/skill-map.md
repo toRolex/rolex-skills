@@ -134,6 +134,7 @@ flowchart TD
 | 缺背景事实 | [research](../skills/engineering/research/SKILL.md) | 背景 agent 调查 primary sources；带引用的文件作为 grill-with-docs 的输入。 |
 | 信息在别人脑子里 | [to-questionnaire](../skills/productivity/to-questionnaire/SKILL.md) | 发问卷；回收答案供 grill-with-docs 或 to-spec 使用。 |
 | 高影响多方案或关键权衡不明 | [ask-advisor](../skills/personal/ask-advisor/SKILL.md) | 强模型顾问辅助决策；拿到结论后继续原流程。 |
+| 阶段收尾，不确定接下来做什么 | [next-steps](../skills/personal/next-steps/SKILL.md) | 按当前会话给出最多三个可直接提交的后续 prompt，回复编号即选中执行；留在当前会话，不像 [handoff](../skills/productivity/handoff/SKILL.md) 转移 context。 |
 | 拆票或 triage 后，需要无人值守批量交付 | [afk-issue-loop](../skills/personal/afk-issue-loop/SKILL.md) | 用户手动启动独立脚本，处理就绪票；started 不等于交付完成，可结束发起会话。不是 implement-spec 的后置步骤。 |
 | 只有人能完成的凭据、设施或 dashboard 操作 | [wizard](../skills/engineering/wizard/SKILL.md) | 生成交互脚本，保留真正需要 human in the loop 的步骤。 |
 | 任意 skill 对话中没听懂一条消息 | [wait-what](../skills/productivity/wait-what/SKILL.md) | 用缺失 context 与项目词汇重新讲解。 |

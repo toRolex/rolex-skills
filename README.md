@@ -57,6 +57,7 @@ npx skills@latest add toRolex/rolex-skills
 - **[afk-issue-loop](skills/personal/afk-issue-loop/SKILL.md)** — 启动独立本地脚本，分批实现、审查、合并并关闭 GitHub Tickets。
 - **[ask-advisor](skills/personal/ask-advisor/SKILL.md)** — 显式把当前决策点交给强模型顾问（strong-model-consultant），获取决策建议。
 - **[vertical-slice-review](skills/personal/vertical-slice-review/SKILL.md)** — 审查 ticket 拆解方案是否符合 vertical slice 方法论，必要时重拆并请强模型复核。
+- **[next-steps](skills/personal/next-steps/SKILL.md)** — 显式调用时按当前会话上下文，给出最多三个可直接提交的后续 prompt。
 - **[unknowns](skills/Thariq/unknowns/SKILL.md)** — 按四个象限走一遍任务，把 unknowns map 交到用户手里。
 - **[to-plan](skills/Thariq/to-plan/SKILL.md)** — 写一份供审阅的实现计划：最可能变的决策置顶，机械性工作沉底。
 - **[to-pitch](skills/Thariq/to-pitch/SKILL.md)** — 打包 prototype、spec、notes 成争取 buy-in 的文档：explainer 加速理解，pitch 加速批准；用户提到 remote / 手机 / Tailscale 时，经 Tailscale 让手机直接访问。

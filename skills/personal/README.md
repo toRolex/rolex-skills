@@ -4,6 +4,7 @@ Rolex 原创的个人 skill——本仓库相比上游 mattpocock/skills 的差�
 
 ## User-invoked
 
+- **[next-steps](./next-steps/SKILL.md)** — 显式调用时按当前会话上下文，给出最多三个可直接提交的后续 prompt。
 - **[afk-issue-loop](./afk-issue-loop/SKILL.md)** — 启动独立本地脚本，分批实现、审查、合并并关闭 GitHub Tickets。
 - **[ask-advisor](./ask-advisor/SKILL.md)** — 显式把当前决策点交给强模型顾问（strong-model-consultant），获取决策建议。
 - **[vertical-slice-review](./vertical-slice-review/SKILL.md)** — 审查 ticket 拆解方案是否符合 vertical slice 方法论，必要时重拆并请强模型复核。

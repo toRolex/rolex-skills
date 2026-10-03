@@ -117,3 +117,4 @@ disable-model-invocation: true
 - **浏览器或网页任务**（搜索、读取 URL、交互、抓取、诊断）→ agent 用 Skill 工具加载 **`/browser-tools`**，由它选工具、交接与失败回退。它为 `/research` 等需要网页证据的工作提供工具路由，不取代调研流程。
 - **gh / GitHub API 请求** → 发请求前，agent 用 Skill 工具加载 **`/github-api-rate-limits`**，尤其分页、循环或批量调用，以及遇到 403/429、RATE_LIMITED 或 Retry-After 时。它管理 REST / GraphQL 独立预算与限流恢复，是 `/triage`、`/to-tickets`、PR 操作等使用 GitHub 时的护栏，不是新交付阶段。
 - **强模型顾问**：目标不清、高影响多方案、关键权衡不明时，建议用户手动调用 **`/ask-advisor`**，把当前决策点、约束和上下文交给强模型顾问；拿到建议后继续原来的澄清、规划或实现流程。这里的入口是 skill，而不是绕过它直接派顾问 Agent。
+- **下一步建议**：一个阶段收尾、对话看起来告一段落，或不确定接下来该做什么时，建议用户手动调用 **`/next-steps`**：它按当前会话上下文给出最多三个可直接提交的后续 prompt，回复编号即选中并继续执行。它留在当前会话内，只建议紧接着的 prompt；要把对话转移到新的 agent 或新 context，用 **`/handoff`**。
