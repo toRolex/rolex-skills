@@ -6,15 +6,21 @@ disable-model-invocation: true
 
 # Ask Rolex
 
-你不必记住每个 skill，问就行。
+你不必记住每个 skill，问 **`/ask-rolex`** 就行：根据当前场景选入口和下一步。
 
-一个 **flow** 是一条贯穿多个 skill 的路径。大部分路径沿着一条 **main flow** 走，两条 **on-ramp** 汇入其中。其余的都是 standalone，或者是一个在底层运行的词汇层。
+**调用边界**：下文 `/skill` 是导航标签。user-invoked 入口只向用户建议手动调用，不由 agent 自动启动；model-invoked skill 可由 agent 用 Skill 工具加载，每次传入一个名称。以各 skill 的 `disable-model-invocation` flag 为准。
+
+需要查看完整的分阶段流程图、辅助场景和 skill 链接时，读 [Skill 使用地图](../../../docs/skill-map.md)；这里负责路由判断，不重复维护大段图。
+
+一个 **flow** 是一条贯穿多个 skill 的路径。大部分路径沿着一条 **main flow** 走，几条 **on-ramp** 汇入其中。其余的都是 standalone，或者是一个在底层运行的词汇层。
 
 ## main flow：想法 → 交付
 
 大多数工作走的路线。你有一个想法，想把它做出来。
 
-0. **分支：任务在陌生地带吗？** 如果它落在 codebase 里你没碰过的区域，或者一个你不熟悉的领域（一种没接触过的技术、一类没做过的设计），先跑一次 **`/blind-spot-pass`**（user-invoked，手动触发）：让 agent 把你的 **unknown unknowns** 翻出来讲清楚，再带着它们进入步骤 1。熟悉的领域直接跳过——它的价值与你的盲区成正比。
+- **整段任务模糊，不知道缺什么、想要什么或哪些决策待定？** 建议用户手动调用 **`/unknowns`**：它按四象限编排盲点扫描、候选探索（需要实物时做 prototype）和访谈收敛，交付 unknowns map，而不是直接实现。地图交给用户后，按需继续 `/grill-with-docs`，或把已确认的决定带入 `/to-plan`、`/to-spec`；构建是另一件任务。这是完整澄清入口，下面两个单项分支是替代入口，不是再跑一遍的必经关卡。
+
+0. **分支：只需扫描陌生地带的盲点吗？** 如果它落在 codebase 里你没碰过的区域，或者一个你不熟悉的领域（一种没接触过的技术、一类没做过的设计），先用 **`/blind-spot-pass`**（model-invoked，agent 可用 Skill 工具加载）：把你的 **unknown unknowns** 翻出来讲清楚，再带着发现进入候选探索或步骤 1。熟悉的领域直接跳过——它的价值与你的盲区成正比。
 0.5. **分支：判断标准是看到才认得的吗？** 如果你不知道有哪些可能，或者标准说不出来但看到能认出（审美、口味、"就要这个感觉"），先 **`/brainstorm`** 发散：列举介入点，或产出多个截然不同的方向交给 prototype 供你反应。grilling 中途发现剩下的决策要看到实物才能定时，也会转手调用它。
 1. **`/grill-with-docs`** 通过 interview 打磨想法。只要你在**工作目录**里工作，就从这里开始：它是有状态的，会把学到的东西保留在 `GLOSSARY.md` 和 ADR 中。（没有工作目录？改用 `/grill-me`，见 Standalone。两者运行同一个 `/grilling` 原语；`grill-with-docs` 是会留下书面痕迹的那个，所以只要有仓库可以留下痕迹，它就是两者中更好的那个。）
 2. **分支：你能在对话中解决每个问题吗？** 如果一个问题需要可运行的答案（状态、业务逻辑、一个你必须亲眼看到的 UI），就绕行一个 prototype，用 **`/handoff`** 双向桥接（prototype 住在自己的目录里，这正是 `/handoff` 的用途；见 Phase boundaries）：
@@ -26,9 +32,17 @@ disable-model-invocation: true
      - 对每个 ticket 跑 **`/implement`**，**每两个之间 `/clear` context**。在本地 tracker 上，就是 `.scratch/<feature>/issues/` 下每个 ticket 一个文件，按 blocker 优先手工推进；在真实的 tracker 上，这些 edges 变成原生的阻塞链接，所以任何 blocker 都已完成的 ticket 都可以被拿走。每个 ticket 都是自包含的，所以上一个 ticket 的 context 是可以随手丢弃的。
      - 用 **`/implement-spec`** 一次跑完整个 spec。它把 tickets 读成一张 **task graph**，在就绪的 **frontier** 上并行跑 implementer subagent，把所有东西落到一个 **integration branch** 上。当你更想编排整个构建、而不是亲自驱动每个 ticket 时，用它。
 
+   **拆票后想复核切片边界？** 在 `/to-tickets` 或 `/triage` 得到 agent-ready tickets 后、推进前，建议用户手动调用 **`/vertical-slice-review`**。它逐票核验是否贯穿 schema/API/UI/tests、能否独立 demo、是否能放进一个 context window，并核对 blocking edges；必要时重拆并由强模型顾问复核。确认后的方案再交 `/implement`、`/implement-spec` 或 `/afk-issue-loop`，不是交付后的代码 review。
+
+   **开始多步骤交付时**，agent 可用 Skill 工具加载 **`/pre-implement`**：为当前任务新建 `.agents/notes/<task-slug>-implementation-notes.md`，随实现记录决策与原因；偏离 plan/spec 时选保守方案并记录 Deviations。它伴随 `/implement` 或 `/implement-spec` 的交付，不替代 spec、tickets 或测试。单行为不需要完整 spec 时，可在同一 context 中建议用户手动调用 `/implement` 就地完成。
+
    无论走哪条路，代码都是靠 **`/tdd`**（一次一个 red → green 切片）构建、用 **`/code-review`**（对 diff 做一次双轴 review：Standards + Spec）收尾的。`/implement` 对每个 ticket 都运行这两者；`/implement-spec` 的每个 implementer 各自驱动 `/tdd`，最后在 integration branch 上跑一次 `/code-review`。当你只想以 test-first 的方式构建一个具体行为、不需要完整 spec 时，单独使用 **`/tdd`**；当你想针对某个 fixed point review 一个 branch 或 PR 时，单独使用 **`/code-review`**。
 
    当工作以 pull request 的形式提交时，**`/pr`** 负责打磨 body：展示这次改动的最小可视化（diagram、diff-sketch 或文件树）、证明它可用的 before/after 证据，以及单向/双向门（one-way/two-way door）判断。它是 model-invoked 的，所以 agent 每次写 PR 时都会伸手去够它。
+
+   **实现完成、想确认自己真正理解变更再合并？** 建议用户手动调用 **`/quiz-me`**：先出 HTML 报告，讲清背景、直觉、改动和依赖的既有 code path，再一次一题测验。只有用户触发后，满分才成为 merge 门禁；它不替代 `/code-review`，也不是所有交付的强制步骤。
+
+   **成果需要 reviewer 或专家的 buy-in／批准？** 建议用户手动调用 **`/to-pitch`**，把 prototype、spec 与 implementation notes（尤其 Deviations）打包成可直接分享的文档：demo 在前，explainer 补背景，pitch 说明未知与失败点如何处置。它可用于 PR 描述等目的地，但与 `/pr` 的文案打磨职责不同，也不依赖 `/retro`。
 
 4. **`/retro`** 闭环。一次构建之后——尤其是走得磕磕绊绰的那次——它回看这个 session，针对 agent 的**环境**而不是代码提出改进：navigation 指针、自动化检查、`/code-review` 强制执行的 coding standards、steering 文件、工具链。机械性错误变成确定性检查；判断性取舍变成 coding standards。下一次构建就从一个更好的环境开始。
 
@@ -87,25 +101,19 @@ disable-model-invocation: true
 - **`/research`**：把阅读的跑腿活委托给一个 **background agent**：它对照 **primary sources** 调查一个问题，然后在仓库里留下一份带引用的 Markdown 文件。它阅读的时候你继续干活。它产出的文件，是要带_进_ main flow、供 `/grill-with-docs` 使用的东西，因为 research 喂养思考，而不是取代思考。
 - **`/to-questionnaire`**：当挡住你的东西不在你脑子里、也不在代码库里，而是在**别人的**脑子里时，这个 skill 会写一份问卷给他们去填。它是 `/grill-me` 的反面：它不是就那个主题采访你，而是采访你关于**发送（send）**（发给谁、你需要拿回什么），并把问题对准那个缺口。拿回来的东西，是 `/grill-with-docs` 或 `/to-spec` 的素材。
 - **`/wizard`** 用于那些只有**人类**才能完成的步骤：开通基础设施、设置凭据或 CI secrets、在一个陌生的第三方 dashboard 里点来点去、运行一次性的迁移或切换。它生成一个交互式 bash 脚本，打开每个 URL、捕获每个值，并写进 `.env` 和 GitHub secrets，这样那套流程就不再是每次都需要你向 agent 重新解释的东西了。它是 model-invoked 的，所以 agent 一撞上只有你能通过的墙，就会伸手去够它。如果 agent 能自己做，它就应该自己做；这个 skill 是为真正有 human in the loop 的情况准备的。
-- **`/wait-what`** 是针对一条没能落地的消息的矫正。在对话中途、任何其他 skill 内部使用它，agent 会用你缺失的 context、用通俗易懂的语言、用 `GLOSSARY.md` 的词汇，重新讲解它刚刚说的话。它是事后生效的；`/grill-with-docs` 是事前的治愈，因为早早约定好的共享语言，才正是阻止行话出现的东西。
+- **`/wait-what`** 是针对一条没能落地的消息的矫正。对话中途、任何其他 skill 里没听懂时，建议用户手动调用，agent 会用你缺失的 context、用通俗易懂的语言、用 `GLOSSARY.md` 的词汇，重新讲解它刚刚说的话。它是事后生效的；`/grill-with-docs` 是事前的治愈，因为早早约定好的共享语言，才正是阻止行话出现的东西。
 - **`/teach-me`**：跨多个 session 学习一个概念，把当前目录当作一个有状态的工作区。
 - **`/writing-for-agents`** 是编写 agent 消费的文档时的参考：skills、AGENTS.md、被指向的文档。
-- **`/writing-great-skills`**：编写和编辑 skill 的参考指南。
+- **`/writing-great-skills`**：编写和编辑 skill 时，建议用户手动调用的参考指南；agent 需要自主到达文档写作纪律时，用 model-invoked 的 `/writing-for-agents`。
 - **`/afk-issue-loop [issue numbers]`**：在 `/to-tickets` 或 triage 后，需要无人值守批量交付时，建议用户手动调用。入口仅解析输入并启动独立本地脚本，报告 started、运行身份、日志和 stop；脚本通过 CLI 执行当前全部就绪票的固定批次、不补位，逐票独立审查，批末单 Merger 汇总关闭；剩余全 blocked 且无在途或可推进交付时报告并结束。确认启动后可结束发起会话，启动不等于交付。输入、Provider 配置与失败续做边界见 [执行规范](../../personal/afk-issue-loop/SKILL.md)。
-- **`/qa-plan`**：从最近 commit 生成 step-by-step QA 测试计划，保存为 GitHub issue。
-- **`/clean-branches`**：清理本地和远程已合并的 Git 分支。
-- **`/git-flow-conventions`**：Git Flow 分支管理与提交规范指南。
-- **`/publish-release`**：从 develop 分支发版。
-- **`/safe-pull`**：安全 git pull + rebase 工作流。
+- **`/clean-branches`**：清理本地和远程已合并的 Git 分支；model-invoked，agent 可加载。用于合并后的 Git 运维，不是 `/retro` 的产物。
 
 ## 前置条件
 
-**`/setup-rolex-skills`**：在第一个工程 flow 之前运行，配置其他 skill 所假定的 issue tracker、triage 标签和文档布局。自定义 issue tracker 也能用。
+**`/setup-rolex-skills`**：在第一个工程 flow 之前，建议用户手动调用，配置其他 skill 所假定的 issue tracker、triage 标签和文档布局。自定义 issue tracker 也能用。
 
-## Rolex 专属补充
+## 跨流程辅助
 
-这些是本仓库相比 matt pocock skills 的差异化内容，原创 skill 位于 `skills/personal/`：
-
-- **6 个原创技能**：覆盖 Git 工作流（`/safe-pull`、`/clean-branches`、`/git-flow-conventions`、`/publish-release`）、AFK 批量处理（`/afk-issue-loop`）、QA 计划（`/qa-plan`）。
-- **浏览器工具**：每次会话首次使用浏览器/搜索工具前必须先 `Skill("browser-tools")`，由它路由到 ego-browser / OpenCLI / firecrawl / anysearch / CloakBrowser。`WebSearch` 有 bug，走其他搜索途径。
-- **强模型顾问**：目标不清、高影响多方案、关键权衡不明时，调用 `Agent(subagent_type="strong-model-consultant")`，顾问返回决策后再继续执行。
+- **浏览器或网页任务**（搜索、读取 URL、交互、抓取、诊断）→ agent 用 Skill 工具加载 **`/browser-tools`**，由它选工具、交接与失败回退。它为 `/research` 等需要网页证据的工作提供工具路由，不取代调研流程。
+- **gh / GitHub API 请求** → 发请求前，agent 用 Skill 工具加载 **`/github-api-rate-limits`**，尤其分页、循环或批量调用，以及遇到 403/429、RATE_LIMITED 或 Retry-After 时。它管理 REST / GraphQL 独立预算与限流恢复，是 `/triage`、`/to-tickets`、PR 操作等使用 GitHub 时的护栏，不是新交付阶段。
+- **强模型顾问**：目标不清、高影响多方案、关键权衡不明时，建议用户手动调用 **`/ask-advisor`**，把当前决策点、约束和上下文交给强模型顾问；拿到建议后继续原来的澄清、规划或实现流程。这里的入口是 skill，而不是绕过它直接派顾问 Agent。
