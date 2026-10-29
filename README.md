@@ -1,6 +1,6 @@
 # Rolex Skills
 
-我在用的 AI agent skill 合集，已推广 41 个：一部分改编自 [mattpocock/skills](https://github.com/mattpocock/skills)，一部分受 [Thariq 的 quadrant walk 方法](https://x.com/trq212/status/2073100352921215386) 启发。
+我在用的 AI agent skill 合集，已推广 43 个：一部分改编自 [mattpocock/skills](https://github.com/mattpocock/skills)，一部分受 [Thariq 的 quadrant walk 方法](https://x.com/trq212/status/2073100352921215386) 启发。
 
 ## 快速开始
 
@@ -20,6 +20,7 @@ npx skills@latest add toRolex/rolex-skills
 
 | Skill | 同时安装 |
 |---|---|
+| `to-goal` | `writing-for-agents` |
 | `grill-me` | `grilling` |
 | `grill-with-docs` | `grilling` |
 | `triage` | `grilling` |
@@ -65,6 +66,7 @@ npx skills@latest add toRolex/rolex-skills
 
 ## Model-invoked
 
+- **[to-goal](skills/personal/to-goal/SKILL.md)**：生成包含终态、证明、不变量与 turn 上限的目标执行 prompt，先激活 writing-for-agents。
 - **[prototype](skills/engineering/prototype/SKILL.md)**：构建一次性原型来回答设计问题。
 - **[diagnosing-bugs](skills/engineering/diagnosing-bugs/SKILL.md)**：困难 bug 的诊断循环：复现→最小化→假设→插桩→修复→回归测试。
 - **[research](skills/engineering/research/SKILL.md)**：针对高可信度一手资料调查问题，产出带引用的 Markdown 文件。
@@ -83,7 +85,7 @@ npx skills@latest add toRolex/rolex-skills
 - **[pre-implement](skills/Thariq/pre-implement/SKILL.md)** — 动手实现前先调用：维护 implementation notes，偏离 plan/spec 时记入 Deviations 继续。
 - **[brainstorm](skills/Thariq/brainstorm/SKILL.md)** — 在充满 unknown knowns 的领域发散：列举介入点或产出多个设计方向供用户反应。
 
-另有 4 个保留但不推广的 skill，见 [skills/misc/](skills/misc/)。仓库里的 `SKILL.md` 共 45 个。
+另有 4 个保留但不推广的 skill，见 [skills/misc/](skills/misc/)。仓库里的 `SKILL.md` 共 47 个。
 ## 协议
 
 MIT，见 [LICENSE](LICENSE)。

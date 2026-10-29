@@ -93,6 +93,7 @@ disable-model-invocation: true
 
 ## Standalone
 
+- **需要一份有边界、可验收的目标执行 prompt？** 用 [to-goal](../../personal/to-goal/SKILL.md)：先激活 `writing-for-agents`，再生成终态、证明、不变量与 turn 上限四项。它只起草 prompt，不启动目标任务，也不替代 spec 或 tickets。
 完全脱离 main flow。
 
 - **`/grill-me`**：和 `/grill-with-docs` 同样不留情面的 interview，但**无状态**：它不在本地保存任何东西，也不构建 `GLOSSARY.md`。当你**不在工作目录里**工作时使用它（打磨一份计划、一个设计、一段文字，任何底下没有 repo 的东西）。如果你在工作目录里，就改用 `/grill-with-docs`：它运行同样的 interview 并留下书面痕迹，所以严格来说它是更好的那个。
