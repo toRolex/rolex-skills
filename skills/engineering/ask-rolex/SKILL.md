@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 **调用边界**：下文 `/skill` 是导航标签。user-invoked 入口只向用户建议手动调用，不由 agent 自动启动；model-invoked skill 可由 agent 用 Skill 工具加载，每次传入一个名称。以各 skill 的 `disable-model-invocation` flag 为准。
 
-需要查看完整的分阶段流程图、辅助场景和 skill 链接时，读 [Skill 使用地图](../../../docs/skill-map.md)；这里负责路由判断，不重复维护大段图。
+需要查看完整的分阶段流程图、辅助场景和 skill 链接时，读 [Skill 使用地图](../../../docs/skill-map.md)；这里负责路由判断，不重复维护大段图。**在说明某个 skill 的作用、给出建议或建议跳过它的步骤前，先读该 skill 的 `SKILL.md` 原文**；这里的摘要和使用地图只供导航，不能代替权威说明。
 
 一个 **flow** 是一条贯穿多个 skill 的路径。大部分路径沿着一条 **main flow** 走，几条 **on-ramp** 汇入其中。其余的都是 standalone，或者是一个在底层运行的词汇层。
 
@@ -60,7 +60,7 @@ disable-model-invocation: true
 
   triage 只用于**不是你创建的** issue：bug 报告、外部进来的功能请求、任何原始到达的东西。`/to-tickets` 产出的 tickets 已经是 agent-ready 的，所以**不要对它们做 triage**。
 
-- **有东西坏了** → **`/diagnosing-bugs`**。用于那些难啃的：第一眼看不出来的 bug、间歇性的 flake、在两个已知良好状态之间悄悄溜进来的 regression。在建立起**紧密的 feedback loop**（一条已经在这_个_ bug 上变红的命令）之前，它拒绝空想，然后用一条 regression test 修复。当真正的发现是没有好的 seam 能把 bug 锁住时，它的 post-mortem 会交接给 **`/improve-codebase-architecture`**。
+- **有东西坏了** → **`/diagnosing-bugs`**。用于那些难啃的：第一眼看不出来的 bug、间歇性的 flake、在两个已知良好状态之间悄悄溜进来的 regression。在建立起**紧密的 feedback loop**（一条已经在这_个_ bug 上变红的命令）之前，它拒绝空想，然后用一条 regression test 修复。修复后，在同一 session 运行 **`/retro`**，找出什么能预防这个 bug；如果发现没有好的 seam 能把 bug 锁住，再交接给 **`/improve-codebase-architecture`**。
 
 - **一个巨大而模糊（foggy）的工程量：绿地项目，或一个超大功能构建，一个 session 装不下** → **`/wayfinder`**，这是这里认知负担最重的 flow。当从这里到 destination 之间的路还看不见时，它会在 issue tracker 上绘出一张由 **decision tickets** 组成的**共享 map**，并一次一个地解决它们，产出的是 **decisions，而不是 deliverables**，直到 fog 被推回去、路线清晰。**`/grill-with-docs`** 打磨的是你能在一个 session 里握住的想法，wayfinder 针对的则是你握不住的那种，而且它更慢、更密，所以只把它留给那种情况，绝不要用于一个范围清晰的功能。
 

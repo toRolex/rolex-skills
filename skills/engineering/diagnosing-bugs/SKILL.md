@@ -122,7 +122,7 @@ description: 针对硬 bug 和 performance regression 的诊断循环。当用�
 如果存在正确的 seam：
 
 1. 把已 minimise（最小化）的 repro 变成那个 seam 上的失败测试。
-2. 看着它失败。
+2. 看着它失败。若你通过修改代码或 fixture 人为制造 red，先将其与 pristine 副本做 diff，确认 mutation 确实生效后再信任这个失败信号。
 3. 应用修复。
 4. 看着它通过。
 5. 针对原始的（未 minimise 的）场景重新运行阶段 1 的 feedback loop。
