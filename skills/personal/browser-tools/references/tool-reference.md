@@ -8,48 +8,21 @@
 |------|------------------|------|
 | **ego-browser** | `Skill("ego-browser")` | 基于用户 Chrome 进程的 Node.js CLI，task space 隔离；`cdp()` 直连 CDP 任意 domain |
 | **CloakBrowser** | `~/.agent-venv/bin/python` | 全局 agent venv，所有 agent 共用；安装见 [cloakbrowser.md](cloakbrowser.md) 安装节 |
-| **OpenCLI** | `opencli browser <session>` | Chrome 扩展桥接；扩展需先装：`chrome://extensions` → 开发者模式 → 加载已解压。桥接型命令需先 bind（见下方 bind-first）；`[api]` adapter 无需 |
+| **OpenCLI** | `opencli browser <session>` | Chrome 扩展桥接；生命周期与会话操作遵其当前 skill 与 references/browser.md；`[api]` adapter 无需浏览器 |
 | **firecrawl** | `firecrawl` | 托管网页数据服务（非本地浏览器）。首次使用先 `firecrawl --status` 验证 |
 | **anysearch** | `Skill('anysearch')` | 实时搜索 API（非浏览器）。CLI 自动加载 skill 目录 `.env`（`ANYSEARCH_API_KEY`），无 key 匿名可用（限流更低）；垂直域覆盖金融 / 学术 / 健康 / 代码 / 法律等 |
 
 ## ego-browser
 
-**加载**：`Skill("ego-browser")` — 完整 API / helper / task space 在其自身 skill，此处只列要点。
+**加载**：`Skill("ego-browser")` — 完整 API / 命令 / task space 规范以其自身 skill 及其安装版本手册为准，此处不缓存具体 helper 或 finish 签名。
 
-```bash
-# 起始（当前 API；同一目标的多轮 heredoc 必须复用同一 task）
-const task = await taskSpace('短名')
-# 操作：snapshotText / click / fill / js 均为 helper
-# CDP 直连（诊断、任意 CDP domain）：page 域命令 page.cdp()，Target/Browser 域命令 task.cdp()
-await page.cdp('Network.enable')
-await page.cdp('Network.getResponseBody', { requestId })
-# 收尾：finish 只调一次
-await task.finish({ keep: [] })
-```
-
-**独占能力**：继承用户登录态、共享 Chrome 进程（低内存）、`@N` ref 跨 snapshot 稳定、handoff 交还控制权、`cdp()` 直连协议层（性能/网络/控制台/内存诊断都走这里）
+**核心能力**：继承用户登录态、共享 Chrome 进程、`cdp()` 直连协议层排查、handoff 交还控制权。同一目标复用单 space / 多 page。
 
 ## OpenCLI
 
 **加载**：`Skill("opencli")`（总入口；browser/adapter/autofix 是其 references/ 披露文件）
 
-**bind-first（桥接型命令的唯一操作来源）**：opencli 的桥接型命令（需浏览器的，含 google / brave / duckduckgo 的 search）走 Chrome 扩展桥接；浏览器没连就报 `BROWSER_CONNECT`，命令全废。`[api]` adapter 直接调 HTTP，不需要 bind。opencli 自己不会启动 Chrome，桥接的是用户日常 Chrome（Browser Bridge 扩展已装在默认 profile），用 macOS `open` 命令拉起：
-
-```bash
-# 1. 拉起用户日常 Chrome 并加载页面（默认 profile，扩展、登录态全在；Chrome 已在运行则只是新开标签页）
-open -a "Google Chrome" "https://www.google.com"
-
-# 2. 等 Chrome 起来后绑定当前标签页
-sleep 2
-opencli browser default bind
-
-# 3. 之后 opencli 命令全部可用
-opencli google search "sites like namethatui" -f md
-```
-
-检查条件：`opencli browser default bind` 返回当前页 url + title（无 `BROWSER_CONNECT` 报错）即算已 bind。绑定后本会话内持续有效。
-
-**协议差异**：OpenCLI 通过 Chrome 扩展桥接，**不走 CDP `Runtime.enable()`**。对检测 CDP 调试域的站点（如 Boss直聘），OpenCLI 的协议面比直连 CDP 更安全。
+**浏览器连接与会话生命周期**：opencli 的桥接型命令走扩展桥接，`[api]` adapter 直接调 HTTP。会话启动、标签页绑定、session 隔离及释放操作直接交接至其当前 skill 及 references/browser.md（或加载 `Skill("opencli")` 查阅），不在此维护固定启动脚本或绝对协议断言。
 
 ### 查找已有 adapter
 

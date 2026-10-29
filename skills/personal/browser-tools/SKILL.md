@@ -1,6 +1,6 @@
 ---
 name: browser-tools
-description: 浏览器与网页任务的路由器：按任务把工作交给 ego-browser / OpenCLI / firecrawl / anysearch / CloakBrowser 之一。当需要打开或操作网页（点击/填表/截图/登录态操作）、网页搜索或深度调研、读取 URL / 批量抓取 / 整站抓取 / 监控页面变化、访问反爬站点（验证码/挑战页/被拦截）、页面性能/网络/控制台/内存诊断，web scraping / browser automation / deep research 等英文表达，或抓取/搜索工具报错需要回退时使用。
+description: 浏览器与网页任务的路由器：按任务把工作交给 ego-browser / OpenCLI / firecrawl / anysearch / CloakBrowser / 宿主 T3 preview。当需要打开或操作网页（点击/填表/截图/登录态操作）、网页搜索或深度调研、读取 URL / 批量抓取 / 整站抓取 / 监控页面变化、访问反爬站点（验证码/挑战页/被拦截）、页面性能/网络/控制台/内存诊断，web scraping / browser automation / deep research 等英文表达，或抓取/搜索工具报错需要回退时使用。
 ---
 
 # 浏览器与网页任务路由
@@ -14,16 +14,18 @@ description: 浏览器与网页任务的路由器：按任务把工作交给 ego
 | **firecrawl** | 深度抓取 —— 全文 markdown、整站批量、监控（托管服务） |
 | **ego-browser** | 本地登录态操作 + CDP 直连诊断 |
 | **CloakBrowser** | 反爬穿透（指纹消除） |
+| **T3 preview** | 当前宿主中的本地 web app 临时交互、截图与视觉验收 |
 
 ## 第一步：硬约束前置
 
-以下约束在分类之前裁决，命中即落定，分类树无权覆盖：
+以下约束均须核对，分类树不得覆盖；工具指定不免除隐私与操作授权约束：
 
 1. **用户指定了工具** → 用指定工具。
-2. **需本地登录态或涉及隐私内容** → 在 ego-browser 与 OpenCLI 本地桥中选择，托管服务（firecrawl / anysearch）退出候选。
+2. **需本地登录态或涉及隐私内容** → 在 ego-browser、OpenCLI 本地桥或当前宿主支持的本地工具中选择，托管服务（firecrawl / anysearch）退出候选；T3 preview 本身不具备用户个人浏览器登录态，不作为本地登录态替代。
 3. **敏感操作**（购买 / 发布 / 删除 / 权限修改 / 私密数据外发）→ 先向用户确认再执行。用户已明确授权的，直接执行。
+4. **禁止隐式回退到系统 Chrome**：自写浏览器脚本不得将系统 Chrome 作为隐式回退；仅在任务明确需要该浏览器时显式选择。
 
-完成条件：三条约束逐一核对过，命中的那条已落定，未命中的进入第二步。
+完成条件：四条均已核对，适用约束均已满足；工具未落定时进入第二步。
 
 ## 第二步：adapter gate（条件式）
 
@@ -39,7 +41,7 @@ description: 浏览器与网页任务的路由器：按任务把工作交给 ego
 
 完成条件：已有 adapter 目录缓存；命中判定同时核对了「子命令覆盖需求」和「任务形态匹配」；「无命中」与「opencli 不可用」已区分开。
 
-命中 OpenCLI 的**桥接型命令**需先 bind（拉起 Chrome + 绑定标签页，操作序列见 [references/tool-reference.md](references/tool-reference.md) 的 OpenCLI 节）；`[api]` adapter 直接调 HTTP，无需此步。
+命中 OpenCLI 的**桥接型命令**按其当前 skill 及 [references/tool-reference.md](references/tool-reference.md) 指针连接浏览器；`[api]` adapter 直接调 HTTP，无需此步。
 
 ## 第三步：按任务形态分类
 
@@ -59,7 +61,7 @@ description: 浏览器与网页任务的路由器：按任务把工作交给 ego
 ├─ 快速拿结果 → Skill("anysearch") search，结果够用即回复
 ├─ 独立多条搜索并行 → Skill("anysearch") batch_search
 ├─ 深入调研（多页面并行 / 跨页探索 / 追踪链接 / 上下文比对）
-│  → Skill("ego-browser") 多开 task space（默认主场），细节见 references/ego-browser.md
+│  → Skill("ego-browser")（默认主场，按其安装指南复用单 space / 多 page），细节见 references/ego-browser.md
 ├─ 主要要大量公开全文 / 批量抓取 / 结构化数据
 │  → Skill("firecrawl") search --scrape / crawl
 └─ 混合 → ego-browser 主导探索 + firecrawl 补批量
@@ -67,16 +69,18 @@ description: 浏览器与网页任务的路由器：按任务把工作交给 ego
 URL 读取
 ├─ 静态文章轻读 → Skill("anysearch") extract —— 先轻后重：从最轻的工具试起，
 │   技术细节（是否 JS 渲染等）先试再说，不拿问题挡在用户前面
+├─ 本地 web app 临时交互 / 截图 / 视觉验收 → 沿下方「页面交互」本地分支
 ├─ JS 渲染 / PDF / 结构化提取 / 整站 / 监控 → Skill("firecrawl")
 └─ 需交互 / 截图 / 可视验证 / 登录态 → Skill("ego-browser")
 
 页面交互
+├─ 本地 web app 临时交互 / 截图 / 视觉验收
+│  → 宿主提供 T3 preview 且目标可达、控制权允许时使用；工具缺席或环境不可达时选 ego-browser，仍受前置约束限制
 ├─ 交互为了拿数据 → Skill("firecrawl") interact
 ├─ 交互本身是任务 / 需可视验证 / 用户接管 → Skill("ego-browser")
 └─ 固定操作且 adapter gate 已命中 → OpenCLI（沿用 gate 结果）
 
-诊断（性能 / 网络 / 控制台 / 内存）→ Skill("ego-browser") cdp()，无替代；
-   CDP domain 用法见 references/ego-browser.md
+诊断（性能 / 网络 / 控制台 / 内存）→ Skill("ego-browser") cdp()（CDP 直连诊断，域用法见 references/ego-browser.md）
 ```
 
 完成条件：已按需求形态命中唯一叶子，该叶子的 skill 与 reference 已按「交接」节处理。
@@ -93,7 +97,7 @@ URL 读取
 
 ## 交接
 
-每片叶子标注 skill，reference 按工具从「参考文档表」取。执行交接：
+T3 preview 直接遵循当前宿主工具定义，无独立 skill；其余叶子按下列方式交接，reference 从文末表取：
 
 1. **skill 已注册** → 加载：`Skill("opencli")` / `Skill("ego-browser")` / `Skill("firecrawl")` / `Skill("anysearch")`。
 2. **未注册但其 SKILL.md 文件可读** → 直接读该文件。
@@ -115,7 +119,7 @@ CloakBrowser 无独立 skill，唯一入口是 references/cloakbrowser.md。
   - 认证失败 → 先配 key / 走登录，这是配置问题不是工具问题
   - 网络故障 → 先健康检查，再决定是否换叶
 - 写操作回退前先确认是否已生效；发帖 / 下单类操作禁止盲重放。
-- 用户接管（"user is controlling" / 人工介入）是正常交接：交还控制权，等待用户。
+- 用户接管（"user is controlling" / 人工介入）是正常交接：交还控制权，等待用户，不借换工具绕过。
 
 额度耗尽时的换叶方向：
 
@@ -125,15 +129,15 @@ CloakBrowser 无独立 skill，唯一入口是 references/cloakbrowser.md。
 | firecrawl `search --scrape` 失败 | anysearch search 拿条目 → 目标 URL 交 ego-browser 读全文 |
 | firecrawl `scrape` 失败 | 静态页 anysearch extract；JS 渲染 / 登录态 ego-browser |
 | firecrawl `monitor` 不可用 | ego-browser task space 打开比对（仅本次）；持续监控与用户确认调度方式后另建 |
-| anysearch 额度尽 | firecrawl `search --scrape`；或 opencli 搜索 adapter（bind 后） |
+| anysearch 额度尽 | firecrawl `search --scrape`；或 opencli 搜索 adapter |
 | ego-browser 连接故障 | 按 ego-browser skill 自身的恢复文档恢复，不换工具 |
 
 ## 参考文档
 
 | 文件 | 内容 |
 | ------ | ------ |
-| [references/tool-reference.md](references/tool-reference.md) | 五工具的完整 API、命令表、环境入口、OpenCLI bind 操作、独占能力对照 |
-| [references/ego-browser.md](references/ego-browser.md) | ego-browser 能力画像、诊断 cdp 示例、task space 速记、与 CloakBrowser 互补、委派语法 |
+| [references/tool-reference.md](references/tool-reference.md) | 工具环境入口、命令表、OpenCLI 与 ego-browser 指针、独占能力对照 |
+| [references/ego-browser.md](references/ego-browser.md) | ego-browser 能力画像、诊断 cdp 示例、与 CloakBrowser 互补、委派语法 |
 | [references/anti-bot-field-guide.md](references/anti-bot-field-guide.md) | 反爬类型分类、检测方法、穿透矩阵、实战案例、可执行脚本 |
 | [references/cloakbrowser.md](references/cloakbrowser.md) | CloakBrowser 安装、配置、API、macOS 注意、部署方案 |
 | [references/combo-patterns.md](references/combo-patterns.md) | 多工具组合使用模式（实战场景） |

@@ -5,14 +5,14 @@
 ## 影响选型的能力
 
 - **继承用户已登录态**（GitHub / Notion / 后台系统等）
-- **task space 跨 heredoc 复用**，适合多次访问同一站点、深入调研时多开并行
-- **`cdp()` 直连 CDP 任意 domain** —— 性能 / 网络 / 控制台 / 内存诊断的唯一入口
+- **task space 跨 heredoc 复用**，按其当前指南同一目标复用单 space / 多 page
+- **`cdp()` 直连 CDP 任意 domain** —— 性能 / 网络 / 控制台 / 内存诊断可通过 CDP 协议直连排查
 - **共享 Chrome 进程**（低内存），`@N` ref 跨 snapshot 稳定，对自动化脚本友好
 - **handoff 可把控制权交还用户**（用户接管是正常交接，见 ../SKILL.md 回退节）
 
 能力边界：不改浏览器指纹 —— Cloudflare Turnstile / DataDome / Kasada / 运行时 CDP 检测需要 CloakBrowser 穿透（判型与穿透矩阵见 [anti-bot-field-guide.md](anti-bot-field-guide.md)）。
 
-不复制 helper 清单 —— 完整 helper（`snapshotText` / `click` / `js` / `cdp` / task space / handoff）通过 `Skill("ego-browser")` 一次加载。
+不复制 API / helper 清单 —— 完整用法与命令以 `Skill("ego-browser")` 及其当前安装版本文档为准一次加载。
 
 ### 诊断 CDP 示例
 
@@ -40,9 +40,6 @@ Skill("ego-browser")
 
 ## Task space 速记
 
-完整规则在 ego-browser skill。这里只列容易忘的两条：
-
-- **起始**：`const task = await taskSpace('短名')` — 同一个用户目标的多轮 heredoc 必须复用同一 task（传短名或已存在的 spaceId）
-- **收尾**：`await task.finish({ keep: [] })` — 默认不留 Agent 管理的页面；只有用户明确要保留某页面才 `keep: ["p2"]`；`finish()` 恰好调一次
-
-如果收到 `"user is controlling"` 错误：硬停止，按 ego-browser skill 的 handoff 流程等待用户确认。
+完整规则见 ego-browser skill 及其当前安装版本文档。核心原则：
+- 同一用户目标复用同一 task space，跨页面探索在 space 内复用或新增 page；仅在用户明确要求时开启多 space。
+- 生命周期与收尾（如 `finish()` 及保留页面判定）、人控交接（`"user is controlling"`）严格按已安装版本手册执行，不作静态假设。
