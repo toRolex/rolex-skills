@@ -12,4 +12,4 @@ skill 以五个标准 triage 角色来表述。本文件将这些角色映射到
 
 当 skill 提到某个角色（例如“打上 AFK-ready 的 triage label”）时，使用本表格中对应的 label 字符串。
 
-编辑右列，使其与你实际使用的词汇一致。
+编辑“我们 tracker 中的 label”列，使其与你实际使用的词汇一致。

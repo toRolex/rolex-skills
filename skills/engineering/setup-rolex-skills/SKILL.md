@@ -23,7 +23,7 @@ disable-model-invocation: true
 
 - `git remote -v` 和 `.git/config`：是 GitHub 仓库吗？是哪个？
 - `AGENTS.md` 和 `CLAUDE.md`：是否存在？是否已有 `## Agent skills` 区块？
-- `GLOSSARY.md` 和 `GLOSSARY-MAP.md`
+- `GLOSSARY.md` 和 `GLOSSARY-MAP.md`，以及旧版 `CONTEXT.md` / `CONTEXT-MAP.md`。若发现旧文件，先向用户说明对应迁移目标并征求确认；确认后仅在目标不存在时用 `git mv` 迁移，并更新 `docs/agents/domain.md` 中相关文件名。目标已存在或引用关系不清楚时先停下询问，不覆盖、不自行合并。
 - `docs/adr/` 和任何 `src/*/docs/adr/` 目录
 - `docs/agents/`：本 skill 之前的输出是否已存在？
 - `.scratch/`：本地 markdown issue tracker 惯例是否已在使用
@@ -48,6 +48,14 @@ disable-model-invocation: true
 - **其他**（Jira、Linear 等）：请用户用一段话描述工作流；skill 将其记录为自由文本
 
 将选择记录在 `docs/agents/issue-tracker.md`。GitHub 和 GitLab 模板带有 "PRs as a request surface" 标志，默认 **off**。保持关闭，不要提出：如果用户希望外部 PR 进入 triage 队列，他们可以稍后在文件中修改。
+
+如果选择 GitHub 或 GitLab，必须先确认目标项目可达，再继续配置或写 tracker：
+
+- 有指向所选托管平台的 remote 时，展示并确认准确的目标项目（owner/group 与 repo/project）。不能只凭当前分支或 fork 的 parent 推断写入目标。
+- 没有对应 remote 时，向用户索取目标项目 URL；用户确认后才可按需运行 `git init` 和 `git remote add origin <url>`。随后从本仓库目录运行 `gh repo view --json nameWithOwner` 或 `glab repo view -F json`，确认返回项目与用户指定目标完全一致。
+- CLI 未登录、项目不可达、目标不一致或结果无法核实：停止 tracker 配置与所有外部写入，报告缺少的登录、权限、URL 或目标信息。不要创建 issue、label、comment 或其他远端对象来试探权限。
+
+模板自包含的目标仓库安全规则仍须遵守：对 GitHub，每次写入前再次核对 `gh repo view --json nameWithOwner` 与已确认目标；fork 场景对写入命令显式使用 `--repo <已确认的owner/repo>`。对 GitLab，每次写入前核对 `glab repo view -F json` 返回的项目路径；若当前 clone 不能明确解析到已确认项目，停止并请用户提供正确 clone/目标上下文。任何情况下都不得把操作发到上游技能来源仓库，除非用户明确指定且确认拥有该目标。
 
 **Section B：Triage 标签词汇。** 如果 `triage` skill 未安装则整体跳过。
 
@@ -105,6 +113,8 @@ disable-model-invocation: true
 ```
 
 仅当 `triage` 已安装且 Section B 运行时才包含 `### Triage labels` 子区块并写入 `docs/agents/triage-labels.md`。
+
+当 Section B 对应 GitHub 或 GitLab 时，先列出 tracker 现有 labels，再仅创建缺失的已配置标签；不要假设默认名称尚不存在。确认目标项目后再执行 label 写入。GitLab 用 `glab label list --output json` 检查，并用 `glab label create --name "..."` 创建缺失项。GitHub 的 label 列出/创建具体 flags 应先通过 `gh label list --help` 与 `gh label create --help` 核实，再按目标仓库现状补建缺失项。
 
 然后使用本 skill 目录中的种子模板写入文档文件：
 

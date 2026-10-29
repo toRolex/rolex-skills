@@ -1,12 +1,14 @@
 # GitHub tracker 接线
 
-只在用 GitHub Issues 作为 wayfinder map 的 tracker 时读这份资料。其他 tracker 见同名目录下的姊妹文件。
+当使用 GitHub Issues 发布 tickets 时，读取这份接线规范；适用于 `to-tickets` 和 Wayfinder。其他 tracker 见同名目录下的姊妹文件。
 
-SKILL.md 要求先探测 tracker 暴露的原生关系能力。本文件只给**创建接线**用的规范——探测与故障兜底不重复。
+`to-tickets` 和 Wayfinder 都要求先探测 tracker 暴露的原生关系能力。本文件只给**创建接线**用的规范——探测与故障兜底不重复。
 
 > 需要 gh ≥ 2.55 才支持 `--add-sub-issue` / `--add-blocked-by`。旧版本需要走 GraphQL `addSubIssue` / `addBlockedBy` mutation + `gh issue view <number> --json id` 取 Node ID。
 
-## 创建 Sub-issue
+## 将 ticket 设为来源 issue 的 Sub-issue
+
+仅当 tickets 来源于一个既有 issue 时，对每张新 ticket 执行一次；这条 parent-child 关系与 ticket 之间的 blocking edges 相互独立。
 
 ```bash
 gh issue edit <父号> --add-sub-issue <子号>

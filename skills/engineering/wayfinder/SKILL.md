@@ -64,7 +64,7 @@ Tracker 特定的接线细节（原生关系 API、label 命名约定、frontier
 <此 ticket 要解决的 decision 或调查>
 ```
 
-每个 ticket 携带一个 `wayfinder:<type>` label，`research`、`prototype`、`grilling`、`task` 之一（见 [Ticket Types](#ticket-types)）。
+每个 ticket 携带一个 `wayfinder:<type>` label，`research`、`prototype`、`grilling`、`task` 之一（见 [Ticket Types](#ticket-types)）。Map 和 tickets 只使用 `wayfinder:` labels，不加 `ready-for-agent` 等 triage labels：它们记录的是 decisions，不是待实现工作。
 
 一个会话通过**先把 ticket 分配**给驱动 map 的开发者来 **claim** 它，在任何工作之前，这样并发的会话会跳过它。那个 assignee _就是_ claim：一个打开、未分配的 ticket 就是未 claim 的。
 
@@ -118,10 +118,10 @@ out of scope 的工作从不 graduate（frontier 在 destination 处停止），
 4. **创建 tickets 并连接阻塞边**。顺序：
    1. **探测**：用一次小的 GraphQL query（或其他 tracker 等价手段）确认 tracker 暴露的原生关系能力（sub-issue / blocked-by / 自定义字段）。如果只有 body 约定可用，停下来跟用户确认走降级。详见 `references/<tracker>.md`。
    2. **批量发**：用脚本（不是 shell heredoc）批量创建 map + 子 tickets，body 写到临时文件再用 `--body-file`，避免转义陷阱。
-   3. **一次接线**：拿到全部 id 后，一次性调用原生 mutation 把 sub-issue + blocked-by 接好。**完成标准**：跑一次 GraphQL query 列出子 tickets 的 `blockedBy`，确认真阻塞关系已落库。
+   3. **一次接线**：拿到全部 id 后，一次性调用原生 mutation 把 sub-issue + blocked-by 接好，并在此阶段写入互相引用的真实 id；禁止使用 `#<n>` 等占位编号，因为 tracker 可能把它自动链接到无关 issue。**完成标准**：跑一次 GraphQL query 列出子 tickets 的 `blockedBy`，确认真阻塞关系已落库。
 
    接线将它们排序为 frontier 和被阻塞；所有你现在还不能明确的内容留在迷雾中：即 **Not yet specified** 部分。
-5. **触发 research subagents。** 对你刚创建的每个 `research` ticket，启动一个调用 Skill 工具并传入 "research" 的 subagent 并行解决它，把它的发现捕获到一个一次性的 `research/<name>` 分支上，并从 ticket 留下一个 context pointer。
+5. **触发 research subagents。** 对你刚创建的每个 `research` ticket，启动一个调用 Skill 工具并传入 "research" 的 subagent 并行解决它，把它的发现捕获到一个一次性的 `research/<name>` 分支上，并从 ticket 留下一个 context pointer。Push 该分支，但不开 PR：research 分支只提供发现，不会合并。
 6. 停止：绘制 map 是一个会话的工作；它不手工解决任何东西。
 
 ### 通过 Map 工作
@@ -132,7 +132,7 @@ out of scope 的工作从不 graduate（frontier 在 destination 处停止），
 
 1. 加载 **map**：低分辨率视图，不是每个 ticket 的 body。
 2. 选择 ticket。如果用户指定了一个，就用它。否则按顺序取第一个 frontier ticket。**claim 它**：在任何工作开始前把它分配给你自己。
-3. 解决它，按 ticket 类型决定"解决"的含义：
+3. 解决它，按其 `wayfinder:<type>` label 决定"解决"的含义；先读 label，不要只根据 body 推断，因为 body 不声明 type：
    - **Research / Grilling / Prototype**：通过 research、对话或 prototype 来锁定 decision。产出记录在 resolution comment 中。
    - **Task**：**产出执行方案**：分析影响文件、变更要点、风险和执行顺序，写成 resolution comment。**禁止直接修改代码**。执行由后续 feature 分支完成。
 

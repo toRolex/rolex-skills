@@ -60,11 +60,11 @@ issue tracker 与 triage label 词汇应该已经提供给你。若没有，让�
 发布已认可的 tickets。**如何**发布取决于 `/setup-rolex-skills` 配置的 tracker；tickets 本身无论哪种方式都一样，只有 blocking edges 的形态不同：
 
 - **Local files** → 在 `.scratch/<feature-slug>/issues/<NN>-<slug>.md` 下每张 ticket 写一个文件，按依赖顺序从 `01` 编号（blocker 在前）。每个文件的 "Blocked by" 列出它所依赖的编号/标题。使用下面的 per-ticket 文件模板：每张 ticket 一个文件，绝不合并成单个文件。
-- **A real issue tracker（GitHub、Linear……）** → 按依赖顺序（blocker 在前）每张 ticket 发布一个 issue，这样每张 ticket 的 blocking edges 可以引用真实标识。在平台支持的情况下使用其原生的 blocking / sub-issue 关系；否则把每张 ticket 的 "Blocked by" 设为阻塞它的 issues。除非另有指示，应用 `ready-for-agent` triage label；这些 tickets 构造上就是 agent 可直接认领的。GitHub 原生关系的接线命令见 [`references/github-tracker.md`](./references/github-tracker.md)。
+- **A real issue tracker（GitHub、Linear……）** → 按依赖顺序（blocker 在前）每张 ticket 发布一个 issue，这样每张 ticket 的 blocking edges 可以引用真实标识。如果 tracker 支持原生 blocking 关系，就使用该关系；不支持时才在每张 ticket 的 `Blocked by` 中列出阻塞它的 issues。**另行处理 parent**：仅当来源是既有 issue 且 tracker 支持 sub-issue 时，把新 tickets 设为其 sub-issues；这与 ticket 之间的 blocking edges 是两种独立关系。具体操作见 tracker 文档。除非另有指示，应用 `ready-for-agent` triage label；这些 tickets 构造上就是 agent 可直接认领的。GitHub 原生关系的接线命令见 [`references/github-tracker.md`](./references/github-tracker.md)。
 
 推进 **frontier**：任何 blockers 全部完成的 ticket。对纯线性链条而言，就是自上而下。
 
-不要关闭或修改任何 parent issue。
+不要关闭或修改任何 parent issue 的状态或正文；按上述要求创建 sub-issue 关系不属于此限制。
 
 <local-ticket-template>
 
@@ -98,10 +98,10 @@ issue tracker 与 triage label 词汇应该已经提供给你。若没有，让�
 
 ## Blocked by
 
-- 对每张阻塞 ticket 的引用，或 "None (can start immediately)"。
+- 对每张阻塞 ticket 的引用，或 "None (can start immediately)"。如果 blockers 已通过原生 blocking edges 设置，则省略本节。
 
 </issue-template>
 
-> **GitHub Issues 注意：** body 中的 `## Blocked by` 段是辅助文档，GitHub 的原生 blocked-by 关系是主机制。两个都保留，不冲突。
+> **GitHub Issues 注意：** GitHub 的原生 blocked-by 关系是主机制。若已设置原生关系，省略 body 中的 `## Blocked by`，避免重复；只有无法设置原生关系时才用该段记录依赖。
 
 无论哪种形式，都要避免具体的文件路径或代码片段：它们很快就会过时。例外：如果 prototype 产出了比散文更精确地编码决策的片段（state machine、reducer、schema、type shape），就内联它，并简短注明它来自 prototype。裁剪到决策密集的部分，不是可运行的 demo，只是重要的那几处。
