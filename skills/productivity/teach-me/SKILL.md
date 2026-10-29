@@ -11,7 +11,7 @@ argument-hint: "你想学什么？"
 
 ## Teaching Workspace（教学工作区）
 
-将当前目录视为教学 workspace。学习状态通过以下文件捕获在此目录中：
+将运行 `/teach-me` 时的工作目录视为教学 workspace。`./lessons/` 等工作区路径相对于该启动目录解析；只有 `*-FORMAT.md` 模板链接相对于本 skill 文件夹解析。学习状态通过以下文件捕获在教学 workspace 中：
 
 - `MISSION.md`：捕获用户对该主题感兴趣*原因*的文档。应用来支撑所有教学。使用 [MISSION-FORMAT.md](./MISSION-FORMAT.md) 中的格式。
 - `./reference/*.html`：reference 材料目录。这些是来自 lesson 的精简 knowledge——速查表、reference 算法、语法、瑜伽姿势、glossary。它们是学习的原始单元。应该是打印效果良好的精美文档，设计用于快速 reference。
@@ -110,7 +110,7 @@ knowledge 应首先从可信资源收集。使用 `RESOURCES.md` 跟踪它们。
 
 每种都应基于**feedback loop**，用户接收关于他们表现的反馈。这个 feedback loop 应尽可能紧，理想情况下立即且自动提供反馈。
 
-对于测验，每个答案应有完全相同的字数（以及如果可能，字符数）。不要通过格式给用户任何回答的线索。
+对于测验，各选项答案应有完全相同的字数（以及如果可能，字符数）。正确选项的位置应在不同题目间变化（指选项列表中的位置，不是答案写入文件的位置）；不要让格式或选项顺序模式泄露答案。
 
 ## Acquiring Wisdom（获取智慧）
 

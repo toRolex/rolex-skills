@@ -5,7 +5,7 @@ description: 对 plan、decision 或 idea 进行无休止的追问。当用户�
 
 无休止地访谈用户，直到达成 shared understanding。把它映射为一棵 **design tree**：每个 decision 都分支为挂在它下面的 decisions。
 
-以 **rounds**（轮次）来推进这棵树。**frontier** 是每个前提都已确定、你可以*现在*就问的 decision：不需要猜测你还没听到的答案。一轮里问整个 frontier：给每个问题编号并给出你的 recommended answer。然后等待用户回答，再进入下一轮。
+以 **rounds**（轮次）来推进这棵树。**frontier** 是每个前提都已确定、你可以*现在*就问的 decision：不需要猜测你还没听到的答案。一轮里问整个 frontier：给每个问题编号并给出你的 recommended answer。将每个问题措辞成用户回答“是”即接受你的推荐答案。然后等待用户回答，再进入下一轮。
 
 一轮的格式如下：
 
