@@ -26,7 +26,7 @@ Skills 按 bucket 文件夹组织在 `skills/` 下：
 
 每个 bucket 文件夹有一个 `README.md`，列出该 bucket 中的每个 skill 及其一行描述，skill 名称链接到其 `SKILL.md`。已推广 bucket 的 `README.md` 和顶层 `README.md` 将条目分组为 **User-invoked** 和 **Model-invoked**；`misc/` bucket 的 `README.md` 使用平面列表。
 
-每个 `SKILL.md` 要么是 user-invoked（`disable-model-invocation: true`，仅由人类调用），要么是 model-invoked（模型或用户均可调用）。见 [.agents/invocation.md](./.agents/invocation.md)。
+每个 `SKILL.md` 要么是 user-invoked（`disable-model-invocation: true`，仅由人类调用），要么是 model-invoked（模型或用户均可调用）。见 [Skill 机制](./skills/productivity/writing-for-agents/SKILL-MECHANICS.md)。
 
 [`ask-rolex`](./skills/engineering/ask-rolex/SKILL.md) 是路由器，映射所有用户可调用的 skill 及其相互关系。当你添加、重命名、删除或更改用户可调用 skill 在流程中的位置时，重新阅读 `ask-rolex` 的 `SKILL.md` 并更新它，使地图保持准确。
 

@@ -9,6 +9,7 @@ package/
 
 # local user settings
 .claude/settings.local.json
+/.agents/
 
 # temp / backup files
 *.bak
