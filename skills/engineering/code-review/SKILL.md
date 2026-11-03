@@ -10,7 +10,7 @@ description: 审查自某个 fixed point（commit、branch、tag 或 merge-base�
 - **Standards（规范）**：代码是否符合本仓库文档化的编码规范？
 - **Spec（规格）**：代码是否忠实实现了原始 issue / spec？
 
-两个轴作为**并行的 sub-agent** 运行，以免污染彼此的上下文，然后本 skill 汇总它们的发现。每个 sub-agent 都用全新的 context window启动。
+两个轴作为**并行的 sub-agent** 运行，以免污染彼此的上下文，然后本 skill 汇总它们的发现。每个 sub-agent 都用全新的 context window 启动。
 
 issue tracker 应该已经提供给你。如果 `docs/agents/issue-tracker.md` 缺失，让用户运行 `/setup-rolex-skills`。
 

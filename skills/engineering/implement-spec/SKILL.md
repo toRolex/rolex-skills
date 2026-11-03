@@ -12,7 +12,7 @@ disable-model-invocation: true
 
 Tickets 不是步骤列表。它们是一张带有 blocking edges 的 **task graph**。这意味着始终存在一个由可认领 tickets 组成的 **frontier**。
 
-每个 subagent 都用全新的 context window启动。
+每个 subagent 都用全新的 context window 启动。
 
 与 subagent 之间的通信应当稀疏。主要通过 **context pointers** 沟通：指向 spec、tickets、research notes 和此前的 commits。不要重复通过 pointer 已经可以获取的信息。
 

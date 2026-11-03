@@ -5,7 +5,7 @@ description: 针对高信任度一手资料调研问题，并将发现作为 Mar
 
 # Research（调研）
 
-启动一个**background agent** 来做调研，这样你在它阅读时继续工作。用全新的 context window启动它。
+启动一个**background agent** 来做调研，这样你在它阅读时继续工作。用全新的 context window 启动它。
 
 它的工作：
 

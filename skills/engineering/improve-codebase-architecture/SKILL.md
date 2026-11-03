@@ -24,7 +24,7 @@ disable-model-invocation: true
 
 先阅读你将要触及的领域的项目 domain glossary（`GLOSSARY.md`）和任何 ADR。
 
-然后用 `subagent_type=Explore` 的 Agent 工具、以全新的 context window走一遍代码库。不要死守僵化的启发式规则；要有机地探索，并记下你感到 friction 的地方：
+然后用 `subagent_type=Explore` 的 Agent 工具、以全新的 context window 走一遍代码库。不要死守僵化的启发式规则；要有机地探索，并记下你感到 friction 的地方：
 
 - 在哪里，理解一个概念需要在许多小 module 之间来回跳？
 - 哪些 module 是 **shallow** 的，interface 几乎和 implementation 一样复杂？
