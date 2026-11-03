@@ -121,7 +121,7 @@ out of scope 的工作从不 graduate（frontier 在 destination 处停止），
    3. **一次接线**：拿到全部 id 后，一次性调用原生 mutation 把 sub-issue + blocked-by 接好，并在此阶段写入互相引用的真实 id；禁止使用 `#<n>` 等占位编号，因为 tracker 可能把它自动链接到无关 issue。**完成标准**：跑一次 GraphQL query 列出子 tickets 的 `blockedBy`，确认真阻塞关系已落库。
 
    接线将它们排序为 frontier 和被阻塞；所有你现在还不能明确的内容留在迷雾中：即 **Not yet specified** 部分。
-5. **触发 research subagents。** 对你刚创建的每个 `research` ticket，启动一个使用全新上下文窗口、调用 Skill 工具并传入 "research" 的 subagent 并行解决它，把它的发现捕获到一个一次性的 `research/<name>` 分支上，并从 ticket 留下一个 context pointer。Push 该分支，但不开 PR：research 分支只提供发现，不会合并。
+5. **触发 research subagents。** 对你刚创建的每个 `research` ticket，启动一个使用全新 context window、调用 Skill 工具并传入 "research" 的 subagent 并行解决它，把它的发现捕获到一个一次性的 `research/<name>` 分支上，并从 ticket 留下一个 context pointer。Push 该分支，但不开 PR：research 分支只提供发现，不会合并。
 6. 停止：绘制 map 是一个会话的工作；它不手工解决任何东西。
 
 ### 通过 Map 工作

@@ -18,7 +18,7 @@
 
 ### 2. 启动 sub-agents
 
-使用 Agent 工具并行启动 3+ 个 sub-agents，每个都用全新的上下文窗口。每个都必须为深化后的 module 产出一个**截然不同**的 interface。
+使用 Agent 工具并行启动 3+ 个 sub-agents，每个都用全新的 context window。每个都必须为深化后的 module 产出一个**截然不同**的 interface。
 
 为每个 sub-agent 提供单独的技术 brief（文件路径、coupling 细节、来自 [DEEPENING.md](DEEPENING.md) 的依赖类别、seam 后面是什么）。这个 brief 独立于步骤 1 中面向用户的问题空间说明。给每个 agent 一个不同的设计约束：
 
