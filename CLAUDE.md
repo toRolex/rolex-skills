@@ -32,7 +32,7 @@ Skills 按 bucket 文件夹组织在 `skills/` 下：
 
 要将所有 skill（重新）链接到本地 harness skill 目录，运行 `scripts/link-skills.sh`。无参数时目标为 `~/.claude/skills` 与 `~/.agents/skills`；传入目录参数时仅链接到指定位置。Skills Manager 中央目录已有实体副本时，使用 `scripts/link-skills.sh --replace-existing "$HOME/.config/.skills-manager/skills"` 将同名副本替换为仓库软链接；省略该选项时遇到实体冲突会退出。每个链接指向此仓库，因此 `git pull` 可以保持已安装的 skill 最新；在添加、删除或重命名 skill 后重新运行该脚本。
 
-每个派发 subagent 的 skill 都要写明用全新的 context window启动它。部分 harness（如 Codex）默认 fork 父会话，fork 会继承父 context，而这正是 subagent 要摆脱的。
+每个派发 subagent 的 skill 都要写明用全新的 context window 启动它。部分 harness（如 Codex）默认 fork 父会话，fork 会继承父 context，而这正是 subagent 要摆脱的。
 
 ## Agent skills
 
